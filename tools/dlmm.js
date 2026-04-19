@@ -117,8 +117,7 @@ async function meridianJson(pathname, options = {}) {
       );
     } catch (error) {
       lastError = error;
-      const status = Number(error?.status || 0);
-      if (!isRetryableMeridianStatus(status) || attempt >= maxAttempts - 1) {
+      if (!isRetryableMeridianError(error) || attempt >= maxAttempts - 1) {
         throw error;
       }
       const waitMs = Math.min(meridianRetryDelayMs(error, attempt), Math.max(0, remainingMs - 1));
@@ -137,6 +136,16 @@ function sleep(ms) {
 
 function isRetryableMeridianStatus(status) {
   return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+}
+
+function isRetryableMeridianError(error) {
+  if (isRetryableMeridianStatus(Number(error?.status || 0))) return true;
+  const name = String(error?.name || "");
+  const message = String(error?.message || "").toLowerCase();
+  return name === "AbortError" ||
+    message.includes("aborted") ||
+    message.includes("fetch failed") ||
+    message.includes("network");
 }
 
 function meridianRetryDelayMs(error, attempt) {
@@ -882,7 +891,7 @@ async function fetchOpenPositionsFromMeridian({ walletAddress, agentId }) {
     headers: config.api.publicApiKey ? { "x-api-key": config.api.publicApiKey } : {},
     retry: {
       maxElapsedMs: 30_000,
-      perAttemptTimeoutMs: 10_000,
+      perAttemptTimeoutMs: 30_000,
     },
   });
   return {

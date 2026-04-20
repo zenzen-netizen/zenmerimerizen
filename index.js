@@ -905,6 +905,7 @@ const MAX_HISTORY = 20;    // keep last 20 messages (10 exchanges)
 let _ttyInterface = null;
 let _latestCandidates = [];
 let _latestCandidatesAt = null;
+let _pendingInput = null; // { key, page, menuMsgId }
 
 function setLatestCandidates(candidates = []) {
   _latestCandidates = Array.isArray(candidates) ? candidates : [];
@@ -1043,6 +1044,12 @@ function stepButtons(key, label, step, { digits = 2 } = {}) {
   ];
 }
 
+function inputButton(key, label, { digits = 0 } = {}) {
+  const value = settingValue(key);
+  const shown = value == null ? "off" : Number.isFinite(Number(value)) ? Number(value).toFixed(digits).replace(/\.?0+$/, "") : String(value);
+  return [settingButton(`${label}: ${shown} ✏`, `cfg:input:${key}`)];
+}
+
 function renderSettingsMenu(page = "main") {
   const title = page === "main" ? "Settings menu" : `Settings: ${page}`;
   const summary = [
@@ -1113,11 +1120,11 @@ function renderSettingsMenu(page = "main") {
         settingButton("TF: 1h", "cfg:set:gmgnIndicatorInterval:1h"),
       ],
       [toggleButton("gmgnRequireBullishSt", "Bullish ST"), toggleButton("gmgnRejectAtBottom", "Reject at bottom"), toggleButton("gmgnRequireAboveSt", "Above ST")],
-      stepButtons("gmgnMinRsi", "Min RSI", 5, { digits: 0 }),
-      stepButtons("gmgnMaxRsi", "Max RSI", 5, { digits: 0 }),
-      stepButtons("gmgnMinKolCount", "Min KOL", 1, { digits: 0 }),
-      stepButtons("gmgnMinTotalFeeSol", "Min fee SOL", 10, { digits: 0 }),
-      stepButtons("gmgnMinHolders", "Min holders", 100, { digits: 0 }),
+      inputButton("gmgnMinRsi", "Min RSI"),
+      inputButton("gmgnMaxRsi", "Max RSI"),
+      inputButton("gmgnMinKolCount", "Min KOL"),
+      inputButton("gmgnMinTotalFeeSol", "Min fee SOL"),
+      inputButton("gmgnMinHolders", "Min holders"),
     ];
   } else if (page === "indicators") {
     rows = [
@@ -1188,6 +1195,18 @@ async function applySettingsMenuCallback(msg) {
     await answerCallbackQuery(msg.callbackQueryId);
     return;
   }
+  if (action === "input") {
+    const inputKey = parts[2];
+    const currentVal = settingValue(inputKey);
+    const inputPage = inputKey.startsWith("gmgn") ? "gmgn"
+      : inputKey.startsWith("indicator") || inputKey === "chartIndicatorsEnabled" || inputKey === "rsiLength" || inputKey === "requireAllIntervals" ? "indicators"
+      : ["useDiscordSignals", "blockPvpSymbols", "strategy", "managementIntervalMin", "screeningIntervalMin", "screeningSource", "gmgnRequireKol"].includes(inputKey) ? "screen"
+      : "risk";
+    _pendingInput = { key: inputKey, page: inputPage, menuMsgId: msg.messageId };
+    await answerCallbackQuery(msg.callbackQueryId);
+    await sendMessage(`Enter new value for ${inputKey} (current: ${currentVal ?? "off"}):\nSend a number, or "off" to clear.`);
+    return;
+  }
   if (action === "close") {
     await answerCallbackQuery(msg.callbackQueryId, "Closed");
     await editMessage("Settings menu closed.", msg.messageId);
@@ -1238,11 +1257,13 @@ async function applySettingsMenuCallback(msg) {
     await answerCallbackQuery(msg.callbackQueryId, "Config update failed");
     return;
   }
-  page = key.startsWith("indicator") || key === "chartIndicatorsEnabled" || key === "rsiLength" || key === "requireAllIntervals"
-    ? "indicators"
-    : ["useDiscordSignals", "blockPvpSymbols", "strategy", "managementIntervalMin", "screeningIntervalMin", "screeningSource", "gmgnRequireKol"].includes(key)
-      ? "screen"
-      : "risk";
+  page = key.startsWith("gmgn") && key !== "gmgnRequireKol"
+    ? "gmgn"
+    : key.startsWith("indicator") || key === "chartIndicatorsEnabled" || key === "rsiLength" || key === "requireAllIntervals"
+      ? "indicators"
+      : ["useDiscordSignals", "blockPvpSymbols", "strategy", "managementIntervalMin", "screeningIntervalMin", "screeningSource", "gmgnRequireKol"].includes(key)
+        ? "screen"
+        : "risk";
   await answerCallbackQuery(msg.callbackQueryId, `Updated ${key}`);
   await showSettingsMenu({ messageId: msg.messageId, page });
 }
@@ -1348,6 +1369,28 @@ async function drainTelegramQueue() {
 async function telegramHandler(msg) {
   const text = msg?.text?.trim();
   if (!text) return;
+
+  if (_pendingInput && !msg.isCallback && !text.startsWith("/")) {
+    const { key, page, menuMsgId } = _pendingInput;
+    _pendingInput = null;
+    let value;
+    if (text.toLowerCase() === "off" || text.toLowerCase() === "null") {
+      value = null;
+    } else {
+      value = Number(text);
+      if (!Number.isFinite(value)) {
+        await sendMessage(`Invalid value "${text}" — must be a number or "off".`);
+        return;
+      }
+    }
+    const result = await executeTool("update_config", { changes: { [key]: value }, reason: "Telegram input field" });
+    if (!result?.success) {
+      await sendMessage(`Failed to update ${key}.`);
+      return;
+    }
+    await showSettingsMenu({ messageId: menuMsgId, page });
+    return;
+  }
   if (msg?.isCallback && text.startsWith("cfg:")) {
     try {
       await applySettingsMenuCallback(msg);

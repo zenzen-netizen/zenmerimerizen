@@ -997,6 +997,8 @@ function settingValue(key) {
     gmgnMinTotalFeeSol: config.gmgn.minTotalFeeSol,
     gmgnMinHolders: config.gmgn.minHolders,
     strategy: config.strategy.strategy,
+    minBinsBelow: config.strategy.minBinsBelow,
+    maxBinsBelow: config.strategy.maxBinsBelow,
     deployAmountSol: config.management.deployAmountSol,
     gasReserve: config.management.gasReserve,
     maxPositions: config.risk.maxPositions,
@@ -1066,6 +1068,9 @@ function renderSettingsMenu(page = "main") {
     [
       settingButton("Main", "cfg:page:main"),
       settingButton("Risk", "cfg:page:risk"),
+      settingButton("Strategy", "cfg:page:strategy"),
+    ],
+    [
       settingButton("Screen", "cfg:page:screen"),
       settingButton("Indicators", "cfg:page:indicators"),
       settingButton("GMGN", "cfg:page:gmgn"),
@@ -1108,8 +1113,22 @@ function renderSettingsMenu(page = "main") {
         settingButton(`Strategy: spot`, "cfg:set:strategy:spot"),
         settingButton(`Strategy: bid_ask`, "cfg:set:strategy:bid_ask"),
       ],
+      inputButton("minBinsBelow", "Min bins"),
+      inputButton("maxBinsBelow", "Max bins"),
       inputButton("managementIntervalMin", "Manage interval (min)"),
       inputButton("screeningIntervalMin", "Screen interval (min)"),
+    ];
+  } else if (page === "strategy") {
+    rows = [
+      [
+        settingButton("spot", "cfg:set:strategy:spot"),
+        settingButton("bid_ask", "cfg:set:strategy:bid_ask"),
+      ],
+      inputButton("minBinsBelow", "Min bins"),
+      inputButton("maxBinsBelow", "Max bins"),
+      inputButton("deployAmountSol", "Deploy SOL", { digits: 2 }),
+      inputButton("maxDeployAmount", "Max deploy SOL"),
+      inputButton("maxPositions", "Max positions"),
     ];
   } else if (page === "gmgn") {
     rows = [
@@ -1198,9 +1217,10 @@ async function applySettingsMenuCallback(msg) {
   if (action === "input") {
     const inputKey = parts[2];
     const currentVal = settingValue(inputKey);
-    const inputPage = inputKey.startsWith("gmgn") ? "gmgn"
+    const inputPage = inputKey.startsWith("gmgn") && inputKey !== "gmgnRequireKol" ? "gmgn"
       : inputKey.startsWith("indicator") || inputKey === "chartIndicatorsEnabled" || inputKey === "rsiLength" || inputKey === "requireAllIntervals" ? "indicators"
-      : ["useDiscordSignals", "blockPvpSymbols", "strategy", "managementIntervalMin", "screeningIntervalMin", "screeningSource", "gmgnRequireKol"].includes(inputKey) ? "screen"
+      : ["strategy", "minBinsBelow", "maxBinsBelow", "deployAmountSol", "maxDeployAmount", "maxPositions"].includes(inputKey) ? "strategy"
+      : ["useDiscordSignals", "blockPvpSymbols", "managementIntervalMin", "screeningIntervalMin", "screeningSource", "gmgnRequireKol"].includes(inputKey) ? "screen"
       : "risk";
     _pendingInput = { key: inputKey, page: inputPage, menuMsgId: msg.messageId };
     await answerCallbackQuery(msg.callbackQueryId);
@@ -1261,9 +1281,11 @@ async function applySettingsMenuCallback(msg) {
     ? "gmgn"
     : key.startsWith("indicator") || key === "chartIndicatorsEnabled" || key === "rsiLength" || key === "requireAllIntervals"
       ? "indicators"
-      : ["useDiscordSignals", "blockPvpSymbols", "strategy", "managementIntervalMin", "screeningIntervalMin", "screeningSource", "gmgnRequireKol"].includes(key)
-        ? "screen"
-        : "risk";
+      : ["strategy", "minBinsBelow", "maxBinsBelow", "deployAmountSol", "maxDeployAmount", "maxPositions"].includes(key)
+        ? "strategy"
+        : ["useDiscordSignals", "blockPvpSymbols", "managementIntervalMin", "screeningIntervalMin", "screeningSource", "gmgnRequireKol"].includes(key)
+          ? "screen"
+          : "risk";
   await answerCallbackQuery(msg.callbackQueryId, `Updated ${key}`);
   await showSettingsMenu({ messageId: msg.messageId, page });
 }

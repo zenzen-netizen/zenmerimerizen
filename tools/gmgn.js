@@ -147,6 +147,15 @@ function isPreferredKol(entry) {
   return preferred.some((preferredName) => normalized.includes(preferredName));
 }
 
+function isDumpKol(entry) {
+  const dump = (config.gmgn.dumpKolNames || [])
+    .map((name) => String(name || "").trim().toLowerCase())
+    .filter(Boolean);
+  if (!dump.length) return false;
+  const normalized = entryName(entry).toLowerCase();
+  return dump.some((dumpName) => normalized.includes(dumpName));
+}
+
 function passBasicRankFilter(token) {
   const g = config.gmgn;
   const reasons = [];
@@ -246,6 +255,10 @@ function analyzeHoldersAndTraders(holders = [], traders = []) {
   const preferredKolHolders = kolHolders.filter((entry) =>
     isPreferredKol(entry) && entryAmountPct(entry) >= g.preferredKolMinHoldPct
   );
+  const dumpKolThreshold = g.dumpKolMinHoldPct ?? 0.5;
+  const dumpKolHoldersAll = [...kolHolders, ...kolTraders.filter((e) => !e.end_holding_at)].filter(isDumpKol);
+  const dumpKolSignificant = dumpKolHoldersAll.filter((e) => entryAmountPct(e) >= dumpKolThreshold);
+  const dumpKolMinor = dumpKolHoldersAll.filter((e) => entryAmountPct(e) < dumpKolThreshold);
   const bundlerTopHolders = holders.filter((entry) => hasTag(entry, "bundler"));
   const sniperTopHolders = holders.filter((entry) => hasTag(entry, "sniper"));
   const sniperHoldRate = holders.length > 0 ? sniperTopHolders.length / holders.length : 0;
@@ -263,6 +276,12 @@ function analyzeHoldersAndTraders(holders = [], traders = []) {
       .slice(0, 12),
     preferredKolHolding: preferredKolHolders.length,
     preferredKolHolders: preferredKolHolders.map((entry) => ({
+      name: entryName(entry),
+      amountPct: Number(entryAmountPct(entry).toFixed(2)),
+    })),
+    dumpKolSignificantCount: dumpKolSignificant.length,
+    dumpKolMinorCount: dumpKolMinor.length,
+    dumpKolHolders: dumpKolSignificant.map((entry) => ({
       name: entryName(entry),
       amountPct: Number(entryAmountPct(entry).toFixed(2)),
     })),
@@ -344,7 +363,9 @@ function condenseGmgnCandidate({ token, pool, poolDetail, security, info, infoAn
     num(token.volume) / 100 +
     num(token.smart_degen_count) * 50 +
     kolCount * 35 +
-    num(holdersAnalysis?.preferredKolHolding) * 75 +
+    num(holdersAnalysis?.preferredKolHolding) * 75 -
+    num(holdersAnalysis?.dumpKolSignificantCount) * 100 -
+    num(holdersAnalysis?.dumpKolMinorCount) * 20 +
     feeActiveTvlRatio * 1000 +
     Math.max(0, 100 - num(security?.rug_ratio) * 100) * 5;
 
@@ -393,6 +414,9 @@ function condenseGmgnCandidate({ token, pool, poolDetail, security, info, infoAn
     gmgn_kol_profit_names: holdersAnalysis?.kolProfitNames || [],
     gmgn_preferred_kol_matches: num(holdersAnalysis?.preferredKolHolding),
     gmgn_preferred_kol_holders: holdersAnalysis?.preferredKolHolders || [],
+    gmgn_dump_kol_significant: num(holdersAnalysis?.dumpKolSignificantCount),
+    gmgn_dump_kol_minor: num(holdersAnalysis?.dumpKolMinorCount),
+    gmgn_dump_kol_holders: holdersAnalysis?.dumpKolHolders || [],
     gmgn_top10_holder_pct: ratioPct(security?.top_10_holder_rate ?? token.top_10_holder_rate),
     gmgn_bundler_pct: ratioPct(security?.bundler_trader_amount_rate ?? token.bundler_rate),
     gmgn_insider_pct: ratioPct(security?.rat_trader_amount_rate ?? token.rat_trader_amount_rate),
@@ -667,6 +691,14 @@ export function formatGmgnCandidateForPrompt(p) {
     kolLine = `\n  KOL: ${names}${prof}`;
   }
 
+  let dumpKolLine = "";
+  if (p.gmgn_dump_kol_holders?.length) {
+    const sig = p.gmgn_dump_kol_holders.map((k) => `${k.name} ${k.amountPct}%`).join(" | ");
+    dumpKolLine = `\n  ⚠ DUMP KOL (significant): ${sig}`;
+  } else if (p.gmgn_dump_kol_minor > 0) {
+    dumpKolLine = `\n  ⚠ DUMP KOL (minor, <${config.gmgn.dumpKolMinHoldPct}%): ${p.gmgn_dump_kol_minor} wallet(s)`;
+  }
+
   let indLine = "";
   if (p.indicators) {
     const ind = p.indicators;
@@ -689,6 +721,7 @@ export function formatGmgnCandidateForPrompt(p) {
     risk ? `  Risk: ${risk}` : null,
     traction ? `  Traction: ${traction}` : null,
     kolLine || null,
+    dumpKolLine || null,
     indLine || null,
   ].filter(Boolean).join("\n");
 }

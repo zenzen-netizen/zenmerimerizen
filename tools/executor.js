@@ -263,6 +263,8 @@ const toolMap = {
       gmgnMaxSniperHoldRate: ["gmgn", "maxSniperHoldRate"],
       gmgnPreferredKolNames: ["gmgn", "preferredKolNames"],
       gmgnPreferredKolMinHoldPct: ["gmgn", "preferredKolMinHoldPct"],
+      gmgnDumpKolNames: ["gmgn", "dumpKolNames"],
+      gmgnDumpKolMinHoldPct: ["gmgn", "dumpKolMinHoldPct"],
       gmgnRequireKol: ["gmgn", "requireKol"],
       gmgnMinKolCount: ["gmgn", "minKolCount"],
       gmgnMinSmartDegenCount: ["gmgn", "minSmartDegenCount"],

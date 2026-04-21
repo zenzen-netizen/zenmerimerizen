@@ -1133,20 +1133,17 @@ function renderSettingsMenu(page = "main") {
         settingButton("6h", "cfg:set:gmgnInterval:6h"),
         settingButton("24h", "cfg:set:gmgnInterval:24h"),
       ],
+      [
+        inputButton("gmgnMinVolume", "Min volume"),
+        inputButton("gmgnMinTokenAgeHours", "Min token age (h)"),
+      ],
+      [
+        inputButton("gmgnMaxTokenAgeHours", "Max token age (h)"),
+        inputButton("gmgnMaxBundlerRate", "Max bundler %"),
+      ],
+      [settingButton("KOL settings", "cfg:page:kol")],
       inputButton("managementIntervalMin", "Manage interval (min)"),
       inputButton("screeningIntervalMin", "Screen interval (min)"),
-    ];
-  } else if (page === "strategy") {
-    rows = [
-      [
-        settingButton("spot", "cfg:set:strategy:spot"),
-        settingButton("bid_ask", "cfg:set:strategy:bid_ask"),
-      ],
-      inputButton("minBinsBelow", "Min bins"),
-      inputButton("maxBinsBelow", "Max bins"),
-      inputButton("deployAmountSol", "Deploy SOL", { digits: 2 }),
-      inputButton("maxDeployAmount", "Max deploy SOL"),
-      inputButton("maxPositions", "Max positions"),
     ];
   } else if (page === "gmgn") {
     rows = [
@@ -1170,14 +1167,6 @@ function renderSettingsMenu(page = "main") {
       [inputButton("gmgnPreferredKolMinHoldPct", "Preferred KOL min hold %")],
       [inputButton("gmgnDumpKolNames", "Dump KOL (comma-sep)")],
       [inputButton("gmgnDumpKolMinHoldPct", "Dump KOL min hold %")],
-      [
-        inputButton("gmgnMinVolume", "Min volume"),
-        inputButton("gmgnMinTokenAgeHours", "Min token age (h)"),
-      ],
-      [
-        inputButton("gmgnMaxTokenAgeHours", "Max token age (h)"),
-        inputButton("gmgnMaxBundlerRate", "Max bundler %"),
-      ],
     ];
   } else if (page === "indicators") {
     rows = [
@@ -1255,6 +1244,7 @@ async function applySettingsMenuCallback(msg) {
     const inputKey = parts[2];
     const currentVal = settingValue(inputKey);
     const inputPage = ["gmgnPreferredKolNames", "gmgnPreferredKolMinHoldPct", "gmgnDumpKolNames", "gmgnDumpKolMinHoldPct"].includes(inputKey) ? "kol"
+      : ["gmgnMinVolume", "gmgnMaxBundlerRate", "gmgnMinTokenAgeHours", "gmgnMaxTokenAgeHours"].includes(inputKey) ? "screen"
       : inputKey.startsWith("gmgn") && inputKey !== "gmgnRequireKol" ? "gmgn"
       : inputKey.startsWith("indicator") || inputKey === "chartIndicatorsEnabled" || inputKey === "rsiLength" || inputKey === "requireAllIntervals" ? "indicators"
       : ["strategy", "minBinsBelow", "maxBinsBelow", "deployAmountSol", "maxDeployAmount", "maxPositions"].includes(inputKey) ? "strategy"
@@ -1315,15 +1305,17 @@ async function applySettingsMenuCallback(msg) {
     await answerCallbackQuery(msg.callbackQueryId, "Config update failed");
     return;
   }
-  page = key.startsWith("gmgn") && key !== "gmgnRequireKol"
-    ? "gmgn"
-    : key.startsWith("indicator") || key === "chartIndicatorsEnabled" || key === "rsiLength" || key === "requireAllIntervals"
-      ? "indicators"
-      : ["strategy", "minBinsBelow", "maxBinsBelow", "deployAmountSol", "maxDeployAmount", "maxPositions"].includes(key)
-        ? "strategy"
-        : ["useDiscordSignals", "blockPvpSymbols", "managementIntervalMin", "screeningIntervalMin", "screeningSource", "gmgnRequireKol"].includes(key)
-          ? "screen"
-          : "risk";
+  page = ["gmgnPreferredKolNames", "gmgnPreferredKolMinHoldPct", "gmgnDumpKolNames", "gmgnDumpKolMinHoldPct"].includes(key) ? "kol"
+    : ["gmgnMinVolume", "gmgnMaxBundlerRate", "gmgnMinTokenAgeHours", "gmgnMaxTokenAgeHours"].includes(key) ? "screen"
+    : key.startsWith("gmgn") && key !== "gmgnRequireKol"
+      ? "gmgn"
+      : key.startsWith("indicator") || key === "chartIndicatorsEnabled" || key === "rsiLength" || key === "requireAllIntervals"
+        ? "indicators"
+        : ["strategy", "minBinsBelow", "maxBinsBelow", "deployAmountSol", "maxDeployAmount", "maxPositions"].includes(key)
+          ? "strategy"
+          : ["useDiscordSignals", "blockPvpSymbols", "managementIntervalMin", "screeningIntervalMin", "screeningSource", "gmgnRequireKol"].includes(key)
+            ? "screen"
+            : "risk";
   await answerCallbackQuery(msg.callbackQueryId, `Updated ${key}`);
   await showSettingsMenu({ messageId: msg.messageId, page });
 }

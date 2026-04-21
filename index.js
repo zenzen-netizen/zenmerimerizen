@@ -432,7 +432,11 @@ export async function runScreeningCycle({ silent = false } = {}) {
       : `No active strategy — use strategy=${config.strategy.strategy}, bins_above=0, SOL only.`;
 
     // Fetch top candidates, then recon each sequentially with a small delay to avoid 429s
-    const topCandidates = await getTopCandidates({ limit: 10 }).catch(() => null);
+    const topCandidates = await getTopCandidates({ limit: 10 }).catch((e) => ({ _error: e.message }));
+    if (topCandidates?._error) {
+      screenReport = `Screening failed: ${topCandidates._error}`;
+      return screenReport;
+    }
     const candidates = (topCandidates?.candidates || topCandidates?.pools || []).slice(0, 10);
     const earlyFilteredExamples = topCandidates?.filtered_examples || [];
     const gmgnStageCounts = topCandidates?.stage_counts ?? null;
@@ -488,11 +492,12 @@ export async function runScreeningCycle({ silent = false } = {}) {
         .map((entry) => `- ${entry.name}: ${entry.reason}`)
         .join("\n");
       const funnelBlock = buildGmgnFunnelReport(gmgnStageCounts, gmgnAllFiltered);
+      const thresholds = `Thresholds: tvl>$${config.screening.minTvl} | vol>$${config.screening.minVolume} | organic>${config.screening.minOrganic}% | holders>${config.screening.minHolders} | fee/tvl>${config.screening.minFeeActiveTvlRatio}%`;
       screenReport = funnelBlock
         ? `No candidates available.\n\n${funnelBlock}`
         : combinedExamples
           ? `No candidates available.\nFiltered examples:\n${combinedExamples}`
-          : `No candidates available (all filtered).`;
+          : `No candidates available (all filtered).\n${thresholds}`;
       appendDecision({
         type: "no_deploy",
         actor: "SCREENER",

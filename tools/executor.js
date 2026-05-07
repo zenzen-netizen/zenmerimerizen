@@ -31,7 +31,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const USER_CONFIG_PATH = path.join(__dirname, "../user-config.json");
 const GMGN_CONFIG_PATH = path.join(__dirname, "../gmgn-config.json");
 const POOL_DISCOVERY_BASE = "https://pool-discovery-api.datapi.meteora.ag";
-const VOLATILITY_TIMEFRAME = "30m";
+const MIN_VOLATILITY_TIMEFRAME = "30m";
+const TIMEFRAME_MINUTES = {
+  "5m": 5,
+  "15m": 15,
+  "30m": 30,
+  "1h": 60,
+  "2h": 120,
+  "4h": 240,
+  "12h": 720,
+  "24h": 1440,
+};
 import { log, logAction } from "../logger.js";
 import { notifyDeploy, notifyClose, notifySwap } from "../telegram.js";
 
@@ -55,6 +65,13 @@ function redactAppliedConfig(applied) {
 function numberOrNull(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function getVolatilityTimeframe(sourceTimeframe) {
+  const source = String(sourceTimeframe || "").trim();
+  const sourceMinutes = TIMEFRAME_MINUTES[source];
+  const minMinutes = TIMEFRAME_MINUTES[MIN_VOLATILITY_TIMEFRAME];
+  return sourceMinutes != null && sourceMinutes >= minMinutes ? source : MIN_VOLATILITY_TIMEFRAME;
 }
 
 function poolDetailTvl(pool) {
@@ -130,14 +147,15 @@ async function validateDeployPoolThresholds(args) {
     };
   }
 
+  const volatilityTimeframe = getVolatilityTimeframe(config.screening.timeframe || "5m");
   let volatilityDetail = detail;
-  if ((config.screening.timeframe || "5m") !== VOLATILITY_TIMEFRAME) {
+  if ((config.screening.timeframe || "5m") !== volatilityTimeframe) {
     try {
-      volatilityDetail = await fetchFreshPoolDetail(args.pool_address, VOLATILITY_TIMEFRAME);
+      volatilityDetail = await fetchFreshPoolDetail(args.pool_address, volatilityTimeframe);
     } catch (error) {
       return {
         pass: false,
-        reason: `Could not verify pool ${VOLATILITY_TIMEFRAME} volatility before deploy: ${error.message}`,
+        reason: `Could not verify pool ${volatilityTimeframe} volatility before deploy: ${error.message}`,
       };
     }
   }
@@ -146,7 +164,7 @@ async function validateDeployPoolThresholds(args) {
   if (volatility == null || volatility <= 0) {
     return {
       pass: false,
-      reason: `Pool ${VOLATILITY_TIMEFRAME} volatility ${volatility ?? "unknown"} is unusable. Refusing deploy.`,
+      reason: `Pool ${volatilityTimeframe} volatility ${volatility ?? "unknown"} is unusable. Refusing deploy.`,
     };
   }
 

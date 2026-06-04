@@ -10,7 +10,7 @@ import { getWalletBalances } from "./tools/wallet.js";
 import { getTopCandidates } from "./tools/screening.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
 import { config, reloadScreeningThresholds, computeDeployAmount } from "./config.js";
-import { evolveThresholds, getPerformanceSummary } from "./lessons.js";
+import { evolveThresholds, getPerformanceSummary, listLessons } from "./lessons.js";
 import { executeTool, registerCronRestarter } from "./tools/executor.js";
 import {
   startPolling,
@@ -373,6 +373,7 @@ After executing, write a brief one-line result per position.
         }
       }
     }
+    drainTelegramQueue().catch(() => {});
   }
   return mgmtReport;
 }
@@ -758,6 +759,7 @@ IMPORTANT:
         else sendMessage(`🔍 Screening Cycle\n\n${stripThink(screenReport)}`).catch(() => { });
       }
     }
+    drainTelegramQueue().catch(() => {});
   }
   return screenReport;
 }
@@ -787,6 +789,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
       log("cron_error", `Health check failed: ${error.message}`);
     } finally {
       _managementBusy = false;
+      drainTelegramQueue().catch(() => {});
     }
   });
 
@@ -1642,10 +1645,21 @@ async function telegramHandler(msg) {
   if (text === "/wallet" || text === "/status") {
     try {
       const [wallet, positions] = await Promise.all([getWalletBalances(), getMyPositions({ force: true })]);
-      const suffix = text === "/status" && positions.total_positions
-        ? `\n\nUse /positions for the numbered list.`
-        : "";
-      await sendMessage(`${formatWalletStatus(wallet, positions)}${suffix}`).catch(() => {});
+      let msg = formatWalletStatus(wallet, positions);
+      if (text === "/status") {
+        if (positions.total_positions) msg += `\n\nUse /positions for the numbered list.`;
+        // Learning summary
+        const perf = getPerformanceSummary();
+        const { lessons } = listLessons({ limit: 10 });
+        if (perf) {
+          msg += `\n\n🧠 Learning: ${perf.total_positions_closed} closed | ${perf.win_rate_pct}% win | avg PnL ${perf.avg_pnl_pct >= 0 ? "+" : ""}${perf.avg_pnl_pct}%`;
+        }
+        const lastBad = lessons.filter(l => l.outcome === "bad" || l.outcome === "poor").slice(-1)[0];
+        const lastGood = lessons.filter(l => l.outcome === "good").slice(-1)[0];
+        if (lastBad) msg += `\n⚠️ Avoid: ${String(lastBad.rule).slice(0, 150)}`;
+        if (lastGood) msg += `\n✅ Prefer: ${String(lastGood.rule).slice(0, 150)}`;
+      }
+      await sendMessage(msg).catch(() => {});
     } catch (e) {
       await sendMessage(`Error: ${e.message}`).catch(() => {});
     }

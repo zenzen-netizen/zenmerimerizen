@@ -110,13 +110,16 @@ function getMeridianHeaders() {
 
 let _relayCircuitOpen = false;
 let _relayCircuitOpenAt = 0;
+let _relayConsecutiveFailures = 0;
 const RELAY_CIRCUIT_COOLDOWN_MS = 10 * 60 * 1000;
+const RELAY_CIRCUIT_FAIL_THRESHOLD = 2;
 
 function shouldUseLpAgentRelay() {
   if (!config.api.lpAgentRelayEnabled) return false;
   if (_relayCircuitOpen) {
     if (Date.now() - _relayCircuitOpenAt > RELAY_CIRCUIT_COOLDOWN_MS) {
       _relayCircuitOpen = false;
+      _relayConsecutiveFailures = 0;
       log("positions", "Relay circuit breaker reset — retrying relay");
       return true;
     }
@@ -130,6 +133,19 @@ function openRelayCircuit(reason) {
   _relayCircuitOpen = true;
   _relayCircuitOpenAt = Date.now();
   log("positions_warn", `Relay circuit breaker OPEN (${reason}) — skipping relay for ${RELAY_CIRCUIT_COOLDOWN_MS / 60000}m`);
+}
+
+function relayCallFailed(error) {
+  _relayConsecutiveFailures += 1;
+  if (error.status === 401 || error.status === 403) {
+    openRelayCircuit(`${error.status} auth error`);
+  } else if (_relayConsecutiveFailures >= RELAY_CIRCUIT_FAIL_THRESHOLD) {
+    openRelayCircuit(`${_relayConsecutiveFailures} consecutive failures`);
+  }
+}
+
+function relayCallSucceeded() {
+  _relayConsecutiveFailures = 0;
 }
 
 function shouldUseLpAgentRelayForDeploy() {
@@ -1115,7 +1131,7 @@ export async function getPositionPnl({ pool_address, position_address }) {
       }
       log("pnl_warn", "Relay positions API did not include requested position; falling back to Meteora PnL path");
     } catch (error) {
-      if (error.status === 401 || error.status === 403) openRelayCircuit(`${error.status} auth error`);
+      relayCallFailed(error);
       log("pnl_warn", `Relay PnL lookup failed; falling back to Meteora PnL path: ${error.message}`);
     }
   }
@@ -1318,8 +1334,9 @@ export async function getMyPositions({ force = false, silent = false, wallet_add
         });
         relayLpAgentByPosition = result.byPosition || {};
         relayRequestId = result.requestId || result.request_id || null;
+        relayCallSucceeded();
       } catch (error) {
-        if (error.status === 401 || error.status === 403) openRelayCircuit(`${error.status} auth error`);
+        relayCallFailed(error);
         log("positions_warn", `Agent Meridian raw relay failed; falling back to direct LPAgent fetch: ${error.message}`);
       }
     }
@@ -1879,7 +1896,7 @@ export async function closePosition({ position_address, reason }) {
         };
       } catch (relayError) {
         if (relaySubmitted) throw relayError;
-        if (relayError.status === 401 || relayError.status === 403) openRelayCircuit(`${relayError.status} auth error`);
+        relayCallFailed(relayError);
         log("close_warn", `Relay zap-out failed before submit; falling back to local close + Jupiter autoswap: ${relayError.message}`);
       }
     }

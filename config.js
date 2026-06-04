@@ -43,7 +43,7 @@ if (u.walletKey) process.env.WALLET_PRIVATE_KEY ||= u.walletKey;
 if (u.llmModel)  process.env.LLM_MODEL          ||= u.llmModel;
 if (u.llmBaseUrl) process.env.LLM_BASE_URL      ||= u.llmBaseUrl;
 if (u.llmApiKey)  process.env.LLM_API_KEY       ||= u.llmApiKey;
-if (u.dryRun !== undefined) process.env.DRY_RUN ||= String(u.dryRun);
+if (u.dryRun !== undefined) process.env.DRY_RUN = String(u.dryRun);
 if (u.publicApiKey) process.env.PUBLIC_API_KEY ||= u.publicApiKey;
 if (u.agentMeridianApiUrl) process.env.AGENT_MERIDIAN_API_URL ||= u.agentMeridianApiUrl;
 if (gmgnUserConfig.apiKey || u.gmgnApiKey) {

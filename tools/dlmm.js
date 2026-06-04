@@ -108,8 +108,28 @@ function getMeridianHeaders() {
   return headers;
 }
 
+let _relayCircuitOpen = false;
+let _relayCircuitOpenAt = 0;
+const RELAY_CIRCUIT_COOLDOWN_MS = 10 * 60 * 1000;
+
 function shouldUseLpAgentRelay() {
-  return !!config.api.lpAgentRelayEnabled;
+  if (!config.api.lpAgentRelayEnabled) return false;
+  if (_relayCircuitOpen) {
+    if (Date.now() - _relayCircuitOpenAt > RELAY_CIRCUIT_COOLDOWN_MS) {
+      _relayCircuitOpen = false;
+      log("positions", "Relay circuit breaker reset — retrying relay");
+      return true;
+    }
+    return false;
+  }
+  return true;
+}
+
+function openRelayCircuit(reason) {
+  if (_relayCircuitOpen) return;
+  _relayCircuitOpen = true;
+  _relayCircuitOpenAt = Date.now();
+  log("positions_warn", `Relay circuit breaker OPEN (${reason}) — skipping relay for ${RELAY_CIRCUIT_COOLDOWN_MS / 60000}m`);
 }
 
 function shouldUseLpAgentRelayForDeploy() {
@@ -1095,6 +1115,7 @@ export async function getPositionPnl({ pool_address, position_address }) {
       }
       log("pnl_warn", "Relay positions API did not include requested position; falling back to Meteora PnL path");
     } catch (error) {
+      if (error.status === 401 || error.status === 403) openRelayCircuit(`${error.status} auth error`);
       log("pnl_warn", `Relay PnL lookup failed; falling back to Meteora PnL path: ${error.message}`);
     }
   }
@@ -1246,8 +1267,8 @@ async function fetchRawOpenPositionsFromMeridian({ walletAddress, agentId }) {
   const payload = await meridianJson(`/positions/open/raw?${search.toString()}`, {
     headers: config.api.publicApiKey ? { "x-api-key": config.api.publicApiKey } : {},
     retry: {
-      maxElapsedMs: 30_000,
-      perAttemptTimeoutMs: 30_000,
+      maxElapsedMs: 8_000,
+      perAttemptTimeoutMs: 8_000,
     },
   });
   const rows = Array.isArray(payload?.data) ? payload.data : [];
@@ -1298,6 +1319,7 @@ export async function getMyPositions({ force = false, silent = false, wallet_add
         relayLpAgentByPosition = result.byPosition || {};
         relayRequestId = result.requestId || result.request_id || null;
       } catch (error) {
+        if (error.status === 401 || error.status === 403) openRelayCircuit(`${error.status} auth error`);
         log("positions_warn", `Agent Meridian raw relay failed; falling back to direct LPAgent fetch: ${error.message}`);
       }
     }
@@ -1773,7 +1795,7 @@ export async function closePosition({ position_address, reason }) {
             tracked,
           });
 
-          await recordPerformance({
+          const derivedLesson1 = await recordPerformance({
             position: position_address,
             pool: poolAddress,
             pool_name: tracked.pool_name || poolMeta.name || poolAddress.slice(0, 8),
@@ -1827,6 +1849,8 @@ export async function closePosition({ position_address, reason }) {
             pnl_usd: pnlUsd,
             pnl_pct: pnlPct,
             base_mint: closeBaseMint,
+            close_reason: reason || "agent decision",
+            derived_lesson: derivedLesson1?.rule ?? null,
           };
         }
 
@@ -1855,6 +1879,7 @@ export async function closePosition({ position_address, reason }) {
         };
       } catch (relayError) {
         if (relaySubmitted) throw relayError;
+        if (relayError.status === 401 || relayError.status === 403) openRelayCircuit(`${relayError.status} auth error`);
         log("close_warn", `Relay zap-out failed before submit; falling back to local close + Jupiter autoswap: ${relayError.message}`);
       }
     }
@@ -2060,7 +2085,7 @@ export async function closePosition({ position_address, reason }) {
         tracked,
       });
 
-      await recordPerformance({
+      const derivedLesson2 = await recordPerformance({
         position: position_address,
         pool: poolAddress,
         pool_name: tracked.pool_name || poolMeta.name || poolAddress.slice(0, 8),
@@ -2112,6 +2137,8 @@ export async function closePosition({ position_address, reason }) {
         pnl_usd: pnlUsd,
         pnl_pct: pnlPct,
         base_mint: closeBaseMint,
+        close_reason: reason || "agent decision",
+        derived_lesson: derivedLesson2?.rule ?? null,
       };
     }
 
@@ -2135,6 +2162,7 @@ export async function closePosition({ position_address, reason }) {
       close_txs: closeTxHashes,
       txs: txHashes,
       base_mint: pool.lbPair.tokenXMint.toString(),
+      close_reason: reason || "agent decision",
     };
   } catch (error) {
     log("close_error", error.message);

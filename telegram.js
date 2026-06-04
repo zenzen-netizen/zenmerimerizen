@@ -136,7 +136,15 @@ export async function sendMessageWithButtons(text, inlineKeyboard) {
 
 export async function sendHTML(html) {
   if (!TOKEN || !chatId) return;
-  return postTelegram("sendMessage", { text: html.slice(0, 4096), parse_mode: "HTML" });
+  const result = await postTelegram("sendMessage", { text: html.slice(0, 4096), parse_mode: "HTML" });
+  if (result) return result;
+  const plain = html.replace(/<[^>]+>/g, "").slice(0, 4096);
+  return postTelegram("sendMessage", { text: plain });
+}
+
+// Escape data-derived text before embedding in HTML parse_mode messages.
+export function escapeHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 export async function editMessage(text, messageId) {
@@ -436,6 +444,7 @@ export function stopPolling() {
 // ─── Notification helpers ────────────────────────────────────────
 export async function notifyDeploy({ pair, amountSol, position, tx, priceRange, rangeCoverage, binStep, baseFee }) {
   if (hasActiveLiveMessage()) return;
+  const safePair = escapeHtml(pair || "?");
   const priceStr = priceRange
     ? `Price range: ${priceRange.min < 0.0001 ? priceRange.min.toExponential(3) : priceRange.min.toFixed(6)} – ${priceRange.max < 0.0001 ? priceRange.max.toExponential(3) : priceRange.max.toFixed(6)}\n`
     : "";
@@ -446,7 +455,7 @@ export async function notifyDeploy({ pair, amountSol, position, tx, priceRange, 
     ? `Bin step: ${binStep ?? "?"}  |  Base fee: ${baseFee != null ? baseFee + "%" : "?"}\n`
     : "";
   await sendHTML(
-    `✅ <b>Deployed</b> ${pair}\n` +
+    `✅ <b>Deployed</b> ${safePair}\n` +
     `Amount: ${amountSol} SOL\n` +
     priceStr +
     coverageStr +
@@ -456,19 +465,24 @@ export async function notifyDeploy({ pair, amountSol, position, tx, priceRange, 
   );
 }
 
-export async function notifyClose({ pair, pnlUsd, pnlPct }) {
+export async function notifyClose({ pair, pnlUsd, pnlPct, reason, lesson }) {
   if (hasActiveLiveMessage()) return;
+  const safePair = escapeHtml(pair || "?");
   const sign = pnlUsd >= 0 ? "+" : "";
+  const reasonLine = reason ? `\n📋 <b>Reason:</b> ${escapeHtml(String(reason).slice(0, 200))}` : "";
+  const lessonLine = lesson ? `\n📚 <b>Lesson:</b> <i>${escapeHtml(String(lesson).slice(0, 300))}</i>` : "";
   await sendHTML(
-    `🔒 <b>Closed</b> ${pair}\n` +
-    `PnL: ${sign}$${(pnlUsd ?? 0).toFixed(2)} (${sign}${(pnlPct ?? 0).toFixed(2)}%)`
+    `🔒 <b>Closed</b> ${safePair}\n` +
+    `PnL: ${sign}$${(pnlUsd ?? 0).toFixed(2)} (${sign}${(pnlPct ?? 0).toFixed(2)}%)` +
+    reasonLine +
+    lessonLine
   );
 }
 
 export async function notifySwap({ inputSymbol, outputSymbol, amountIn, amountOut, tx }) {
   if (hasActiveLiveMessage()) return;
   await sendHTML(
-    `🔄 <b>Swapped</b> ${inputSymbol} → ${outputSymbol}\n` +
+    `🔄 <b>Swapped</b> ${escapeHtml(inputSymbol || "?")} → ${escapeHtml(outputSymbol || "?")}\n` +
     `In: ${amountIn ?? "?"} | Out: ${amountOut ?? "?"}\n` +
     `Tx: <code>${tx?.slice(0, 16)}...</code>`
   );
@@ -477,7 +491,7 @@ export async function notifySwap({ inputSymbol, outputSymbol, amountIn, amountOu
 export async function notifyOutOfRange({ pair, minutesOOR }) {
   if (hasActiveLiveMessage()) return;
   await sendHTML(
-    `⚠️ <b>Out of Range</b> ${pair}\n` +
+    `⚠️ <b>Out of Range</b> ${escapeHtml(pair || "?")}\n` +
     `Been OOR for ${minutesOOR} minutes`
   );
 }

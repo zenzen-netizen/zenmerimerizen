@@ -40,7 +40,7 @@ Three agent roles filter which tools the LLM can call:
 
 | Role | Purpose | Key Tools |
 |------|---------|-----------|
-| `SCREENER` | Find and deploy new positions | deploy_position, get_top_candidates, get_token_holders, check_smart_wallets_on_pool |
+| `SCREENER` | Find and deploy new positions | deploy_position, get_top_candidates, get_token_holders, check_smart_wallets_on_pool, get_time_profile |
 | `MANAGER` | Manage open positions | close_position, claim_fees, swap_token, get_position_pnl, set_position_note |
 | `GENERAL` | Chat / manual commands | All tools |
 
@@ -90,6 +90,8 @@ Sets defined in `agent.js:6-7`. If you add a tool, also add it to the relevant s
 | outOfRangeWaitMinutes | management | 30 |
 | managementIntervalMin | schedule | 10 |
 | screeningIntervalMin | schedule | 30 |
+| adaptiveScreening | schedule | false |
+| maxScreeningIntervalMin | schedule | 90 |
 | managementModel / screeningModel / generalModel | llm | openrouter/healer-alpha |
 
 **`computeDeployAmount(walletSol)`** — scales position size with wallet balance (compounding). Formula: `clamp(deployable × positionSizePct, floor=deployAmountSol, ceil=maxDeployAmount)`.
@@ -196,6 +198,17 @@ const actualBaseFee = baseFactor > 0
 - `evolveThresholds()` — adjusts screening thresholds based on winners vs losers
 - Performance recorded via `recordPerformance()` called from executor.js after `close_position`
 - `evolveThresholds()` evolves `minFeeActiveTvlRatio` and `minOrganic` (both real screening filters). The old `maxVolatility` evolution block was removed — the screener never had a max-volatility filter (only `isUsableVolatility()`: finite & > 0), so evolving it was dead code.
+
+---
+
+## Time-of-Day Profile & Adaptive Screening (lessons.js + index.js)
+
+Closed-position performance is bucketed by the **open hour** (deploy time) in **WIB (UTC+7)** into 5 coarse sessions (`dini/pagi/siang/sore/malam`). Coarse buckets, not 24 hours — with sparse data wide buckets are stable.
+
+- **Capture (lessons.js)**: `recordPerformance()` stores `opened_at`, `closed_at`, `open_hour_wib`, `open_session` per record. Requires `deployed_at` to be passed in from both `close_position` paths in `tools/dlmm.js`. Records without an open timestamp are excluded from the profile.
+- **Analysis**: `getHourlyProfile()` → per-session win-rate / avg PnL / sample count (tool `get_time_profile`, SCREENER + GENERAL). `classifySession()` → `weak | ok | insufficient`. A session needs `MIN_SESSION_SAMPLES` (8) before it can steer anything; below that = neutral. "weak" = win-rate ≥15pp under overall AND negative avg PnL.
+- **Soft brake (prompt.js)**: `getTimeProfileForPrompt()` injects one line into the SCREENER prompt about the current session. Good-to-have signal only — it NEVER overrides hard screening rules.
+- **Adaptive interval (index.js)**: when `schedule.adaptiveScreening` is true, the **screening** cron tick is gated by `shouldRunScheduledScreening()`. Effective interval = floor `screeningIntervalMin` … ceiling `maxScreeningIntervalMin`; stretched to the ceiling only during historically weak sessions (saves LLM tokens). Manual mode (default) = fixed `screeningIntervalMin`. **Management & PnL-poll cadence are never throttled**; event-driven screening triggers (freed slot) bypass the gate. The gate reads config live, so toggling needs no cron restart.
 
 ---
 

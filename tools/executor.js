@@ -359,6 +359,7 @@ const toolMap = {
       generalModel: ["llm", "generalModel"],
       temperature: ["llm", "temperature"],
       maxTokens: ["llm", "maxTokens"],
+      generalMaxTokens: ["llm", "generalMaxTokens"],
       maxSteps: ["llm", "maxSteps"],
       // strategy
       strategy:     ["strategy", "strategy"],
@@ -457,7 +458,31 @@ const toolMap = {
       applied[match[0]] = normalizedVal;
     }
 
+    // Drop no-op changes whose requested value already matches live config.
+    // update_config is not session-locked, and parallel tool-calls bypass the
+    // once-per-session guard — without this, the model re-sending the same change
+    // rewrites config, restarts cron, and stacks a lesson every time (historically
+    // 60+ identical writes). Comparing against the live config makes repeats a
+    // clean no-op. Scalars only; arrays/objects fall through and always apply.
+    const unchanged = [];
+    for (const key of Object.keys(applied)) {
+      const [section, field, third] = CONFIG_MAP[key] || [];
+      if (!section) continue;
+      const current = typeof third === "string"
+        ? config[section]?.[field]?.[third]
+        : config[section]?.[field];
+      const next = applied[key];
+      if ((next === null || typeof next !== "object") && current === next) {
+        delete applied[key];
+        unchanged.push(key);
+      }
+    }
+
     if (Object.keys(applied).length === 0) {
+      if (unchanged.length > 0) {
+        log("config", `update_config no-op — already at requested values: ${unchanged.join(", ")}`);
+        return { success: true, applied: {}, unchanged, noop: true, reason };
+      }
       log("config", `update_config failed — unknown keys: ${JSON.stringify(unknown)}, raw changes: ${JSON.stringify(changes)}`);
       return { success: false, unknown, reason };
     }
@@ -562,7 +587,7 @@ const toolMap = {
     }
 
     log("config", `Agent self-tuned: ${JSON.stringify(redactAppliedConfig(applied))} — ${reason}`);
-    return { success: true, applied: redactAppliedConfig(applied), unknown, reason };
+    return { success: true, applied: redactAppliedConfig(applied), unknown, unchanged, reason };
   },
 };
 

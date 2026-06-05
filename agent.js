@@ -6,6 +6,8 @@ import { tools } from "./tools/definitions.js";
 
 const MANAGER_TOOLS  = new Set(["close_position", "claim_fees", "swap_token", "get_position_pnl", "get_my_positions", "get_wallet_balance"]);
 const SCREENER_TOOLS = new Set(["deploy_position", "get_active_bin", "get_top_candidates", "check_smart_wallets_on_pool", "get_token_holders", "get_token_narrative", "get_token_info", "search_pools", "get_pool_memory", "get_wallet_balance", "get_my_positions"]);
+const CHAT_CONFIRM_TOOLS = new Set(["update_config"]);
+
 const GENERAL_INTENT_ONLY_TOOLS = new Set([
   "self_update",
   "update_config",
@@ -155,7 +157,7 @@ function isThinkingModeToolChoiceError(error) {
  * @returns {string} - The agent's final text response
  */
 export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHistory = [], agentType = "GENERAL", model = null, maxOutputTokens = null, options = {}) {
-  const { interactive = false, onToolStart = null, onToolFinish = null } = options;
+  const { interactive = false, onToolStart = null, onToolFinish = null, onConfirmRequired = null } = options;
   // Build dynamic system prompt with current portfolio state
   const [portfolio, positions] = await Promise.all([getWalletBalances(), getMyPositions()]);
   const stateSummary = getStateSummary();
@@ -209,7 +211,7 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
             messages,
             tools: getToolsForRole(agentType, goal),
             temperature: config.llm.temperature,
-            max_tokens: maxOutputTokens ?? config.llm.maxTokens,
+            max_tokens: maxOutputTokens ?? (agentType === "GENERAL" ? config.llm.generalMaxTokens : config.llm.maxTokens),
           };
           if (!omitToolChoice) reqParams.tool_choice = toolChoice;
           response = await client.chat.completions.create(reqParams);
@@ -341,6 +343,19 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
             tool_call_id: toolCall.id,
             content: JSON.stringify({ blocked: true, reason: `${functionName} already attempted this session — do not retry. If it failed, report the error and stop.` }),
           };
+        }
+
+        if (interactive && onConfirmRequired && CHAT_CONFIRM_TOOLS.has(functionName)) {
+          const confirmed = await onConfirmRequired(functionName, functionArgs);
+          if (!confirmed) {
+            const cancelResult = { success: false, cancelled: true, reason: "User cancelled the action." };
+            await onToolFinish?.({ name: functionName, args: functionArgs, result: cancelResult, success: false, step });
+            return {
+              role: "tool",
+              tool_call_id: toolCall.id,
+              content: JSON.stringify(cancelResult),
+            };
+          }
         }
 
         await onToolStart?.({ name: functionName, args: functionArgs, step });

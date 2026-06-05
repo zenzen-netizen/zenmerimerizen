@@ -1041,6 +1041,7 @@ let _ttyInterface = null;
 let _latestCandidates = [];
 let _latestCandidatesAt = null;
 let _pendingInput = null; // { key, page, menuMsgId }
+let _pendingConfirmation = null; // { resolve, timer, messageId }
 
 function setLatestCandidates(candidates = []) {
   _latestCandidates = Array.isArray(candidates) ? candidates : [];
@@ -1165,6 +1166,42 @@ function settingValue(key) {
     requireAllIntervals: config.indicators.requireAllIntervals,
   };
   return values[key];
+}
+
+function getConfigValue(key) {
+  const known = settingValue(key);
+  if (known !== undefined) return known;
+  for (const section of Object.values(config)) {
+    if (section && typeof section === "object" && key in section) return section[key];
+  }
+  return undefined;
+}
+
+async function requestConfirmation(toolName, args) {
+  const changes = args.changes || {};
+  const lines = Object.entries(changes).map(([key, val]) => {
+    const current = getConfigValue(key);
+    return `  ${key}: ${current ?? "unset"} → ${val}`;
+  });
+  const text = `⚠️ Update config?\n${lines.join("\n")}`;
+
+  const sent = await sendMessageWithButtons(text, [
+    [
+      { text: "✅ Ya", callback_data: "confirm:yes" },
+      { text: "❌ Batal", callback_data: "confirm:no" },
+    ],
+  ]);
+  const msgId = sent?.result?.message_id;
+
+  return new Promise((resolve) => {
+    const timer = setTimeout(async () => {
+      _pendingConfirmation = null;
+      if (msgId) await editMessage("⏰ Expired — no changes made.", msgId).catch(() => {});
+      resolve(false);
+    }, 30_000);
+
+    _pendingConfirmation = { resolve, timer, messageId: msgId };
+  });
 }
 
 function fmtSettingValue(value) {
@@ -1585,6 +1622,23 @@ async function telegramHandler(msg) {
   const text = msg?.text?.trim();
   if (!text) return;
 
+  if (msg?.isCallback && text.startsWith("confirm:")) {
+    const action = text.split(":")[1];
+    if (_pendingConfirmation) {
+      clearTimeout(_pendingConfirmation.timer);
+      const confirmed = action === "yes";
+      const msgId = _pendingConfirmation.messageId;
+      const resolve = _pendingConfirmation.resolve;
+      _pendingConfirmation = null;
+      await answerCallbackQuery(msg.callbackQueryId, confirmed ? "Confirmed" : "Cancelled");
+      if (msgId) await editMessage(confirmed ? "✅ Confirmed — updating..." : "❌ Cancelled — no changes made.", msgId).catch(() => {});
+      resolve(confirmed);
+    } else {
+      await answerCallbackQuery(msg.callbackQueryId, "Expired");
+    }
+    return;
+  }
+
   if (_pendingInput && !msg.isCallback && !text.startsWith("/")) {
     const { key, page, menuMsgId } = _pendingInput;
     _pendingInput = null;
@@ -1900,6 +1954,7 @@ async function telegramHandler(msg) {
       interactive: true,
       onToolStart: async ({ name }) => { await liveMessage?.toolStart(name); },
       onToolFinish: async ({ name, result, success }) => { await liveMessage?.toolFinish(name, result, success); },
+      onConfirmRequired: requestConfirmation,
     });
     appendHistory(text, content);
     if (liveMessage) await liveMessage.finalize(stripThink(content));

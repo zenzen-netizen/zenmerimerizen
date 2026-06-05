@@ -2,7 +2,7 @@ import fs from "fs";
 import { log } from "./logger.js";
 import { getPerformanceSummary, getHourlyProfile } from "./lessons.js";
 import { config } from "./config.js";
-import { getOpenRouterBalance, getOpenRouter24hCost } from "./openrouter-usage.js";
+import { getOpenRouterBalance, getOpenRouter24hCost, getOpenRouterCredits } from "./openrouter-usage.js";
 
 // Escape data-derived text before embedding in HTML messages (lesson rules can
 // contain <, >, & — e.g. "PnL -50% <= -50%" — which break Telegram's HTML parser).
@@ -151,11 +151,12 @@ function buildRecommendations(allPerf) {
 const STATE_FILE = "./state.json";
 const LESSONS_FILE = "./lessons.json";
 
-function buildLlmCostSection(costData, balance) {
-  if (!costData && !balance) return null;
+function buildLlmCostSection(costData, balance, credits, netPnlUsd) {
+  if (!costData && !balance && !credits) return null;
   const lines = ["<b>🤖 LLM Usage:</b>"];
-  if (costData && costData.calls > 0) {
-    lines.push(`💸 24h cost: $${costData.totalCost.toFixed(4)} (${costData.calls} calls, ${costData.totalTokens.toLocaleString()} tokens)`);
+  const cost24h = costData && costData.calls > 0 ? costData.totalCost : null;
+  if (cost24h != null) {
+    lines.push(`💸 24h cost: $${cost24h.toFixed(4)} (${costData.calls} calls, ${costData.totalTokens.toLocaleString()} tokens)`);
     const models = Object.entries(costData.byModel)
       .sort((a, b) => b[1].cost - a[1].cost);
     for (const [model, stats] of models) {
@@ -169,7 +170,19 @@ function buildLlmCostSection(costData, balance) {
   } else if (balance?.usage != null) {
     lines.push(`💸 Total spent: $${balance.usage.toFixed(4)}`);
   }
-  if (balance?.remaining != null) {
+  // Bottom line: did today's trading cover the AI bill? Prefer the detailed
+  // /activity cost; fall back to the account's usage_daily when /activity is empty.
+  const todayCost = cost24h ?? (balance?.usageDaily ?? null);
+  if (todayCost != null && Number.isFinite(netPnlUsd)) {
+    const real = netPnlUsd - todayCost;
+    const verdict = real >= 0 ? "✅ profit bersih" : "🔴 rugi setelah biaya AI";
+    const money = (n) => `${n >= 0 ? "+" : "-"}$${Math.abs(n).toFixed(2)}`;
+    lines.push(`📊 Net vs biaya LLM (24h): ${money(netPnlUsd)} − $${todayCost.toFixed(4)} = ${money(real)} ${verdict}`);
+  }
+  if (credits?.balance != null) {
+    lines.push(`💳 Saldo OpenRouter: $${credits.balance.toFixed(2)}`);
+    if (credits.balance < 5) lines.push(`⚠️ Saldo menipis — pertimbangkan top up`);
+  } else if (balance?.remaining != null) {
     lines.push(`💳 Balance remaining: $${balance.remaining.toFixed(2)}`);
   }
   return lines.length > 1 ? lines.join("\n") : null;
@@ -215,9 +228,10 @@ export async function generateBriefing() {
   const perfSummary = getPerformanceSummary();
 
   // 5. LLM cost data
-  const [costData, balance] = await Promise.all([
+  const [costData, balance, credits] = await Promise.all([
     getOpenRouter24hCost(),
     getOpenRouterBalance(),
+    getOpenRouterCredits(),
   ]);
 
   // 6. Format Message
@@ -246,7 +260,7 @@ export async function generateBriefing() {
       ? `📊 All-time PnL: $${perfSummary.total_pnl_usd.toFixed(2)} (${perfSummary.win_rate_pct}% win)`
       : "",
     "",
-    buildLlmCostSection(costData, balance) || "",
+    buildLlmCostSection(costData, balance, credits, totalPnLUsd) || "",
     "",
     buildLearningSection(lessonsData, last24h) || "",
     "",

@@ -35,7 +35,7 @@ import { stageSignals } from "./signal-tracker.js";
 import { getWeightsSummary } from "./signal-weights.js";
 import { bootstrapHiveMind, ensureAgentId, getHiveMindPullMode, isHiveMindEnabled, pullHiveMindLessons, pullHiveMindPresets, registerHiveMindAgent, startHiveMindBackgroundSync } from "./hivemind.js";
 import { appendDecision } from "./decision-log.js";
-import { getOpenRouterBalance } from "./openrouter-usage.js";
+import { getOpenRouterBalance, getOpenRouterCredits } from "./openrouter-usage.js";
 
 const entrypointPath = process.env.pm_exec_path || process.argv[1];
 const isMain = entrypointPath
@@ -1740,13 +1740,20 @@ async function telegramHandler(msg) {
 
   if (text === "/wallet" || text === "/status") {
     try {
-      const [wallet, positions, orBalance] = await Promise.all([
+      const [wallet, positions, orBalance, orCredits] = await Promise.all([
         getWalletBalances(),
         getMyPositions({ force: true }),
         getOpenRouterBalance(),
+        getOpenRouterCredits(),
       ]);
       let msg = formatWalletStatus(wallet, positions);
-      if (orBalance) {
+      if (orCredits?.balance != null) {
+        // Actual purchased-credit balance — the number to watch for top-ups.
+        msg += `\n💳 OpenRouter saldo: $${orCredits.balance.toFixed(2)}`;
+        if (orBalance?.usageDaily != null) msg += ` | hari ini $${orBalance.usageDaily.toFixed(4)}`;
+        else if (orBalance?.usageMonthly != null) msg += ` | bln ini $${orBalance.usageMonthly.toFixed(2)}`;
+        if (orCredits.balance < 5) msg += `\n⚠️ Saldo OpenRouter menipis — pertimbangkan top up`;
+      } else if (orBalance) {
         if (orBalance.remaining != null) {
           msg += `\n💳 OpenRouter: $${orBalance.remaining.toFixed(2)} remaining`;
           if (orBalance.usageMonthly != null) msg += ` | $${orBalance.usageMonthly.toFixed(2)} this month`;

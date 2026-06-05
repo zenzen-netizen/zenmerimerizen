@@ -556,7 +556,7 @@ export function unpinLesson(id) {
 /**
  * List lessons with optional filters — for agent browsing via Telegram.
  */
-export function listLessons({ role = null, pinned = null, tag = null, limit = 30 } = {}) {
+export function listLessons({ role = null, pinned = null, tag = null, limit = 30, full = false } = {}) {
   const data = load();
   let lessons = [...data.lessons];
 
@@ -568,7 +568,7 @@ export function listLessons({ role = null, pinned = null, tag = null, limit = 30
     total: lessons.length,
     lessons: lessons.slice(-limit).map((l) => ({
       id: l.id,
-      rule: l.rule.slice(0, 120),
+      rule: full ? l.rule : l.rule.slice(0, 120),
       tags: l.tags,
       outcome: l.outcome,
       pinned: !!l.pinned,

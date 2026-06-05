@@ -1119,6 +1119,28 @@ function formatWalletStatus(wallet, positions) {
   ].join("\n");
 }
 
+// Condense a learning rule into a short, COMPLETE one-liner for /status.
+// Keeps the subject + headline metric, drops the verbose advisory tail, and
+// never cuts mid-word (the old raw slice(0,120) chopped at "PnL +").
+function condenseRule(rule) {
+  let s = String(rule || "").replace(/\s+/g, " ").trim();
+  if (!s) return s;
+  // Round noisy volatility floats: volatility=2.4598 → vol=2.5
+  s = s.replace(/volatility=(\d+\.\d+)/g, (_, n) => `vol=${(+n).toFixed(1)}`);
+  // Split "<subject> — <explanation>" (or "→") and keep only the first
+  // sentence of the explanation, dropping advisory boilerplate.
+  const m = s.match(/^(.*?)\s([—→])\s(.*)$/);
+  if (m) {
+    const tail = m[3].split(/\.\s/)[0].replace(/\.$/, "").trim();
+    s = `${m[1].trim()} ${m[2]} ${tail}`;
+  } else {
+    s = s.split(/\.\s/)[0].replace(/\.$/, "").trim();
+  }
+  // Safety net: hard cap on a word boundary with an ellipsis.
+  if (s.length > 140) s = s.slice(0, 140).replace(/\s+\S*$/, "") + "…";
+  return s;
+}
+
 function formatConfigSnapshot() {
   return [
     "Config snapshot",
@@ -1767,14 +1789,14 @@ async function telegramHandler(msg) {
       if (text === "/status") {
         if (positions.total_positions) msg += `\n\nUse /positions for the numbered list.`;
         const perf = getPerformanceSummary();
-        const { lessons } = listLessons({ limit: 10 });
+        const { lessons } = listLessons({ limit: 10, full: true });
         if (perf) {
           msg += `\n\n🧠 Learning: ${perf.total_positions_closed} closed | ${perf.win_rate_pct}% win | avg PnL ${perf.avg_pnl_pct >= 0 ? "+" : ""}${perf.avg_pnl_pct}%`;
         }
         const lastBad = lessons.filter(l => l.outcome === "bad" || l.outcome === "poor").slice(-1)[0];
         const lastGood = lessons.filter(l => l.outcome === "good").slice(-1)[0];
-        if (lastBad) msg += `\n⚠️ Avoid: ${String(lastBad.rule).slice(0, 150)}`;
-        if (lastGood) msg += `\n✅ Prefer: ${String(lastGood.rule).slice(0, 150)}`;
+        if (lastBad) msg += `\n⚠️ ${condenseRule(lastBad.rule)}`;
+        if (lastGood) msg += `\n✅ ${condenseRule(lastGood.rule)}`;
       }
       await sendMessage(msg).catch(() => {});
     } catch (e) {

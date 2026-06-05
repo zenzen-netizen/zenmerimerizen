@@ -35,6 +35,7 @@ import { stageSignals } from "./signal-tracker.js";
 import { getWeightsSummary } from "./signal-weights.js";
 import { bootstrapHiveMind, ensureAgentId, getHiveMindPullMode, isHiveMindEnabled, pullHiveMindLessons, pullHiveMindPresets, registerHiveMindAgent, startHiveMindBackgroundSync } from "./hivemind.js";
 import { appendDecision } from "./decision-log.js";
+import { getOpenRouterBalance } from "./openrouter-usage.js";
 
 const entrypointPath = process.env.pm_exec_path || process.argv[1];
 const isMain = entrypointPath
@@ -1644,11 +1645,25 @@ async function telegramHandler(msg) {
 
   if (text === "/wallet" || text === "/status") {
     try {
-      const [wallet, positions] = await Promise.all([getWalletBalances(), getMyPositions({ force: true })]);
+      const [wallet, positions, orBalance] = await Promise.all([
+        getWalletBalances(),
+        getMyPositions({ force: true }),
+        getOpenRouterBalance(),
+      ]);
       let msg = formatWalletStatus(wallet, positions);
+      if (orBalance) {
+        if (orBalance.remaining != null) {
+          msg += `\n💳 OpenRouter: $${orBalance.remaining.toFixed(2)} remaining`;
+          if (orBalance.usageMonthly != null) msg += ` | $${orBalance.usageMonthly.toFixed(2)} this month`;
+          else if (orBalance.usage != null) msg += ` | $${orBalance.usage.toFixed(4)} total spent`;
+        } else if (orBalance.usageDaily != null) {
+          msg += `\n💳 OpenRouter: $${orBalance.usageDaily.toFixed(4)} today | $${(orBalance.usageMonthly ?? 0).toFixed(2)} this month`;
+        } else if (orBalance.usage != null) {
+          msg += `\n💳 OpenRouter: $${orBalance.usage.toFixed(4)} total spent`;
+        }
+      }
       if (text === "/status") {
         if (positions.total_positions) msg += `\n\nUse /positions for the numbered list.`;
-        // Learning summary
         const perf = getPerformanceSummary();
         const { lessons } = listLessons({ limit: 10 });
         if (perf) {

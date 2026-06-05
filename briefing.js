@@ -2,6 +2,7 @@ import fs from "fs";
 import { log } from "./logger.js";
 import { getPerformanceSummary } from "./lessons.js";
 import { config } from "./config.js";
+import { getOpenRouterBalance, getOpenRouter24hCost } from "./openrouter-usage.js";
 
 // Escape data-derived text before embedding in HTML messages (lesson rules can
 // contain <, >, & — e.g. "PnL -50% <= -50%" — which break Telegram's HTML parser).
@@ -150,6 +151,30 @@ function buildRecommendations(allPerf) {
 const STATE_FILE = "./state.json";
 const LESSONS_FILE = "./lessons.json";
 
+function buildLlmCostSection(costData, balance) {
+  if (!costData && !balance) return null;
+  const lines = ["<b>🤖 LLM Usage:</b>"];
+  if (costData && costData.calls > 0) {
+    lines.push(`💸 24h cost: $${costData.totalCost.toFixed(4)} (${costData.calls} calls, ${costData.totalTokens.toLocaleString()} tokens)`);
+    const models = Object.entries(costData.byModel)
+      .sort((a, b) => b[1].cost - a[1].cost);
+    for (const [model, stats] of models) {
+      const short = model.split("/").pop();
+      lines.push(`  • ${esc(short)}: $${stats.cost.toFixed(4)} (${stats.calls} calls)`);
+    }
+  } else if (balance?.usageDaily != null) {
+    lines.push(`💸 Today: $${balance.usageDaily.toFixed(4)}`);
+    if (balance.usageWeekly != null) lines.push(`💸 This week: $${balance.usageWeekly.toFixed(4)}`);
+    if (balance.usageMonthly != null) lines.push(`💸 This month: $${balance.usageMonthly.toFixed(2)}`);
+  } else if (balance?.usage != null) {
+    lines.push(`💸 Total spent: $${balance.usage.toFixed(4)}`);
+  }
+  if (balance?.remaining != null) {
+    lines.push(`💳 Balance remaining: $${balance.remaining.toFixed(2)}`);
+  }
+  return lines.length > 1 ? lines.join("\n") : null;
+}
+
 export async function generateBriefing() {
   const state = loadJson(STATE_FILE) || { positions: {}, recentEvents: [] };
   const lessonsData = loadJson(LESSONS_FILE) || { lessons: [], performance: [] };
@@ -174,7 +199,13 @@ export async function generateBriefing() {
   const openPositions = allPositions.filter(p => !p.closed);
   const perfSummary = getPerformanceSummary();
 
-  // 5. Format Message
+  // 5. LLM cost data
+  const [costData, balance] = await Promise.all([
+    getOpenRouter24hCost(),
+    getOpenRouterBalance(),
+  ]);
+
+  // 6. Format Message
   const lines = [
     "☀️ <b>Morning Briefing</b> (Last 24h)",
     "────────────────",
@@ -199,6 +230,8 @@ export async function generateBriefing() {
     perfSummary
       ? `📊 All-time PnL: $${perfSummary.total_pnl_usd.toFixed(2)} (${perfSummary.win_rate_pct}% win)`
       : "",
+    "",
+    buildLlmCostSection(costData, balance) || "",
     "",
     buildLearningSection(lessonsData, last24h) || "",
     "",

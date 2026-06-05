@@ -51,13 +51,15 @@ function save(state) {
 // ─── Position Registry ─────────────────────────────────────────
 
 /**
- * Record a newly deployed position.
+ * Build a fresh position record with all management fields defaulted. Shared by
+ * trackPosition (full deploy metadata) and ensureDeployedAt (on-chain backfill
+ * with unknown metadata) so the two record shapes never drift apart.
  */
-export function trackPosition({
+function makePositionRecord({
   position,
   pool,
-  pool_name,
-  strategy,
+  pool_name = null,
+  strategy = null,
   bin_range = {},
   amount_sol,
   amount_x = 0,
@@ -68,9 +70,9 @@ export function trackPosition({
   organic_score,
   initial_value_usd,
   signal_snapshot = null,
+  deployed_at,
 }) {
-  const state = load();
-  state.positions[position] = {
+  return {
     position,
     pool,
     pool_name,
@@ -86,7 +88,7 @@ export function trackPosition({
     organic_score,
     initial_value_usd,
     signal_snapshot: signal_snapshot || null,
-    deployed_at: new Date().toISOString(),
+    deployed_at: deployed_at || new Date().toISOString(),
     out_of_range_since: null,
     last_claim_at: null,
     total_fees_claimed_usd: 0,
@@ -105,9 +107,57 @@ export function trackPosition({
     confirmed_trailing_exit_until: null,
     trailing_active: false,
   };
-  pushEvent(state, { action: "deploy", position, pool_name: pool_name || pool });
+}
+
+/**
+ * Record a newly deployed position.
+ */
+export function trackPosition(fields) {
+  const state = load();
+  const existing = state.positions[fields.position];
+  // Protect deployed_at: re-tracking a position we already know must never reset
+  // its clock — that would corrupt minutes-held / age in PnL and performance.
+  const deployed_at = existing?.deployed_at ?? new Date().toISOString();
+  state.positions[fields.position] = makePositionRecord({ ...fields, deployed_at });
+  pushEvent(state, { action: "deploy", position: fields.position, pool_name: fields.pool_name || fields.pool });
   save(state);
-  log("state", `Tracked new position: ${position} in pool ${pool}`);
+  log("state", `Tracked new position: ${fields.position} in pool ${fields.pool}`);
+}
+
+/**
+ * Ensure an on-chain position has a persistent deployed_at — recorded once and
+ * never overwritten. Called for every position observed on-chain so age /
+ * minutes-held is always computable, even for positions that predate tracking
+ * or survive a state.json reset.
+ *
+ * - Known position missing deployed_at → stamp it (first-seen) and persist.
+ * - Untracked position → create a minimal backfilled record (deploy metadata
+ *   unknown; deployed_at = first-seen now) so the management loop can adopt it.
+ */
+export function ensureDeployedAt(position_address, meta = {}) {
+  if (!position_address) return;
+  const state = load();
+  const pos = state.positions[position_address];
+
+  if (pos) {
+    if (!pos.deployed_at) {
+      pos.deployed_at = new Date().toISOString();
+      save(state);
+      log("state", `Backfilled deployed_at for ${position_address.slice(0, 8)}`);
+    }
+    return;
+  }
+
+  const record = makePositionRecord({
+    position: position_address,
+    pool: meta.pool ?? null,
+    pool_name: meta.pool_name ?? null,
+    strategy: meta.strategy ?? "unknown",
+  });
+  record.notes.push("Backfilled from on-chain — deploy metadata unknown");
+  state.positions[position_address] = record;
+  save(state);
+  log("state", `Backfilled untracked on-chain position ${position_address.slice(0, 8)}`);
 }
 
 /**

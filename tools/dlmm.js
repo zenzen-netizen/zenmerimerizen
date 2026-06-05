@@ -22,6 +22,7 @@ import {
   getTrackedPosition,
   minutesOutOfRange,
   syncOpenPositions,
+  ensureDeployedAt,
 } from "../state.js";
 import { recordPerformance } from "../lessons.js";
 import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
@@ -1362,6 +1363,9 @@ export async function getMyPositions({ force = false, silent = false, wallet_add
     const positions = [];
     for (const pool of pools) {
       for (const positionAddress of (pool.listPositions || [])) {
+        // Persist deployed_at on first sight so age / minutes-held survives a
+        // state reset and is always available for untracked on-chain positions.
+        ensureDeployedAt(positionAddress, { pool: pool.poolAddress, pool_name: `${pool.tokenX}/${pool.tokenY}` });
         const tracked = getTrackedPosition(positionAddress);
         const isOOR = pool.outOfRange || pool.positionsOutOfRange?.includes(positionAddress);
 

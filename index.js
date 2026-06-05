@@ -10,7 +10,7 @@ import { getWalletBalances } from "./tools/wallet.js";
 import { getTopCandidates } from "./tools/screening.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
 import { config, reloadScreeningThresholds, computeDeployAmount } from "./config.js";
-import { evolveThresholds, getPerformanceSummary, listLessons } from "./lessons.js";
+import { evolveThresholds, getPerformanceSummary, listLessons, classifySession, currentWibSession } from "./lessons.js";
 import { executeTool, registerCronRestarter } from "./tools/executor.js";
 import {
   startPolling,
@@ -765,6 +765,37 @@ IMPORTANT:
   return screenReport;
 }
 
+/**
+ * Effective screening interval (minutes) for right now.
+ * Manual mode → the configured interval, fixed.
+ * Auto mode   → floor=screeningIntervalMin, ceiling=maxScreeningIntervalMin;
+ *               stretched to the ceiling only during historically WEAK WIB
+ *               sessions. Insufficient data or "ok" sessions stay at the floor.
+ * Management & PnL-poll cadence are never affected — screening only.
+ */
+function effectiveScreeningIntervalMin() {
+  const base = Math.max(1, config.schedule.screeningIntervalMin);
+  if (!config.schedule.adaptiveScreening) return base;
+  const ceil = Math.max(base, config.schedule.maxScreeningIntervalMin ?? base);
+  return classifySession(currentWibSession().key) === "weak" ? ceil : base;
+}
+
+/**
+ * Gate for the *scheduled* screening tick (event-driven triggers from the
+ * management cycle bypass this — a freed slot should be looked at now).
+ * The cron fires every base interval; in auto mode we skip ticks until the
+ * effective (possibly stretched) interval has elapsed since the last run.
+ */
+function shouldRunScheduledScreening() {
+  if (!config.schedule.adaptiveScreening) return true;
+  const eff = effectiveScreeningIntervalMin();
+  const base = Math.max(1, config.schedule.screeningIntervalMin);
+  if (eff <= base) return true;
+  if (!timers.screeningLastRun) return true;
+  const elapsedMin = (Date.now() - timers.screeningLastRun) / 60000;
+  return elapsedMin >= eff - 0.5;
+}
+
 export function startCronJobs() {
   stopCronJobs(); // stop any running tasks before (re)starting
 
@@ -774,7 +805,13 @@ export function startCronJobs() {
     await runManagementCycle();
   });
 
-  const screenTask = cron.schedule(`*/${Math.max(1, config.schedule.screeningIntervalMin)} * * * *`, runScreeningCycle);
+  const screenTask = cron.schedule(`*/${Math.max(1, config.schedule.screeningIntervalMin)} * * * *`, async () => {
+    if (!shouldRunScheduledScreening()) {
+      log("cron", `Screening tick skipped — adaptive throttle (session ${currentWibSession().label}, effective ${effectiveScreeningIntervalMin()}m)`);
+      return;
+    }
+    await runScreeningCycle();
+  });
 
   const healthTask = cron.schedule(`0 * * * *`, async () => {
     if (_managementBusy) return;
@@ -1159,6 +1196,8 @@ function settingValue(key) {
     repeatDeployCooldownMinFeeEarnedPct: config.management.repeatDeployCooldownMinFeeEarnedPct,
     managementIntervalMin: config.schedule.managementIntervalMin,
     screeningIntervalMin: config.schedule.screeningIntervalMin,
+    adaptiveScreening: config.schedule.adaptiveScreening,
+    maxScreeningIntervalMin: config.schedule.maxScreeningIntervalMin,
     indicatorEntryPreset: config.indicators.entryPreset,
     indicatorExitPreset: config.indicators.exitPreset,
     rsiLength: config.indicators.rsiLength,
@@ -1308,7 +1347,9 @@ function renderSettingsMenu(page = "main") {
       ],
       [settingButton("KOL settings", "cfg:page:kol")],
       inputButton("managementIntervalMin", "Manage interval (min)"),
-      inputButton("screeningIntervalMin", "Screen interval (min)"),
+      inputButton("screeningIntervalMin", "Screen interval — min/floor (min)"),
+      [toggleButton("adaptiveScreening", "Adaptive screening")],
+      inputButton("maxScreeningIntervalMin", "Screen interval — max/ceil (min)"),
     ];
   } else if (page === "strategy") {
     rows = [
@@ -1422,7 +1463,7 @@ async function applySettingsMenuCallback(msg) {
       : inputKey.startsWith("gmgn") && inputKey !== "gmgnRequireKol" ? "gmgn"
       : inputKey.startsWith("indicator") || inputKey === "chartIndicatorsEnabled" || inputKey === "rsiLength" || inputKey === "requireAllIntervals" ? "indicators"
       : ["minBinsBelow", "maxBinsBelow"].includes(inputKey) ? "strategy"
-      : ["useDiscordSignals", "blockPvpSymbols", "managementIntervalMin", "screeningIntervalMin", "screeningSource", "gmgnRequireKol"].includes(inputKey) ? "screen"
+      : ["useDiscordSignals", "blockPvpSymbols", "managementIntervalMin", "screeningIntervalMin", "maxScreeningIntervalMin", "adaptiveScreening", "screeningSource", "gmgnRequireKol"].includes(inputKey) ? "screen"
       : "risk";
     _pendingInput = { key: inputKey, page: inputPage, menuMsgId: msg.messageId };
     await answerCallbackQuery(msg.callbackQueryId);
@@ -1487,7 +1528,7 @@ async function applySettingsMenuCallback(msg) {
         ? "indicators"
         : ["minBinsBelow", "maxBinsBelow"].includes(key)
           ? "strategy"
-          : ["useDiscordSignals", "blockPvpSymbols", "managementIntervalMin", "screeningIntervalMin", "screeningSource", "gmgnRequireKol"].includes(key)
+          : ["useDiscordSignals", "blockPvpSymbols", "managementIntervalMin", "screeningIntervalMin", "maxScreeningIntervalMin", "adaptiveScreening", "screeningSource", "gmgnRequireKol"].includes(key)
             ? "screen"
             : "risk";
   await answerCallbackQuery(msg.callbackQueryId, `Updated ${key}`);

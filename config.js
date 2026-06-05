@@ -209,6 +209,12 @@ export const config = {
     managementIntervalMin:  u.managementIntervalMin  ?? 10,
     screeningIntervalMin:   u.screeningIntervalMin   ?? 30,
     healthCheckIntervalMin: u.healthCheckIntervalMin ?? 60,
+    // Adaptive screening: when true, the screening cadence stretches during
+    // historically weak WIB sessions (saves LLM tokens) but stays 24/7.
+    // screeningIntervalMin acts as the floor (fastest); maxScreeningIntervalMin
+    // the ceiling (slowest). When false, screeningIntervalMin is fixed.
+    adaptiveScreening:       u.adaptiveScreening       ?? false,
+    maxScreeningIntervalMin: u.maxScreeningIntervalMin ?? 90,
   },
 
   // ─── LLM Settings ──────────────────────

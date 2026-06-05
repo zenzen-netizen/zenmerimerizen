@@ -10,6 +10,7 @@
  * @returns {string} - Complete system prompt
  */
 import { config } from "./config.js";
+import { getTimeProfileForPrompt } from "./lessons.js";
 
 export function buildSystemPrompt(agentType, portfolio, positions, stateSummary = null, lessons = null, perfSummary = null, weightsSummary = null, decisionSummary = null) {
   const s = config.screening;
@@ -102,6 +103,7 @@ Current screening timeframe: ${config.screening.timeframe} — interpret all non
 `;
 
   if (agentType === "SCREENER") {
+    const timeProfile = getTimeProfileForPrompt();
     return `You are an autonomous DLMM LP agent on Meteora, Solana. Role: SCREENER
 
 All candidates are pre-loaded. Your job: deploy only when at least one candidate has real conviction. active_bin is pre-fetched.
@@ -136,7 +138,7 @@ DEPLOY RULES:
 - Bin steps must be [${config.screening.minBinStep}-${config.screening.maxBinStep}].
 - Pick ONE pool only if it qualifies. Otherwise explain why none qualify.
 
-${weightsSummary ? `${weightsSummary}\nPrioritize candidates whose strongest attributes align with high-weight signals.\n\n` : ""}${lessons ? `LESSONS LEARNED:\n${lessons}\n` : ""}Timestamp: ${new Date().toISOString()}
+${timeProfile ? `${timeProfile}\n\n` : ""}${weightsSummary ? `${weightsSummary}\nPrioritize candidates whose strongest attributes align with high-weight signals.\n\n` : ""}${lessons ? `LESSONS LEARNED:\n${lessons}\n` : ""}Timestamp: ${new Date().toISOString()}
 `;
   } else if (agentType === "MANAGER") {
     basePrompt += `

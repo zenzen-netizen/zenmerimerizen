@@ -32,6 +32,40 @@ const PERFORMANCE_SIGNAL_FIELDS = [
 ];
 const MAX_MANUAL_LESSON_LENGTH = 400;
 
+// ─── Time-of-day (WIB / UTC+7) sessions ────────────────────────
+// Position open-hour is bucketed into coarse sessions rather than 24
+// individual hours — with sparse data, wide buckets are far more stable.
+const WIB_OFFSET_HOURS = 7;
+const SESSIONS = [
+  { key: "dini",  label: "00–06 dini hari", start: 0,  end: 6  },
+  { key: "pagi",  label: "06–11 pagi",      start: 6,  end: 11 },
+  { key: "siang", label: "11–15 siang",     start: 11, end: 15 },
+  { key: "sore",  label: "15–19 sore",      start: 15, end: 19 },
+  { key: "malam", label: "19–24 malam",     start: 19, end: 24 },
+];
+// Minimum closed-position samples before a session's stats may steer any
+// decision (prompt nudge or interval throttle). Below this = treat as neutral.
+const MIN_SESSION_SAMPLES = 8;
+
+/** Hour-of-day (0–23) in WIB for an ISO timestamp, or null if unparseable. */
+function wibHour(iso) {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return null;
+  return (new Date(t).getUTCHours() + WIB_OFFSET_HOURS) % 24;
+}
+
+/** Map a WIB hour to its session descriptor. */
+function sessionForHour(hour) {
+  if (hour == null) return null;
+  return SESSIONS.find((s) => hour >= s.start && hour < s.end) || SESSIONS[0];
+}
+
+/** The session active right now (WIB). */
+export function currentWibSession(date = new Date()) {
+  return sessionForHour((date.getUTCHours() + WIB_OFFSET_HOURS) % 24);
+}
+
 function sanitizeLessonText(text, maxLen = MAX_MANUAL_LESSON_LENGTH) {
   if (text == null) return null;
   const cleaned = String(text)
@@ -133,13 +167,20 @@ export async function recordPerformance(perf) {
   }
 
   const signalSnapshot = buildSignalSnapshot(perf);
+  const recordedAt = new Date().toISOString();
+  const openedAt = perf.deployed_at || null;
+  const openHourWib = wibHour(openedAt);
   const entry = {
     ...perf,
     signal_snapshot: signalSnapshot,
     pnl_usd: Math.round(pnl_usd * 100) / 100,
     pnl_pct: Math.round(pnl_pct * 100) / 100,
     range_efficiency: Math.round(range_efficiency * 10) / 10,
-    recorded_at: new Date().toISOString(),
+    opened_at: openedAt,
+    closed_at: recordedAt,
+    open_hour_wib: openHourWib,
+    open_session: openHourWib != null ? sessionForHour(openHourWib).key : null,
+    recorded_at: recordedAt,
   };
 
   data.performance.push(entry);

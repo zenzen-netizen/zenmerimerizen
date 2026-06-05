@@ -69,3 +69,29 @@ export async function getOpenRouter24hCost() {
     return null;
   }
 }
+
+/**
+ * Actual purchased-credit balance on the OpenRouter account
+ * (total_credits − total_usage). This is the number to watch for top-ups,
+ * independent of any per-key spend limit reported by /auth/key.
+ * Returns null if the endpoint isn't accessible for this key.
+ */
+export async function getOpenRouterCredits() {
+  if (!IS_OPENROUTER || !API_KEY) return null;
+  try {
+    const res = await fetch(`${BASE_URL}/api/v1/credits`, {
+      headers: { Authorization: `Bearer ${API_KEY}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const d = data.data ?? data;
+    const totalCredits = Number(d.total_credits);
+    const totalUsage = Number(d.total_usage);
+    if (!Number.isFinite(totalCredits) || !Number.isFinite(totalUsage)) return null;
+    return { totalCredits, totalUsage, balance: totalCredits - totalUsage };
+  } catch (e) {
+    log("openrouter", `Credits fetch failed: ${e.message}`);
+    return null;
+  }
+}

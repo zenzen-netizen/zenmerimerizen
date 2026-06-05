@@ -1,6 +1,6 @@
 import fs from "fs";
 import { log } from "./logger.js";
-import { getPerformanceSummary } from "./lessons.js";
+import { getPerformanceSummary, getHourlyProfile } from "./lessons.js";
 import { config } from "./config.js";
 import { getOpenRouterBalance, getOpenRouter24hCost } from "./openrouter-usage.js";
 
@@ -175,6 +175,21 @@ function buildLlmCostSection(costData, balance) {
   return lines.length > 1 ? lines.join("\n") : null;
 }
 
+function buildTimeProfileSection() {
+  const prof = getHourlyProfile();
+  if (!prof || prof.total_with_open_time < prof.min_samples) return null;
+
+  const lines = [`🕒 <b>Best Open Hours (WIB)</b> — overall win ${prof.overall_win_rate_pct}%`];
+  const rated = prof.sessions.filter((s) => s.count > 0);
+  if (rated.length === 0) return null;
+  for (const s of rated) {
+    const enough = s.count >= prof.min_samples;
+    const tag = !enough ? " <i>(few samples)</i>" : "";
+    lines.push(`  • ${esc(s.label)}: ${s.win_rate_pct}% win, avg ${s.avg_pnl_pct >= 0 ? "+" : ""}${s.avg_pnl_pct}% (${s.count})${tag}`);
+  }
+  return lines.join("\n");
+}
+
 export async function generateBriefing() {
   const state = loadJson(STATE_FILE) || { positions: {}, recentEvents: [] };
   const lessonsData = loadJson(LESSONS_FILE) || { lessons: [], performance: [] };
@@ -234,6 +249,8 @@ export async function generateBriefing() {
     buildLlmCostSection(costData, balance) || "",
     "",
     buildLearningSection(lessonsData, last24h) || "",
+    "",
+    buildTimeProfileSection() || "",
     "",
     buildRecommendations(lessonsData.performance) || "",
     "────────────────"

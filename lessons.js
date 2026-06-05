@@ -786,3 +786,88 @@ export function getPerformanceSummary() {
     total_lessons: data.lessons.length,
   };
 }
+
+// ─── Time-of-day Profile (open-hour analysis) ──────────────────
+
+/**
+ * Bucket closed positions by their OPEN session (WIB) and report
+ * win-rate / avg-PnL per session. Only records that carry an open
+ * timestamp are counted, so this is empty until Phase-1 data accrues.
+ *
+ * Tool handler: get_time_profile
+ */
+export function getHourlyProfile() {
+  const data = load();
+  const perf = (data.performance || []).filter((p) => p.open_session && isFiniteNum(p.pnl_pct));
+
+  const buckets = {};
+  for (const s of SESSIONS) buckets[s.key] = { wins: 0, count: 0, pnlSum: 0 };
+  for (const p of perf) {
+    const b = buckets[p.open_session];
+    if (!b) continue;
+    b.count++;
+    if (p.pnl_pct > 0) b.wins++;
+    b.pnlSum += p.pnl_pct;
+  }
+
+  const total = perf.length;
+  const overallWins = perf.filter((p) => p.pnl_pct > 0).length;
+  const overallWinRate = total > 0 ? Math.round((overallWins / total) * 100) : null;
+
+  const sessions = SESSIONS.map((s) => {
+    const b = buckets[s.key];
+    return {
+      key: s.key,
+      label: s.label,
+      count: b.count,
+      win_rate_pct: b.count > 0 ? Math.round((b.wins / b.count) * 100) : null,
+      avg_pnl_pct: b.count > 0 ? Math.round((b.pnlSum / b.count) * 100) / 100 : null,
+    };
+  });
+
+  return {
+    timezone: "WIB (UTC+7)",
+    min_samples: MIN_SESSION_SAMPLES,
+    total_with_open_time: total,
+    overall_win_rate_pct: overallWinRate,
+    sessions,
+  };
+}
+
+/**
+ * Classify a session's historical strength.
+ * @returns {"weak" | "ok" | "insufficient"}
+ *   "weak"        — enough samples AND clearly below baseline (win-rate
+ *                   ≥15pp under overall AND negative avg PnL)
+ *   "ok"          — enough samples, not weak
+ *   "insufficient"— too few samples to judge (treat as neutral)
+ */
+export function classifySession(sessionKey) {
+  const prof = getHourlyProfile();
+  if (prof.overall_win_rate_pct == null) return "insufficient";
+  const s = prof.sessions.find((x) => x.key === sessionKey);
+  if (!s || s.count < MIN_SESSION_SAMPLES) return "insufficient";
+  const weak = s.win_rate_pct < prof.overall_win_rate_pct - 15 && (s.avg_pnl_pct ?? 0) < 0;
+  return weak ? "weak" : "ok";
+}
+
+/**
+ * One-line time-of-day note for the SCREENER prompt. Returns null when
+ * there isn't enough data overall, so we never nudge on noise. This is a
+ * good-to-have signal only — it must never override hard screening rules.
+ */
+export function getTimeProfileForPrompt() {
+  const prof = getHourlyProfile();
+  if (prof.total_with_open_time < MIN_SESSION_SAMPLES) return null;
+
+  const cur = currentWibSession();
+  const s = prof.sessions.find((x) => x.key === cur.key);
+  if (!s || s.count < MIN_SESSION_SAMPLES) {
+    return `TIME-OF-DAY (WIB): current session ${cur.label} has only ${s?.count ?? 0} past deploys — no historical edge yet, judge on pool merits.`;
+  }
+
+  const verdict = classifySession(cur.key) === "weak"
+    ? "historically WEAK — raise the bar, prefer skipping marginal candidates (good-to-have signal, NEVER overrides hard rules)."
+    : "historically OK — deploy normally if a candidate qualifies.";
+  return `TIME-OF-DAY (WIB): current session ${cur.label} — win ${s.win_rate_pct}%, avg PnL ${s.avg_pnl_pct}% over ${s.count} deploys (overall ${prof.overall_win_rate_pct}%). ${verdict}`;
+}

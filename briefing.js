@@ -1,6 +1,151 @@
 import fs from "fs";
 import { log } from "./logger.js";
 import { getPerformanceSummary } from "./lessons.js";
+import { config } from "./config.js";
+
+// Escape data-derived text before embedding in HTML messages (lesson rules can
+// contain <, >, & — e.g. "PnL -50% <= -50%" — which break Telegram's HTML parser).
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// Surfaces only what the 24h sections above DON'T already show:
+// older lessons (outside the 24h window), the last threshold adjustment,
+// and avg in-range efficiency (the one all-time stat not printed elsewhere).
+function buildLearningSection(lessonsData, since) {
+  const allLessons = lessonsData.lessons || [];
+  const allPerf = lessonsData.performance || [];
+
+  // Recent lessons are already listed under "Lessons Learned (24h)" — keep only older ones.
+  const older = allLessons.filter(l => !l.created_at || new Date(l.created_at) <= since);
+
+  const warnings = older
+    .filter(l => l.outcome === "bad" || l.outcome === "poor" || (l.rule || "").startsWith("FAILED"))
+    .slice(-3);
+
+  // Highest-confidence proven winners. Sort descending, take the FIRST 3.
+  const winners = older
+    .filter(l => l.outcome === "good" || (l.rule || "").startsWith("PREFER") || (l.rule || "").startsWith("WORKED"))
+    .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
+    .slice(0, 3);
+
+  // Latest auto-evolution change (not shown anywhere else in the briefing)
+  const evolved = allLessons.filter(l => l.tags?.includes("evolution")).slice(-1)[0];
+
+  // Avg in-range efficiency, all-time (PnL/win-rate are already shown above; this isn't)
+  const effPerf = allPerf.filter(p => Number.isFinite(p.range_efficiency));
+  const avgEff = effPerf.length
+    ? effPerf.reduce((s, p) => s + p.range_efficiency, 0) / effPerf.length
+    : null;
+
+  if (warnings.length === 0 && winners.length === 0 && !evolved && avgEff == null) return null;
+
+  const lines = ["<b>🧠 Learning Insights:</b>"];
+  if (warnings.length > 0) {
+    lines.push("⚠️ <b>Older warnings:</b>");
+    for (const l of warnings) lines.push(`  • ${esc(String(l.rule).slice(0, 180))}`);
+  }
+  if (winners.length > 0) {
+    lines.push("✅ <b>Proven patterns:</b>");
+    for (const l of winners) lines.push(`  • ${esc(String(l.rule).slice(0, 180))}`);
+  }
+  if (evolved) {
+    lines.push(`🔧 <b>Last threshold adjustment:</b> ${esc(String(evolved.rule).slice(0, 200))}`);
+  }
+  if (avgEff != null) {
+    lines.push(`📊 <b>Avg in-range (all-time):</b> ${avgEff.toFixed(0)}%`);
+  }
+
+  return lines.join("\n");
+}
+
+const fin = (arr) => arr.filter((n) => Number.isFinite(n));
+const mean = (arr) => (arr.length ? arr.reduce((s, x) => s + x, 0) / arr.length : null);
+
+// Turns closed-position performance into concrete, actionable config tweaks the
+// operator can apply to push for more profit. Mirrors evolveThresholds' winner/loser
+// logic, but covers dimensions the auto-evolver doesn't touch (bin_step, strategy,
+// OOR wait, position sizing) and always references REAL config keys.
+function buildRecommendations(allPerf) {
+  const perf = (allPerf || []).filter((p) => Number.isFinite(p.pnl_pct));
+  if (perf.length < 4) return null; // not enough closed positions to advise confidently
+
+  const winners = perf.filter((p) => p.pnl_pct > 0);
+  const losers = perf.filter((p) => p.pnl_pct < -5);
+  if (winners.length < 2 && losers.length < 2) return null;
+
+  const s = config.screening || {};
+  const m = config.management || {};
+  const recs = [];
+
+  // 1. Fee/active-TVL floor — raise toward worst winner if there's clear headroom.
+  const wFee = fin(winners.map((p) => p.fee_tvl_ratio));
+  if (wFee.length >= 2) {
+    const minWinFee = Math.min(...wFee);
+    const cur = s.minFeeActiveTvlRatio ?? 0.05;
+    if (minWinFee > cur * 1.3) {
+      const target = Number((minWinFee * 0.85).toFixed(2));
+      recs.push(`Raise <code>minFeeActiveTvlRatio</code> ${cur} → ~${target} (worst winner had fee/TVL ${minWinFee.toFixed(2)})`);
+    }
+  }
+
+  // 2. Organic floor — winners consistently more organic than losers.
+  const wOrg = fin(winners.map((p) => p.organic_score));
+  const lOrg = fin(losers.map((p) => p.organic_score));
+  if (wOrg.length >= 2 && lOrg.length >= 2) {
+    const wAvg = mean(wOrg), lAvg = mean(lOrg);
+    const cur = s.minOrganic ?? 60;
+    const target = Math.round(Math.min(...wOrg) - 3);
+    if (wAvg - lAvg >= 10 && target > cur) {
+      recs.push(`Raise <code>minOrganic</code> ${cur} → ~${Math.min(target, 90)} (winners avg ${wAvg.toFixed(0)} vs losers ${lAvg.toFixed(0)})`);
+    }
+  }
+
+  // 3. bin_step ceiling — if losers cluster at higher bin_step, tighten the cap.
+  const wBin = fin(winners.map((p) => p.bin_step));
+  const lBin = fin(losers.map((p) => p.bin_step));
+  if (wBin.length >= 2 && lBin.length >= 2) {
+    const wAvg = mean(wBin), lAvg = mean(lBin);
+    if (lAvg - wAvg >= 10) {
+      recs.push(`Lower <code>maxBinStep</code> toward ~${Math.round(wAvg + 10)} (losers avg bin_step ${lAvg.toFixed(0)} vs winners ${wAvg.toFixed(0)})`);
+    }
+  }
+
+  // 4. Range efficiency — low in-range time means ranges too tight or OOR exits too fast.
+  const allEff = fin(perf.map((p) => p.range_efficiency));
+  if (allEff.length >= 3) {
+    const effAvg = mean(allEff);
+    if (effAvg < 50) {
+      recs.push(`Avg in-range only ${effAvg.toFixed(0)}% — widen ranges (more bins_below) or extend <code>outOfRangeWaitMinutes</code> (now ${m.outOfRangeWaitMinutes ?? 30})`);
+    }
+  }
+
+  // 5. Best-performing strategy — favor it when screening.
+  const byStrat = {};
+  for (const p of perf) {
+    if (!p.strategy) continue;
+    (byStrat[p.strategy] ??= []).push(p.pnl_pct);
+  }
+  const stratStats = Object.entries(byStrat)
+    .filter(([, a]) => a.length >= 2)
+    .map(([k, a]) => [k, mean(a)])
+    .sort((a, b) => b[1] - a[1]);
+  if (stratStats.length >= 2 && stratStats[0][1] > 0) {
+    recs.push(`Best strategy: <b>${esc(stratStats[0][0])}</b> (avg PnL +${stratStats[0][1].toFixed(1)}%) — favor it in screening`);
+  }
+
+  // 6. Position sizing — scale risk with realized win rate.
+  if (perf.length >= 6) {
+    const winRate = winners.length / perf.length;
+    const cur = m.positionSizePct ?? 0.35;
+    if (winRate < 0.4 && cur > 0.2) {
+      recs.push(`Win rate ${(winRate * 100).toFixed(0)}% — lower <code>positionSizePct</code> ${cur} → ${(cur * 0.8).toFixed(2)} until edge improves`);
+    } else if (winRate > 0.65 && cur < 0.5) {
+      recs.push(`Win rate ${(winRate * 100).toFixed(0)}% — room to raise <code>positionSizePct</code> ${cur} → ${Math.min(0.5, cur * 1.2).toFixed(2)} to compound faster`);
+    }
+  }
+
+  if (recs.length === 0) return null;
+  return ["💡 <b>Config Recommendations:</b>", ...recs.slice(0, 5).map((r) => `  • ${r}`)].join("\n");
+}
 
 const STATE_FILE = "./state.json";
 const LESSONS_FILE = "./lessons.json";
@@ -44,9 +189,9 @@ export async function generateBriefing() {
       ? `📈 Win Rate (24h): ${Math.round((perfLast24h.filter(p => p.pnl_usd > 0).length / perfLast24h.length) * 100)}%`
       : "📈 Win Rate (24h): N/A",
     "",
-    `<b>Lessons Learned:</b>`,
+    `<b>Lessons Learned (24h):</b>`,
     lessonsLast24h.length > 0
-      ? lessonsLast24h.map(l => `• ${l.rule}`).join("\n")
+      ? lessonsLast24h.map(l => `• ${esc(l.rule)}`).join("\n")
       : "• No new lessons recorded overnight.",
     "",
     `<b>Current Portfolio:</b>`,
@@ -54,10 +199,15 @@ export async function generateBriefing() {
     perfSummary
       ? `📊 All-time PnL: $${perfSummary.total_pnl_usd.toFixed(2)} (${perfSummary.win_rate_pct}% win)`
       : "",
+    "",
+    buildLearningSection(lessonsData, last24h) || "",
+    "",
+    buildRecommendations(lessonsData.performance) || "",
     "────────────────"
   ];
 
-  return lines.join("\n");
+  // Collapse runs of blank lines left by skipped (null) sections.
+  return lines.filter((l, i) => !(l === "" && lines[i - 1] === "")).join("\n");
 }
 
 function loadJson(file) {

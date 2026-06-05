@@ -157,6 +157,7 @@ export async function recordPerformance(perf) {
   }
 
   // Update pool-level memory
+  // (return lesson so callers can include it in close notifications)
   if (perf.pool) {
     const { recordPoolDeploy } = await import("./pool-memory.js");
     recordPoolDeploy(perf.pool, {
@@ -203,6 +204,7 @@ export async function recordPerformance(perf) {
     eventId: `close:${perf.position}:${entry.recorded_at}`,
   });
 
+  return lesson || null;
 }
 
 /**

@@ -215,6 +215,7 @@ export const config = {
   llm: {
     temperature: u.temperature ?? 0.373,
     maxTokens:   u.maxTokens   ?? 4096,
+    generalMaxTokens: u.generalMaxTokens ?? 8192,
     maxSteps:    u.maxSteps    ?? 20,
     managementModel: u.managementModel ?? process.env.LLM_MODEL ?? "openrouter/healer-alpha",
     screeningModel:  u.screeningModel  ?? process.env.LLM_MODEL ?? "openrouter/hunter-alpha",

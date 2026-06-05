@@ -121,9 +121,29 @@ async function postTelegramRaw(method, body) {
   }
 }
 
+function splitText(text, limit = 4096) {
+  const str = String(text);
+  if (str.length <= limit) return [str];
+  const chunks = [];
+  let remaining = str;
+  while (remaining.length > 0) {
+    if (remaining.length <= limit) { chunks.push(remaining); break; }
+    let cut = remaining.lastIndexOf("\n", limit);
+    if (cut < limit * 0.3) cut = limit;
+    chunks.push(remaining.slice(0, cut));
+    remaining = remaining.slice(cut).replace(/^\n/, "");
+  }
+  return chunks;
+}
+
 export async function sendMessage(text) {
   if (!TOKEN || !chatId) return;
-  return postTelegram("sendMessage", { text: String(text).slice(0, 4096) });
+  const chunks = splitText(text);
+  let last;
+  for (const chunk of chunks) {
+    last = await postTelegram("sendMessage", { text: chunk });
+  }
+  return last;
 }
 
 export async function sendMessageWithButtons(text, inlineKeyboard) {
@@ -136,10 +156,15 @@ export async function sendMessageWithButtons(text, inlineKeyboard) {
 
 export async function sendHTML(html) {
   if (!TOKEN || !chatId) return;
-  const result = await postTelegram("sendMessage", { text: html.slice(0, 4096), parse_mode: "HTML" });
-  if (result) return result;
-  const plain = html.replace(/<[^>]+>/g, "").slice(0, 4096);
-  return postTelegram("sendMessage", { text: plain });
+  const chunks = splitText(html);
+  let last;
+  for (const chunk of chunks) {
+    const result = await postTelegram("sendMessage", { text: chunk, parse_mode: "HTML" });
+    if (result) { last = result; continue; }
+    const plain = chunk.replace(/<[^>]+>/g, "");
+    last = await postTelegram("sendMessage", { text: plain });
+  }
+  return last;
 }
 
 // Escape data-derived text before embedding in HTML parse_mode messages.
@@ -299,6 +324,27 @@ export async function createLiveMessage(title, intro = "Starting...") {
     }, delay);
   }
 
+  // Final flush: unlike the live edits above (which slice to a single 4096-char
+  // message), this splits a long final answer across multiple messages so it is
+  // never truncated. The first chunk edits the live message in place; the rest
+  // are sent as follow-up messages.
+  async function flushFinal() {
+    const sections = [state.title];
+    if (state.intro) sections.push(state.intro);
+    if (state.toolLines.length > 0) sections.push(state.toolLines.join("\n"));
+    if (state.footer) sections.push(state.footer);
+    const chunks = splitText(sections.join("\n\n"));
+    if (!state.messageId) {
+      const sent = await postTelegram("sendMessage", { text: chunks[0] });
+      state.messageId = sent?.result?.message_id ?? null;
+    } else {
+      await editMessage(chunks[0], state.messageId);
+    }
+    for (let i = 1; i < chunks.length; i++) {
+      await postTelegram("sendMessage", { text: chunks[i] });
+    }
+  }
+
   async function upsertToolLine(name, icon, suffix = "") {
     const label = toolLabel(name);
     const line = `${icon} ${label}${suffix ? ` ${suffix}` : ""}`;
@@ -331,7 +377,7 @@ export async function createLiveMessage(title, intro = "Starting...") {
       }
       if (state.flushPromise) await state.flushPromise;
       state.footer = finalText;
-      await flushNow();
+      await flushFinal();
       _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
       typing.stop();
     },
@@ -351,6 +397,14 @@ export async function createLiveMessage(title, intro = "Starting...") {
 
 
 // ─── Long polling ────────────────────────────────────────────────
+// Run a handler without blocking the poll loop, so update fetching keeps
+// going even while a handler awaits user input (config confirmation, etc.).
+function dispatch(onMessage, msg) {
+  Promise.resolve()
+    .then(() => onMessage(msg))
+    .catch((e) => log("telegram_error", `Handler error: ${e.message}`));
+}
+
 async function poll(onMessage) {
   while (_polling) {
     try {
@@ -370,7 +424,11 @@ async function poll(onMessage) {
             text: callback.data,
           };
           if (!isAuthorizedIncomingMessage(callbackMsg)) continue;
-          await onMessage({
+          // Fire-and-forget: a handler may await user input (e.g. a config
+          // confirmation button). If we awaited here, the poll loop would block
+          // and could never fetch the very button-press it is waiting on —
+          // a deadlock. The handler guards its own concurrency via `busy`.
+          dispatch(onMessage, {
             ...callbackMsg,
             isCallback: true,
             callbackQueryId: callback.id,
@@ -382,7 +440,7 @@ async function poll(onMessage) {
         const msg = update.message;
         if (!msg?.text) continue;
         if (!isAuthorizedIncomingMessage(msg)) continue;
-        await onMessage(msg);
+        dispatch(onMessage, msg);
       }
     } catch (e) {
       if (!e.message?.includes("aborted")) {

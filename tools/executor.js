@@ -20,7 +20,7 @@ import { addToBlacklist, removeFromBlacklist, listBlacklist } from "../token-bla
 import { blockDev, unblockDev, listBlockedDevs } from "../dev-blocklist.js";
 import { addSmartWallet, removeSmartWallet, listSmartWallets, checkSmartWalletsOnPool } from "../smart-wallets.js";
 import { getTokenInfo, getTokenHolders, getTokenNarrative } from "./token.js";
-import { config, reloadScreeningThresholds, MIN_SAFE_BINS_BELOW } from "../config.js";
+import { config, reloadScreeningThresholds, MIN_SAFE_BINS_BELOW, applyConvictionSizing } from "../config.js";
 import { getRecentDecisions } from "../decision-log.js";
 import fs from "fs";
 import path from "path";
@@ -462,6 +462,8 @@ const toolMap = {
       candidateMomentum: ["experiments", "candidateMomentum"],
       narrativeProfileSignal: ["experiments", "narrativeProfileSignal"],
       expectedYieldSignal: ["experiments", "expectedYieldSignal"],
+      convictionSizing: ["experiments", "convictionSizing"],
+      convictionSizingMaxAdjustPct: ["experiments", "convictionSizingMaxAdjustPct"],
     };
 
     const applied = {};
@@ -747,6 +749,25 @@ async function runSafetyChecks(name, args) {
     case "deploy_position": {
       const poolThresholds = await validateDeployPoolThresholds(args);
       if (!poolThresholds.pass) return poolThresholds;
+
+      // ─── 🧪 Experiment #6: conviction sizing ──────────────────
+      // OFF by default → applyConvictionSizing returns the amount unchanged
+      // (factory behavior). When ON, the SCREENER's conviction nudges the deploy
+      // size up/down, but ALWAYS re-clamped to [deployAmountSol, maxDeployAmount]
+      // — never breaches min/max. Mutating args here means every downstream check
+      // (single-side, exit-liquidity, SOL balance) validates the adjusted amount.
+      if (config.experiments?.convictionSizing) {
+        const originalAmt = Number(args.amount_y ?? args.amount_sol ?? 0);
+        const adjustedAmt = applyConvictionSizing(originalAmt, args.conviction);
+        if (Number.isFinite(adjustedAmt) && adjustedAmt !== originalAmt) {
+          if (args.amount_sol != null) args.amount_sol = adjustedAmt;
+          args.amount_y = adjustedAmt;
+          log(
+            "experiment",
+            `convictionSizing: ${args.conviction || "medium"} conviction → deploy ${originalAmt} → ${adjustedAmt} SOL (clamped to [${config.management.deployAmountSol}, ${config.risk.maxDeployAmount}])`,
+          );
+        }
+      }
 
       // Reject pools with bin_step out of configured range
       const minStep = config.screening.minBinStep;

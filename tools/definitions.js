@@ -199,6 +199,11 @@ WARNING: This executes a real on-chain transaction. Check DRY_RUN mode.`,
             // KEEP IN SYNC with NARRATIVE_CATEGORIES in lessons.js
             enum: ["animal", "ai", "political", "celebrity", "meme", "culture", "tech_utility", "other"],
             description: "Optional: classify the token's narrative into ONE bucket for performance learning (animal=dog/cat/frog/etc, ai=AI/agent, political, celebrity=person/influencer, meme=viral moment/internet meme, culture=community/movement/ideology, tech_utility=infra/defi/real use, other). Used only for narrative-profile stats; never affects this deploy."
+          },
+          conviction: {
+            type: "string",
+            enum: ["low", "medium", "high"],
+            description: "Optional: your conviction in THIS setup. Only has an effect when the conviction-sizing experiment is on — high nudges the deploy size up, low nudges it down, both strictly within the configured min/max. medium (or omitted) = no change. Inert otherwise."
           }
         },
         required: ["pool_address"]

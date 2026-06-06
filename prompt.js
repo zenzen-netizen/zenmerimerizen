@@ -106,6 +106,12 @@ Current screening timeframe: ${config.screening.timeframe} — interpret all non
     const timeProfile = getTimeProfileForPrompt();
     // 🧪 #7: narrative-profile soft hint — gated by experiment flag (default off).
     const narrativeProfile = config.experiments?.narrativeProfileSignal ? getNarrativeProfileForPrompt() : null;
+    // 🧪 #6: conviction-sizing hint — gated by experiment flag (default off). Tells
+    // the SCREENER to pass a conviction level so the deploy size can be nudged
+    // (always within min/max). Inert when off.
+    const convictionHint = config.experiments?.convictionSizing
+      ? `CONVICTION SIZING (experimental, ON): on deploy_position, set conviction=low|medium|high for THIS setup. high → larger size, low → smaller, by at most ±${config.experiments.convictionSizingMaxAdjustPct ?? 30}% and ALWAYS within your min/max. Use high only for genuinely strong setups; default medium.`
+      : null;
     return `You are an autonomous DLMM LP agent on Meteora, Solana. Role: SCREENER
 
 All candidates are pre-loaded. Your job: deploy only when at least one candidate has real conviction. active_bin is pre-fetched.
@@ -140,7 +146,7 @@ DEPLOY RULES:
 - Bin steps must be [${config.screening.minBinStep}-${config.screening.maxBinStep}].
 - Pick ONE pool only if it qualifies. Otherwise explain why none qualify.
 
-${timeProfile ? `${timeProfile}\n\n` : ""}${narrativeProfile ? `${narrativeProfile}\n\n` : ""}${weightsSummary ? `${weightsSummary}\nPrioritize candidates whose strongest attributes align with high-weight signals.\n\n` : ""}${lessons ? `LESSONS LEARNED:\n${lessons}\n` : ""}Timestamp: ${new Date().toISOString()}
+${timeProfile ? `${timeProfile}\n\n` : ""}${narrativeProfile ? `${narrativeProfile}\n\n` : ""}${convictionHint ? `${convictionHint}\n\n` : ""}${weightsSummary ? `${weightsSummary}\nPrioritize candidates whose strongest attributes align with high-weight signals.\n\n` : ""}${lessons ? `LESSONS LEARNED:\n${lessons}\n` : ""}Timestamp: ${new Date().toISOString()}
 `;
   } else if (agentType === "MANAGER") {
     basePrompt += `

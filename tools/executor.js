@@ -288,7 +288,25 @@ const toolMap = {
     }
     return { error: "invalid mode" };
   },
-  update_config: ({ changes, reason = "" }) => {
+  update_config: ({ changes, key, value, reason = "" }) => {
+    // Weak models (e.g. Gemini) cannot fill a free-form object param, so they send
+    // empty changes. Accept a flat key/value pair as an alternative and coerce the
+    // value type the same way the /settings input field does.
+    const coerceConfigValue = (v) => {
+      if (typeof v !== "string") return v;
+      const t = v.trim();
+      const lc = t.toLowerCase();
+      if (lc === "true") return true;
+      if (lc === "false") return false;
+      if (lc === "off" || lc === "null") return null;
+      if (t !== "" && Number.isFinite(Number(t))) return Number(t);
+      return v;
+    };
+    if ((!changes || typeof changes !== "object" || Object.keys(changes).length === 0)
+        && typeof key === "string" && key.trim()) {
+      changes = { [key.trim()]: coerceConfigValue(value) };
+    }
+    if (!changes || typeof changes !== "object") changes = {};
     // Flat key → config section mapping (covers everything in config.js)
     const CONFIG_MAP = {
       // screening

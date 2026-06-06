@@ -776,10 +776,16 @@ export function getPerformanceSummary() {
   const avgPnlPct = p.reduce((s, x) => s + x.pnl_pct, 0) / p.length;
   const avgRangeEfficiency = p.reduce((s, x) => s + x.range_efficiency, 0) / p.length;
   const wins = p.filter((x) => x.pnl_usd > 0).length;
+  // All-time ROI as a single % = total PnL over total capital deployed (capital-weighted,
+  // not the average of per-position %). Only counts records that carry initial capital.
+  const totalInvested = p.reduce((s, x) => s + (x.initial_value_usd || 0), 0);
+  const roiPct = totalInvested > 0 ? (totalPnl / totalInvested) * 100 : null;
 
   return {
     total_positions_closed: p.length,
     total_pnl_usd: Math.round(totalPnl * 100) / 100,
+    total_invested_usd: Math.round(totalInvested * 100) / 100,
+    roi_pct: roiPct != null ? Math.round(roiPct * 100) / 100 : null,
     avg_pnl_pct: Math.round(avgPnlPct * 100) / 100,
     avg_range_efficiency_pct: Math.round(avgRangeEfficiency * 10) / 10,
     win_rate_pct: Math.round((wins / p.length) * 100),

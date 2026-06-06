@@ -104,6 +104,7 @@ Opt-in experiments live in `config.experiments` and surface as **GRUP 16 — Eks
 - Code paths must **fail-open** (an error in an experiment never blocks the normal flow).
 - Current experiments:
   - `exitLiquidityCheck` (+ `exitLiquidityMaxSlippagePct`): pre-deploy gate in `runSafetyChecks` (executor.js). Probes round-trip cost via `quoteSellPriceImpact()` (wallet.js, read-only Jupiter quotes) and rejects pools too illiquid to exit. Skipped under `DRY_RUN`.
+  - `marketRegimeGate` (+ `marketRegimeMaxDrop24hPct`): pre-screening gate in `runScreeningCycle` hard-guards (index.js). Reads SOL's 24h change via `getSolMarketRegime()` (wallet.js, read-only Jupiter price v3 `priceChange24h`); when SOL is down more than the limit, skips the whole screening cycle (no LLM call, logs an `appendDecision` skip). Catches scheduled + freed-slot screening (both route through `runScreeningCycle`); manual chat deploys are not gated. Runs under `DRY_RUN` too (read-only). No price history is stored — the 24h delta comes straight from the API.
 
 When adding an experiment: add the flag to `config.experiments` (default false), register in `CONFIG_MAP`, add a row to GRUP 16 in `formatFullConfig()` (index.js), document a GRUP 16 entry in SETTINGS-GUIDE.md, and make the code path fail-open.
 

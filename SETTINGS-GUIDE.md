@@ -1044,6 +1044,42 @@ Matikan (balik pabrik): `set exitLiquidityCheck to false`
 
 ---
 
+### marketRegimeGate
+
+| | |
+|---|---|
+| **Nilai sekarang** | `false` |
+| **Default** | `false` |
+| **Format** | `true` atau `false` |
+| **Status** | 🧪 EKSPERIMEN |
+| **Penjelasan** | Sebelum screening jalan, bot baca perubahan harga SOL 24 jam terakhir (Jupiter price, TANPA transaksi). Kalau SOL turun lebih dari batas → pasar dianggap "risk-off" dan **seluruh siklus screening di-skip** (nggak panggil LLM, nggak ada deploy baru). Ide: jangan buka posisi LP baru pas pasar lagi jeblok. OFF = nggak ngecek regime (pabrik) |
+| **Catatan** | Berlaku untuk screening terjadwal **dan** yang dipicu slot kosong (freed-slot). Deploy manual lewat chat TIDAK digerbang (itu override-mu). Kalau fetch harga gagal, screening tetap jalan (fail-open). Berjalan juga saat `DRY_RUN` (read-only, biar bisa kelihatan efeknya) |
+
+---
+
+### marketRegimeMaxDrop24hPct
+
+| | |
+|---|---|
+| **Nilai sekarang** | `8` |
+| **Default** | `8` |
+| **Format** | Angka positif (persen) |
+| **Opsi** | `3` – `30` |
+| **Status** | 🧪 EKSPERIMEN |
+| **Penjelasan** | Ambang penurunan SOL 24 jam. Kalau `priceChange24h` SOL lebih negatif dari `-batas%` → risk-off, screening di-skip. Cuma kepakai kalau `marketRegimeGate = true` |
+| **Tips** | Kalibrasi dari log `marketRegimeGate: SOL X% (24h)`. `8` = cukup konservatif (skip cuma pas dump beneran). Turunin ke `5` kalau mau lebih hati-hati, naikin ke `12–15` kalau cuma mau hindari crash besar |
+
+**Contoh nyalakan:**
+
+```
+set marketRegimeGate to true
+set marketRegimeMaxDrop24hPct to 8
+```
+
+Matikan (balik pabrik): `set marketRegimeGate to false`
+
+---
+
 ---
 
 # CATATAN — GMGN & DUA SISTEM INDIKATOR

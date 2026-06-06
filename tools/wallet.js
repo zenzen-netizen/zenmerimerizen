@@ -178,6 +178,37 @@ export async function quoteSellPriceImpact({ baseMint, solNotional }) {
   return { roundTripLossPct, impactPct, baseAmount, outSol: outLamports / 1e9 };
 }
 
+/**
+ * Read SOL's current price and 24h change from Jupiter Price v3 (read-only,
+ * single GET). Used by the 🧪 market-regime gate to decide whether the market
+ * is "risk-off" before screening for new positions. No history is stored —
+ * the 24h change comes straight from the API.
+ *
+ * Returns { usdPrice, change24hPct, liquidity } on success, or null on any
+ * error / missing field so callers can fail-open (never block on a hiccup).
+ */
+export async function getSolMarketRegime() {
+  try {
+    const key = getJupiterApiKey();
+    const res = await fetch(`${JUPITER_PRICE_API}?ids=${SOL_MINT}`, {
+      headers: key ? { "x-api-key": key } : {},
+    });
+    if (!res.ok) throw new Error(`price ${res.status}`);
+    const data = await res.json();
+    const entry = data?.[SOL_MINT];
+    const change24hPct = Number(entry?.priceChange24h);
+    if (!entry || !Number.isFinite(change24hPct)) return null;
+    return {
+      usdPrice: Number(entry.usdPrice) || null,
+      change24hPct,
+      liquidity: Number(entry.liquidity) || null,
+    };
+  } catch (e) {
+    log("wallet_error", `getSolMarketRegime failed: ${e.message}`);
+    return null;
+  }
+}
+
 // Normalize any SOL-like address to the correct wrapped SOL mint
 export function normalizeMint(mint) {
   if (!mint) return mint;

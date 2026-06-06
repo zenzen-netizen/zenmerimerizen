@@ -311,8 +311,8 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
       }
       sawToolCall = true;
 
-      // Execute each tool call in parallel
-      const toolResults = await Promise.all(msg.tool_calls.map(async (toolCall) => {
+      // Run one tool call, returning the JSON content string for its tool message.
+      const runToolCall = async (toolCall) => {
         const functionName = toolCall.function.name.replace(/<.*$/, "").trim();
         let functionArgs;
 
@@ -331,18 +331,9 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
         // Block once-per-session tools from firing a second time
         if (ONCE_PER_SESSION.has(functionName) && firedOnce.has(functionName)) {
           log("agent", `Blocked duplicate ${functionName} call — already executed this session`);
-          await onToolFinish?.({
-            name: functionName,
-            args: functionArgs,
-            result: { blocked: true, reason: `${functionName} already attempted this session — do not retry. If it failed, report the error and stop.` },
-            success: false,
-            step,
-          });
-          return {
-            role: "tool",
-            tool_call_id: toolCall.id,
-            content: JSON.stringify({ blocked: true, reason: `${functionName} already attempted this session — do not retry. If it failed, report the error and stop.` }),
-          };
+          const blocked = { blocked: true, reason: `${functionName} already attempted this session — do not retry. If it failed, report the error and stop.` };
+          await onToolFinish?.({ name: functionName, args: functionArgs, result: blocked, success: false, step });
+          return JSON.stringify(blocked);
         }
 
         if (interactive && onConfirmRequired && CHAT_CONFIRM_TOOLS.has(functionName)) {
@@ -350,11 +341,7 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
           if (!confirmed) {
             const cancelResult = { success: false, cancelled: true, reason: "User cancelled the action." };
             await onToolFinish?.({ name: functionName, args: functionArgs, result: cancelResult, success: false, step });
-            return {
-              role: "tool",
-              tool_call_id: toolCall.id,
-              content: JSON.stringify(cancelResult),
-            };
+            return JSON.stringify(cancelResult);
           }
         }
 
@@ -373,10 +360,22 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
         if (NO_RETRY_TOOLS.has(functionName)) firedOnce.add(functionName);
         else if (ONCE_PER_SESSION.has(functionName) && result.success === true) firedOnce.add(functionName);
 
+        return JSON.stringify(result);
+      };
+
+      // Deduplicate identical tool calls within one turn. Weak models sometimes emit
+      // the same call hundreds of times in a single message (observed: 300+ identical
+      // update_config calls); executing each would re-run the action, spam confirmation
+      // prompts, and stack writes. The API still needs a tool message per tool_call_id,
+      // so we execute once per unique signature and fan the same result back to each id.
+      const execCache = new Map(); // signature -> Promise<contentString>
+      const toolResults = await Promise.all(msg.tool_calls.map(async (toolCall) => {
+        const signature = `${toolCall.function.name}|${toolCall.function.arguments}`;
+        if (!execCache.has(signature)) execCache.set(signature, runToolCall(toolCall));
         return {
           role: "tool",
           tool_call_id: toolCall.id,
-          content: JSON.stringify(result),
+          content: await execCache.get(signature),
         };
       }));
 

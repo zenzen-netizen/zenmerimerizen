@@ -26,6 +26,7 @@ import {
   createLiveMessage,
 } from "./telegram.js";
 import { generateBriefing } from "./briefing.js";
+import { renderGuide } from "./guide.js";
 import { getLastBriefingDate, setLastBriefingDate, getTrackedPosition, getTrackedPositions, setPositionInstruction, updatePnlAndCheckExits, queuePeakConfirmation, resolvePendingPeak, queueTrailingDropConfirmation, resolvePendingTrailingDrop } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
 import { recordPositionSnapshot, recallForPool, addPoolNote } from "./pool-memory.js";
@@ -1787,6 +1788,7 @@ function formatHelpText() {
     "Telegram commands",
     "",
     "/help — show commands",
+    "/guide — panduan setting (TOC); /guide <no|katakunci|all>",
     "/status — wallet + positions snapshot",
     "/wallet — wallet, deploy amount, HiveMind status",
     "/positions — list open positions",
@@ -1958,6 +1960,11 @@ async function telegramHandler(msg) {
   }
   if (text === "/settings" || text === "/menu" || text === "/configmenu") {
     await showSettingsMenu().catch((e) => sendMessage(`Settings error: ${e.message}`).catch(() => {}));
+    return;
+  }
+  if (text === "/guide" || text.startsWith("/guide ")) {
+    // Pure file read — answer instantly even while the agent is busy.
+    await sendMessage(renderGuide(text.slice(6))).catch(() => {});
     return;
   }
   if (_managementBusy || _screeningBusy || busy) {
@@ -2366,6 +2373,7 @@ Commands:
   /status        Refresh wallet + positions
   /candidates    Refresh top pool list
   /briefing      Show morning briefing (last 24h)
+  /guide         Panduan setting (TOC) — /guide <no|katakunci|all>
   /learn         Study top LPers from the best current pool and save lessons
   /learn <addr>  Study top LPers from a specific pool address
   /thresholds    Show current screening thresholds + performance stats
@@ -2443,6 +2451,12 @@ Commands:
         const briefing = await generateBriefing();
         console.log(`\n${briefing.replace(/<[^>]*>/g, "")}\n`);
       });
+      return;
+    }
+
+    if (input === "/guide" || input.startsWith("/guide ")) {
+      console.log(`\n${renderGuide(input.slice(6))}\n`);
+      rl.prompt();
       return;
     }
 

@@ -391,7 +391,7 @@ GMGN (persisted to gmgn-config.json): gmgnApiKey, gmgnBaseUrl, gmgnInterval, gmg
 Management: minClaimAmount, autoSwapAfterClaim, outOfRangeBinsToClose, outOfRangeWaitMinutes, oorCooldownTriggerCount, oorCooldownHours, repeatDeployCooldownEnabled, repeatDeployCooldownTriggerCount, repeatDeployCooldownHours, repeatDeployCooldownScope, repeatDeployCooldownMinFeeEarnedPct, minVolumeToRebalance, stopLossPct, takeProfitPct, takeProfitFeePct, trailingTakeProfit, trailingTriggerPct, trailingDropPct, pnlSanityMaxDiffPct, solMode, minSolToOpen, deployAmountSol, gasReserve, positionSizePct, minAgeBeforeYieldCheck
 Risk: maxPositions, maxDeployAmount
 Schedule: managementIntervalMin, screeningIntervalMin, healthCheckIntervalMin
-Models: managementModel, screeningModel, generalModel, temperature, maxTokens, maxSteps
+Models: managementModel, screeningModel, generalModel, temperature, maxTokens, generalMaxTokens, maxSteps
 Strategy: strategy, binsBelow, minBinsBelow, maxBinsBelow, defaultBinsBelow
 Hive/API: hiveMindUrl, hiveMindApiKey, agentId, hiveMindPullMode, publicApiKey, agentMeridianApiUrl, lpAgentRelayEnabled
 Indicators: chartIndicatorsEnabled, indicatorEntryPreset, indicatorExitPreset, rsiLength, indicatorIntervals, indicatorCandles, rsiOversold, rsiOverbought, requireAllIntervals

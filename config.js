@@ -331,6 +331,12 @@ export const config = {
     // retention). When on, candidate snapshots are recorded even if #1 is off.
     counterfactualReview:        u.counterfactualReview        ?? false,
     counterfactualMinMcapGainPct: u.counterfactualMinMcapGainPct ?? 25,
+    // Smart-wallet momentum — track each candidate's smart-wallet count across
+    // cycles (sw_snaps in candidate-memory) and add a soft line to the SCREENER's
+    // candidate block when it moves: smart money entering = bullish, leaving =
+    // bearish. Trusted (our own count), soft — never gates. Snapshots accrue only
+    // when on; piggybacks on the candidate-memory store.
+    smartWalletMomentum:         u.smartWalletMomentum         ?? false,
   },
 };
 

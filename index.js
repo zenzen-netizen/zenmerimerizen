@@ -30,7 +30,7 @@ import { renderGuide } from "./guide.js";
 import { getLastBriefingDate, setLastBriefingDate, getTrackedPosition, getTrackedPositions, setPositionInstruction, updatePnlAndCheckExits, queuePeakConfirmation, resolvePendingPeak, queueTrailingDropConfirmation, resolvePendingTrailingDrop } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
 import { recordPositionSnapshot, recallForPool, addPoolNote } from "./pool-memory.js";
-import { recordCandidateSnapshots, getCandidateMomentum, formatCandidateMomentum } from "./candidate-memory.js";
+import { recordCandidateSnapshots, getCandidateMomentum, formatCandidateMomentum, recordSmartWalletCounts, getSmartWalletMomentum, formatSmartWalletMomentum } from "./candidate-memory.js";
 import { checkSmartWalletsOnPool } from "./smart-wallets.js";
 import { getTokenNarrative, getTokenInfo } from "./tools/token.js";
 import { stageSignals } from "./signal-tracker.js";
@@ -487,7 +487,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
     // both need this cycle's candidate snapshots, so record when EITHER is on.
     // OFF by default → skipped (factory behavior). Fail-open: a snapshot hiccup
     // must never derail screening.
-    if (config.experiments?.candidateMomentum || config.experiments?.counterfactualReview) {
+    if (config.experiments?.candidateMomentum || config.experiments?.counterfactualReview || config.experiments?.smartWalletMomentum) {
       try {
         recordCandidateSnapshots(candidates);
       } catch (e) {
@@ -602,6 +602,20 @@ export async function runScreeningCycle({ silent = false } = {}) {
       }
     }
 
+    // 🧪 Smart-wallet momentum: record this cycle's smart-wallet count per passing
+    // candidate (sw is known here). OFF by default → skipped. Fail-open.
+    if (config.experiments?.smartWalletMomentum) {
+      try {
+        recordSmartWalletCounts(passing.map(({ pool, sw }) => ({
+          addr: pool.pool,
+          name: pool.name,
+          sw_count: sw?.in_pool?.length ?? 0,
+        })));
+      } catch (e) {
+        log("experiment", `smartWalletMomentum record failed — continuing (fail-open): ${e.message}`);
+      }
+    }
+
     // Pre-fetch active_bin for all passing candidates in parallel
     const activeBinResults = await Promise.allSettled(
       passing.map(({ pool }) => getActiveBin({ pool_address: pool.pool }))
@@ -644,6 +658,16 @@ export async function runScreeningCycle({ silent = false } = {}) {
         } catch { /* fail-open — omit the line */ }
       }
 
+      // 🧪 Smart-wallet momentum: soft, trusted line — smart money entering/leaving
+      // this pool across cycles. OFF by default → stays null and drops out. Fail-open.
+      let swMomentumLine = null;
+      if (config.experiments?.smartWalletMomentum) {
+        try {
+          const txt = formatSmartWalletMomentum(getSmartWalletMomentum(pool.pool));
+          if (txt) swMomentumLine = `  sw_momentum: ${txt}`;
+        } catch { /* fail-open — omit the line */ }
+      }
+
       // OKX signals
       const okxParts = [
         pool.risk_level     != null ? `risk=${pool.risk_level}`               : null,
@@ -676,6 +700,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
           activeBin != null ? `  active_bin: ${activeBin}` : null,
           momentumLine,
           yieldLine,
+          swMomentumLine,
           n?.narrative ? `  narrative_untrusted: ${sanitizeUntrustedPromptText(n.narrative, 500)}` : `  narrative_untrusted: none`,
           mem ? `  memory_untrusted: ${sanitizeUntrustedPromptText(mem, 500)}` : null,
         ].filter(Boolean).join("\n");
@@ -697,6 +722,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
           priceChange != null ? `  1h: price${priceChange >= 0 ? "+" : ""}${priceChange}%, net_buyers=${netBuyers ?? "?"}` : null,
           momentumLine,
           yieldLine,
+          swMomentumLine,
           n?.narrative ? `  narrative_untrusted: ${sanitizeUntrustedPromptText(n.narrative, 500)}` : `  narrative_untrusted: none`,
           mem ? `  memory_untrusted: ${sanitizeUntrustedPromptText(mem, 500)}` : null,
         ].filter(Boolean).join("\n");
@@ -1390,6 +1416,7 @@ export function formatFullConfig() {
       ["convictionSizingMaxAdjustPct", fmt(c.experiments?.convictionSizingMaxAdjustPct)],
       ["counterfactualReview", fmt(c.experiments?.counterfactualReview)],
       ["counterfactualMinMcapGainPct", fmt(c.experiments?.counterfactualMinMcapGainPct)],
+      ["smartWalletMomentum", fmt(c.experiments?.smartWalletMomentum)],
     ]),
     group(`━ GMGN — ${gmgnActive ? "AKTIF (source=gmgn)" : `tidak aktif (source=${c.screening.source}, blok ini diabaikan)`}`, [
       ["interval", fmt(c.gmgn.interval)],

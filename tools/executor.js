@@ -466,6 +466,7 @@ const toolMap = {
       convictionSizingMaxAdjustPct: ["experiments", "convictionSizingMaxAdjustPct"],
       counterfactualReview: ["experiments", "counterfactualReview"],
       counterfactualMinMcapGainPct: ["experiments", "counterfactualMinMcapGainPct"],
+      smartWalletMomentum: ["experiments", "smartWalletMomentum"],
     };
 
     const applied = {};

@@ -192,13 +192,17 @@ function buildTimeProfileSection() {
   const prof = getHourlyProfile();
   if (!prof || prof.total_with_open_time < prof.min_samples) return null;
 
-  const lines = [`🕒 <b>Best Open Hours (WIB)</b> — overall win ${prof.overall_win_rate_pct}%`];
+  const fmtHold = (m) => (m == null ? null : m >= 60 ? `${(m / 60).toFixed(1)}h` : `${m}m`);
+  const overallHold = fmtHold(prof.overall_avg_hold_min);
+  const header = `🕒 <b>Best Open Hours (WIB)</b> — overall win ${prof.overall_win_rate_pct}%${overallHold ? `, avg hold ${overallHold}` : ""}`;
+  const lines = [header];
   const rated = prof.sessions.filter((s) => s.count > 0);
   if (rated.length === 0) return null;
   for (const s of rated) {
     const enough = s.count >= prof.min_samples;
     const tag = !enough ? " <i>(few samples)</i>" : "";
-    lines.push(`  • ${esc(s.label)}: ${s.win_rate_pct}% win, avg ${s.avg_pnl_pct >= 0 ? "+" : ""}${s.avg_pnl_pct}% (${s.count})${tag}`);
+    const hold = fmtHold(s.avg_hold_min);
+    lines.push(`  • ${esc(s.label)}: ${s.win_rate_pct}% win, avg ${s.avg_pnl_pct >= 0 ? "+" : ""}${s.avg_pnl_pct}% (${s.count})${hold ? `, hold ${hold}` : ""}${tag}`);
   }
   return lines.join("\n");
 }
@@ -257,7 +261,7 @@ export async function generateBriefing() {
     `<b>Current Portfolio:</b>`,
     `📂 Open Positions: ${openPositions.length}`,
     perfSummary
-      ? `📊 All-time PnL: $${perfSummary.total_pnl_usd.toFixed(2)} (${perfSummary.win_rate_pct}% win)`
+      ? `📊 All-time PnL: $${perfSummary.total_pnl_usd.toFixed(2)}${perfSummary.roi_pct != null ? ` (${perfSummary.roi_pct >= 0 ? "+" : ""}${perfSummary.roi_pct}%)` : ""} | ${perfSummary.win_rate_pct}% win over ${perfSummary.total_positions_closed} closed`
       : "",
     "",
     buildLlmCostSection(costData, balance, credits, totalPnLUsd) || "",

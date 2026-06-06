@@ -18,11 +18,16 @@ Bot membaca ulang sebagian setting otomatis. Untuk perubahan jadwal/model/risk �
 ```
 set minOrganic to 80
 update config maxPositions 3
+ubah min age token ke 3 jam
 ```
-LLM akan memanggil `update_config` dan perubahan langsung berlaku tanpa restart.
+LLM memanggil `update_config`, lalu bot kirim tombol konfirmasi **✅ Ya / ❌ Batal** (expired 30 detik). Setelah dikonfirmasi, perubahan berlaku langsung tanpa restart. Satu setting bisa dikirim sebagai pasangan `key`/`value` (mis. `key="minTokenAgeHours"`, `value="3"`) — ini yang dipakai model ringan; banyak setting sekaligus pakai objek `changes`.
 
 **Opsi 3 — Lewat menu Telegram:**
 Ketik `/settings` di Telegram → ada tombol untuk setting yang paling sering diubah.
+
+**Lihat config saat ini:**
+- `/config` → tampilkan **seluruh** config runtime, dikelompokkan sama persis dengan grup di panduan ini (GRUP 1–15 + blok GMGN). Nilainya dibaca langsung dari config bot yang sedang jalan (real-time), bukan dari file panduan ini.
+- `/status` → snapshot wallet + posisi + all-time PnL.
 
 ---
 
@@ -394,6 +399,8 @@ config.js            ← Bot membaca semua file di atas (JANGAN EDIT)
 | **Format** | String |
 | **Opsi** | `"meteora"` atau `"gmgn"` |
 | **Penjelasan** | Dari mana bot cari pool. `meteora` = API resmi Meteora. `gmgn` = platform GMGN (butuh API key di gmgn-config.json) |
+
+> ⚠️ **Penting — blok GMGN itu kondisional.** Seluruh setting GMGN (semua yang muncul di blok `━ GMGN` pada `/config`: `interval`, `requireKol`, `maxBundlerRate`, `indicatorFilter`, `indicatorInterval`, `rules.*`, dll) **HANYA aktif saat `screeningSource = "gmgn"`**. Selama source = `"meteora"` (default sekarang), semua setting GMGN **diabaikan total** — boleh saja terisi, tapi tidak memengaruhi screening apa pun. Sebaliknya, filter GRUP 6 & 7 di atas adalah jalur **Meteora**. Detail lengkap + soal indikator: lihat bagian **CATATAN — GMGN & DUA SISTEM INDIKATOR** di bawah.
 
 ---
 
@@ -993,6 +1000,30 @@ config.js            ← Bot membaca semua file di atas (JANGAN EDIT)
 
 ---
 
+# CATATAN — GMGN & DUA SISTEM INDIKATOR
+
+> Bagian ini menjawab kebingungan umum: "blok GMGN di `/config` itu semua kepakai atau tidak?"
+
+### 1. Blok GMGN hanya jalan saat source = gmgn
+Semua setting GMGN (yang muncul di blok `━ GMGN` pada `/config`, disimpan di `gmgn-config.json` / `config.gmgn`) **cuma dipakai kalau `screeningSource = "gmgn"`**. Pool GMGN ditemukan lewat jalur `discoverGmgnPools`, dan di situlah filter seperti `requireKol`, `minKolCount`, `maxBundlerRate`, `maxRugRatio`, `maxSniperCount`, dst diterapkan.
+
+Saat `screeningSource = "meteora"` (default), jalur yang jalan adalah `discoverPools` (Meteora) + filter **GRUP 6 & 7**. **Tidak satu pun** setting GMGN ikut bekerja — nilainya tersimpan tapi tidur. Jadi tidak perlu pusing menyetel blok GMGN selama kamu pakai Meteora. Header blok di `/config` ikut menandai: `tidak aktif (source=meteora, blok ini diabaikan)` vs `AKTIF (source=gmgn)`.
+
+### 2. Ada DUA sistem indikator yang berbeda — jangan tertukar
+
+| | **GRUP 13 — `chartIndicators`** | **Indikator GMGN — `gmgn.indicatorFilter` + `rules.*`** |
+|---|---|---|
+| Disetel di | `config.indicators` (GRUP 13) | blok GMGN (`config.gmgn`) |
+| Kapan jalan | Konfirmasi **setelah** discovery, jalur **UMUM** — berlaku di kedua source (meteora & gmgn) | **Saat** discovery GMGN — **hanya** source = gmgn |
+| Gerbang on/off | `chartIndicators.enabled` | `gmgn.indicatorFilter` (default on; set off → seluruh `indicatorInterval` + `rules.*` GMGN dilewati) |
+| Wajib? | Tidak — kalau `enabled = off`, tidak ada konfirmasi indikator sama sekali | Tidak — opsional, dan cuma relevan di mode gmgn |
+
+**Ringkasnya:** setting indikator GMGN (`indicatorFilter`, `indicatorInterval`, `rules.requireBullishSupertrend`, dll) **tidak harus** kamu isi. Mereka hanya berpengaruh kalau (a) `screeningSource = gmgn` **dan** (b) `gmgn.indicatorFilter = on`. Untuk mode Meteora, yang menentukan konfirmasi indikator adalah **GRUP 13 chartIndicators**, bukan setting GMGN.
+
+---
+
+---
+
 # SETTING DI FILE `.env` (Kunci Rahasia)
 
 > File `.env` TIDAK boleh di-commit ke GitHub. Isi satu kali saat setup.
@@ -1047,8 +1078,10 @@ update config deployAmountSol 0.2
 
 > `adaptiveScreening` & `maxScreeningIntervalMin` juga ada tombolnya di `/settings` → halaman **screen**.
 
-Bot akan konfirmasi perubahan dan berlaku langsung tanpa restart.
+Bot kirim tombol konfirmasi ✅ Ya / ❌ Batal (expired 30 detik); setelah dikonfirmasi berlaku langsung tanpa restart.
+
+**Lihat semua config:** ketik `/config` → seluruh setting dikelompokkan per grup (real-time dari bot). `/status` untuk wallet + posisi + all-time PnL.
 
 ---
 
-*Terakhir diperbarui: 5 Juni 2026 | Branch: experimental*
+*Terakhir diperbarui: 6 Juni 2026 | Branch: experimental*

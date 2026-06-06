@@ -1266,6 +1266,7 @@ export function formatFullConfig() {
       ["generalModel", fmt(c.llm.generalModel)],
       ["temperature", fmt(c.llm.temperature)],
       ["maxTokens", fmt(c.llm.maxTokens)],
+      ["generalMaxTokens", fmt(c.llm.generalMaxTokens)],
       ["maxSteps", fmt(c.llm.maxSteps)],
     ]),
     group("━ GRUP 12 — Darwin (Bobot Sinyal)", [

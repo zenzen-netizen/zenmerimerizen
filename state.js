@@ -70,6 +70,7 @@ function makePositionRecord({
   organic_score,
   initial_value_usd,
   signal_snapshot = null,
+  narrative_category = null,
   deployed_at,
 }) {
   return {
@@ -87,6 +88,7 @@ function makePositionRecord({
     initial_fee_tvl_24h: fee_tvl_ratio,
     organic_score,
     initial_value_usd,
+    narrative_category: narrative_category || null,
     signal_snapshot: signal_snapshot || null,
     deployed_at: deployed_at || new Date().toISOString(),
     out_of_range_since: null,

@@ -47,6 +47,15 @@ const SESSIONS = [
 // decision (prompt nudge or interval throttle). Below this = treat as neutral.
 const MIN_SESSION_SAMPLES = 8;
 
+// Controlled vocabulary for the 🧪 narrative-profile experiment (#7). The
+// SCREENER tags each deploy with one of these so closed-position performance can
+// be bucketed by narrative type. KEEP IN SYNC with the deploy_position
+// narrative_category enum in tools/definitions.js.
+export const NARRATIVE_CATEGORIES = ["animal", "ai", "political", "celebrity", "meme", "culture", "tech_utility", "other"];
+// Min closed samples before a narrative bucket may steer the prompt. Same idea
+// as MIN_SESSION_SAMPLES — below this, treat the bucket as neutral/insufficient.
+const MIN_NARRATIVE_SAMPLES = 8;
+
 /** Hour-of-day (0–23) in WIB for an ISO timestamp, or null if unparseable. */
 function wibHour(iso) {
   if (!iso) return null;
@@ -895,4 +904,92 @@ export function getTimeProfileForPrompt() {
     ? ` Avg holding time ${fmtHoldMin(s.avg_hold_min)}.`
     : (prof.overall_avg_hold_min != null ? ` Avg holding time ${fmtHoldMin(prof.overall_avg_hold_min)} (overall).` : "");
   return `TIME-OF-DAY (WIB): current session ${cur.label} — win ${s.win_rate_pct}%, avg PnL ${s.avg_pnl_pct}% over ${s.count} deploys (overall ${prof.overall_win_rate_pct}%).${holdNote} ${verdict}`;
+}
+
+// ─── Narrative Profile (🧪 #7) ─────────────────────────────────
+
+/**
+ * Bucket closed positions by their narrative_category (tagged at deploy by the
+ * SCREENER) and report win-rate / avg-PnL per category. Mirrors getHourlyProfile.
+ * Only records that carry a known category are counted, so this is empty until
+ * tagged data accrues.
+ *
+ * Tool handler: get_narrative_profile
+ */
+export function getNarrativeProfile() {
+  const data = load();
+  const perf = (data.performance || []).filter(
+    (p) => NARRATIVE_CATEGORIES.includes(p.narrative_category) && isFiniteNum(p.pnl_pct)
+  );
+
+  const buckets = {};
+  for (const c of NARRATIVE_CATEGORIES) buckets[c] = { wins: 0, count: 0, pnlSum: 0 };
+  for (const p of perf) {
+    const b = buckets[p.narrative_category];
+    if (!b) continue;
+    b.count++;
+    if (p.pnl_pct > 0) b.wins++;
+    b.pnlSum += p.pnl_pct;
+  }
+
+  const total = perf.length;
+  const overallWins = perf.filter((p) => p.pnl_pct > 0).length;
+  const overallWinRate = total > 0 ? Math.round((overallWins / total) * 100) : null;
+
+  const categories = NARRATIVE_CATEGORIES
+    .map((c) => {
+      const b = buckets[c];
+      return {
+        category: c,
+        count: b.count,
+        win_rate_pct: b.count > 0 ? Math.round((b.wins / b.count) * 100) : null,
+        avg_pnl_pct: b.count > 0 ? Math.round((b.pnlSum / b.count) * 100) / 100 : null,
+      };
+    })
+    .filter((c) => c.count > 0)
+    .sort((a, b) => (b.avg_pnl_pct ?? 0) - (a.avg_pnl_pct ?? 0));
+
+  return {
+    min_samples: MIN_NARRATIVE_SAMPLES,
+    total_with_category: total,
+    overall_win_rate_pct: overallWinRate,
+    categories,
+  };
+}
+
+/**
+ * Classify a narrative category's historical strength. Same rule as
+ * classifySession: "weak" = enough samples AND clearly below baseline
+ * (win-rate ≥15pp under overall AND negative avg PnL).
+ * @returns {"weak" | "ok" | "insufficient"}
+ */
+export function classifyNarrative(category) {
+  const prof = getNarrativeProfile();
+  if (prof.overall_win_rate_pct == null) return "insufficient";
+  const c = prof.categories.find((x) => x.category === category);
+  if (!c || c.count < MIN_NARRATIVE_SAMPLES) return "insufficient";
+  const weak = c.win_rate_pct < prof.overall_win_rate_pct - 15 && (c.avg_pnl_pct ?? 0) < 0;
+  return weak ? "weak" : "ok";
+}
+
+/**
+ * One-line narrative note for the SCREENER prompt (gated by the experiment flag
+ * at the call site). Lists the best and worst narrative buckets that have enough
+ * samples. Returns null when there isn't enough tagged data, so we never nudge on
+ * noise. Good-to-have signal only — must never override hard screening rules.
+ */
+export function getNarrativeProfileForPrompt() {
+  const prof = getNarrativeProfile();
+  if (prof.total_with_category < MIN_NARRATIVE_SAMPLES) return null;
+
+  const ranked = prof.categories.filter((c) => c.count >= MIN_NARRATIVE_SAMPLES);
+  if (ranked.length === 0) return null;
+
+  const best = ranked[0];
+  const worst = ranked[ranked.length - 1];
+  const fmt = (c) => `${c.category} (win ${c.win_rate_pct}%, avg ${c.avg_pnl_pct}%, n=${c.count})`;
+  const parts = [`NARRATIVE PROFILE: best ${fmt(best)}`];
+  if (worst.category !== best.category) parts.push(`weakest ${fmt(worst)}`);
+  parts.push(`overall ${prof.overall_win_rate_pct}%. Good-to-have signal — favor stronger narratives, NEVER overrides hard rules.`);
+  return parts.join(" | ");
 }

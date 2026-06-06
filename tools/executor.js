@@ -11,7 +11,7 @@ import {
 } from "./dlmm.js";
 import { getWalletBalances, swapToken, quoteSellPriceImpact } from "./wallet.js";
 import { studyTopLPers } from "./study.js";
-import { addLesson, clearAllLessons, clearPerformance, removeLessonsByKeyword, getPerformanceHistory, getHourlyProfile, pinLesson, unpinLesson, listLessons } from "../lessons.js";
+import { addLesson, clearAllLessons, clearPerformance, removeLessonsByKeyword, getPerformanceHistory, getHourlyProfile, getNarrativeProfile, pinLesson, unpinLesson, listLessons } from "../lessons.js";
 import { setPositionInstruction } from "../state.js";
 
 import { getPoolMemory, addPoolNote } from "../pool-memory.js";
@@ -248,6 +248,7 @@ const toolMap = {
   },
   get_performance_history: getPerformanceHistory,
   get_time_profile: () => getHourlyProfile(),
+  get_narrative_profile: () => getNarrativeProfile(),
   get_recent_decisions: ({ limit } = {}) => ({ decisions: getRecentDecisions(limit || 6) }),
   add_strategy:        addStrategy,
   list_strategies:     listStrategies,
@@ -459,6 +460,7 @@ const toolMap = {
       marketRegimeGate: ["experiments", "marketRegimeGate"],
       marketRegimeMaxDrop24hPct: ["experiments", "marketRegimeMaxDrop24hPct"],
       candidateMomentum: ["experiments", "candidateMomentum"],
+      narrativeProfileSignal: ["experiments", "narrativeProfileSignal"],
     };
 
     const applied = {};

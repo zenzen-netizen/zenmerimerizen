@@ -193,7 +193,13 @@ WARNING: This executes a real on-chain transaction. Check DRY_RUN mode.`,
           volatility: { type: "number", description: "Pool volatility at deploy time, sourced from max(screening timeframe, 30m)" },
           fee_tvl_ratio: { type: "number", description: "fee/TVL ratio at deploy time" },
           organic_score: { type: "number", description: "Base token organic score at deploy time" },
-          initial_value_usd: { type: "number", description: "Estimated USD value being deployed" }
+          initial_value_usd: { type: "number", description: "Estimated USD value being deployed" },
+          narrative_category: {
+            type: "string",
+            // KEEP IN SYNC with NARRATIVE_CATEGORIES in lessons.js
+            enum: ["animal", "ai", "political", "celebrity", "meme", "culture", "tech_utility", "other"],
+            description: "Optional: classify the token's narrative into ONE bucket for performance learning (animal=dog/cat/frog/etc, ai=AI/agent, political, celebrity=person/influencer, meme=viral moment/internet meme, culture=community/movement/ideology, tech_utility=infra/defi/real use, other). Used only for narrative-profile stats; never affects this deploy."
+          }
         },
         required: ["pool_address"]
       }
@@ -984,6 +990,20 @@ Returns individual closed positions with PnL, fees, strategy, hold time, and clo
       description: `Show historical performance bucketed by the WIB (UTC+7) session a position was OPENED in.
 Use to see which times of day your deploys have worked best, or before deciding whether the current session is a good time to open.
 Returns per-session win-rate, avg PnL, and sample count. This is a reference/good-to-have signal — it never overrides hard screening rules. Sessions with fewer than the min sample count are not yet reliable.`,
+      parameters: {
+        type: "object",
+        properties: {}
+      }
+    }
+  },
+
+  {
+    type: "function",
+    function: {
+      name: "get_narrative_profile",
+      description: `Show historical performance bucketed by the token NARRATIVE CATEGORY a position was tagged with at deploy (animal, ai, political, celebrity, meme, culture, tech_utility, other).
+Use to see which narrative types have actually made money for you. Returns per-category win-rate, avg PnL, and sample count, sorted best-first.
+Reference/good-to-have signal only — it never overrides hard screening rules. Categories with fewer than the min sample count are not yet reliable.`,
       parameters: {
         type: "object",
         properties: {}

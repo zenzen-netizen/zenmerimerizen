@@ -615,6 +615,7 @@ export async function deployPosition({
   fee_tvl_ratio,
   organic_score,
   initial_value_usd,
+  narrative_category, // 🧪 #7: optional narrative bucket for performance learning
 }) {
   pool_address = normalizeMint(pool_address);
   const activeStrategy = strategy || config.strategy.strategy;
@@ -851,6 +852,7 @@ export async function deployPosition({
           amount_x: finalAmountX,
           active_bin: activeBin.binId,
           initial_value_usd,
+          narrative_category,
           signal_snapshot: signalSnapshot,
         });
       }
@@ -989,6 +991,7 @@ export async function deployPosition({
       amount_x: finalAmountX,
       active_bin: activeBin.binId,
       initial_value_usd,
+      narrative_category,
       signal_snapshot: signalSnapshot,
     });
 
@@ -1829,6 +1832,7 @@ export async function closePosition({ position_address, reason }) {
             organic_score: tracked.organic_score || null,
             amount_sol: tracked.amount_sol,
             deployed_at: tracked.deployed_at || null,
+            narrative_category: tracked.narrative_category || null,
             fees_earned_usd: feesUsd,
             final_value_usd: finalValueUsd,
             initial_value_usd: initialUsd,
@@ -2120,6 +2124,7 @@ export async function closePosition({ position_address, reason }) {
         organic_score: tracked.organic_score || null,
         amount_sol: tracked.amount_sol,
         deployed_at: tracked.deployed_at || null,
+        narrative_category: tracked.narrative_category || null,
         fees_earned_usd: feesUsd,
         final_value_usd: finalValueUsd,
         initial_value_usd: initialUsd,

@@ -307,6 +307,11 @@ export const config = {
     // block with the delta over the retained window. Soft signal only — surfaces
     // pools that are gaining vs fading; never gates a deploy on its own.
     candidateMomentum:           u.candidateMomentum           ?? false,
+    // #7 Narrative profile signal — bucket closed-position performance by the
+    // narrative_category tagged at deploy and inject a soft one-line hint into the
+    // SCREENER prompt (best/weakest narratives). Tagging is collected passively;
+    // this flag only gates the prompt nudge. Never overrides hard rules.
+    narrativeProfileSignal:      u.narrativeProfileSignal      ?? false,
   },
 };
 

@@ -1160,6 +1160,189 @@ function formatConfigSnapshot() {
   ].join("\n");
 }
 
+// Full runtime config, grouped to match SETTINGS-GUIDE.md (GRUP 1–15) + GMGN.
+// /config shows the complete surface; long output is auto-split by sendMessage.
+export function formatFullConfig() {
+  const c = config;
+  const fmt = (v) => {
+    if (v === null || v === undefined) return "off";
+    if (typeof v === "boolean") return v ? "on" : "off";
+    if (Array.isArray(v)) return v.length ? v.join(", ") : "—";
+    return String(v);
+  };
+  const secret = (v) => (v && String(v).length ? "(set)" : "(unset)");
+  const group = (title, rows) => [title, ...rows.map(([k, v]) => `  ${k}: ${v}`)].join("\n");
+  const ir = c.gmgn.indicatorRules || {};
+
+  const blocks = [
+    group("━ GRUP 1 — Risiko & Modal", [
+      ["dryRun", fmt(String(process.env.DRY_RUN || "").toLowerCase() === "true")],
+      ["maxPositions", fmt(c.risk.maxPositions)],
+      ["maxDeployAmount", fmt(c.risk.maxDeployAmount)],
+      ["deployAmountSol", fmt(c.management.deployAmountSol)],
+      ["positionSizePct", fmt(c.management.positionSizePct)],
+      ["minSolToOpen", fmt(c.management.minSolToOpen)],
+      ["gasReserve", fmt(c.management.gasReserve)],
+    ]),
+    group("━ GRUP 2 — Exit Rules", [
+      ["stopLossPct", fmt(c.management.stopLossPct)],
+      ["takeProfitPct", fmt(c.management.takeProfitPct)],
+      ["trailingTakeProfit", fmt(c.management.trailingTakeProfit)],
+      ["trailingTriggerPct", fmt(c.management.trailingTriggerPct)],
+      ["trailingDropPct", fmt(c.management.trailingDropPct)],
+      ["pnlSanityMaxDiffPct", fmt(c.management.pnlSanityMaxDiffPct)],
+    ]),
+    group("━ GRUP 3 — Out Of Range (OOR)", [
+      ["outOfRangeBinsToClose", fmt(c.management.outOfRangeBinsToClose)],
+      ["outOfRangeWaitMinutes", fmt(c.management.outOfRangeWaitMinutes)],
+      ["oorCooldownTriggerCount", fmt(c.management.oorCooldownTriggerCount)],
+      ["oorCooldownHours", fmt(c.management.oorCooldownHours)],
+    ]),
+    group("━ GRUP 4 — Yield Check", [
+      ["minFeePerTvl24h", fmt(c.management.minFeePerTvl24h)],
+      ["minAgeBeforeYieldCheck", fmt(c.management.minAgeBeforeYieldCheck)],
+      ["minVolumeToRebalance", fmt(c.management.minVolumeToRebalance)],
+    ]),
+    group("━ GRUP 5 — Claim & Cooldown Deploy Ulang", [
+      ["minClaimAmount", fmt(c.management.minClaimAmount)],
+      ["autoSwapAfterClaim", fmt(c.management.autoSwapAfterClaim)],
+      ["repeatDeployCooldownEnabled", fmt(c.management.repeatDeployCooldownEnabled)],
+      ["repeatDeployCooldownTriggerCount", fmt(c.management.repeatDeployCooldownTriggerCount)],
+      ["repeatDeployCooldownHours", fmt(c.management.repeatDeployCooldownHours)],
+      ["repeatDeployCooldownScope", fmt(c.management.repeatDeployCooldownScope)],
+      ["repeatDeployCooldownMinFeeEarnedPct", fmt(c.management.repeatDeployCooldownMinFeeEarnedPct)],
+    ]),
+    group("━ GRUP 6 — Screening (Filter Pool)", [
+      ["screeningSource", fmt(c.screening.source)],
+      ["timeframe", fmt(c.screening.timeframe)],
+      ["category", fmt(c.screening.category)],
+      ["minTvl", fmt(c.screening.minTvl)],
+      ["maxTvl", fmt(c.screening.maxTvl)],
+      ["minVolume", fmt(c.screening.minVolume)],
+      ["minFeeActiveTvlRatio", fmt(c.screening.minFeeActiveTvlRatio)],
+      ["minTokenFeesSol", fmt(c.screening.minTokenFeesSol)],
+      ["minOrganic", fmt(c.screening.minOrganic)],
+      ["minQuoteOrganic", fmt(c.screening.minQuoteOrganic)],
+      ["minMcap", fmt(c.screening.minMcap)],
+      ["maxMcap", fmt(c.screening.maxMcap)],
+      ["minHolders", fmt(c.screening.minHolders)],
+      ["minTokenAgeHours", fmt(c.screening.minTokenAgeHours)],
+      ["maxTokenAgeHours", fmt(c.screening.maxTokenAgeHours)],
+      ["athFilterPct", fmt(c.screening.athFilterPct)],
+      ["minBinStep", fmt(c.screening.minBinStep)],
+      ["maxBinStep", fmt(c.screening.maxBinStep)],
+      ["excludeHighSupplyConcentration", fmt(c.screening.excludeHighSupplyConcentration)],
+    ]),
+    group("━ GRUP 7 — Keamanan Token", [
+      ["maxBundlePct", fmt(c.screening.maxBundlePct)],
+      ["maxBotHoldersPct", fmt(c.screening.maxBotHoldersPct)],
+      ["maxTop10Pct", fmt(c.screening.maxTop10Pct)],
+      ["avoidPvpSymbols", fmt(c.screening.avoidPvpSymbols)],
+      ["blockPvpSymbols", fmt(c.screening.blockPvpSymbols)],
+      ["allowedLaunchpads", fmt(c.screening.allowedLaunchpads)],
+      ["blockedLaunchpads", fmt(c.screening.blockedLaunchpads)],
+    ]),
+    group("━ GRUP 8 — Sinyal Tambahan", [
+      ["useDiscordSignals", fmt(c.screening.useDiscordSignals)],
+      ["discordSignalMode", fmt(c.screening.discordSignalMode)],
+    ]),
+    group("━ GRUP 9 — Strategi Range (Bins)", [
+      ["strategy", fmt(c.strategy.strategy)],
+      ["minBinsBelow", fmt(c.strategy.minBinsBelow)],
+      ["maxBinsBelow", fmt(c.strategy.maxBinsBelow)],
+      ["defaultBinsBelow", fmt(c.strategy.defaultBinsBelow)],
+    ]),
+    group("━ GRUP 10 — Jadwal Bot", [
+      ["managementIntervalMin", fmt(c.schedule.managementIntervalMin)],
+      ["screeningIntervalMin", fmt(c.schedule.screeningIntervalMin)],
+      ["adaptiveScreening", fmt(c.schedule.adaptiveScreening)],
+      ["maxScreeningIntervalMin", fmt(c.schedule.maxScreeningIntervalMin)],
+      ["healthCheckIntervalMin", fmt(c.schedule.healthCheckIntervalMin)],
+    ]),
+    group("━ GRUP 11 — Model AI (LLM)", [
+      ["managementModel", fmt(c.llm.managementModel)],
+      ["screeningModel", fmt(c.llm.screeningModel)],
+      ["generalModel", fmt(c.llm.generalModel)],
+      ["temperature", fmt(c.llm.temperature)],
+      ["maxTokens", fmt(c.llm.maxTokens)],
+      ["maxSteps", fmt(c.llm.maxSteps)],
+    ]),
+    group("━ GRUP 12 — Darwin (Bobot Sinyal)", [
+      ["darwinEnabled", fmt(c.darwin.enabled)],
+      ["darwinWindowDays", fmt(c.darwin.windowDays)],
+      ["darwinRecalcEvery", fmt(c.darwin.recalcEvery)],
+      ["darwinBoost", fmt(c.darwin.boostFactor)],
+      ["darwinDecay", fmt(c.darwin.decayFactor)],
+      ["darwinFloor", fmt(c.darwin.weightFloor)],
+      ["darwinCeiling", fmt(c.darwin.weightCeiling)],
+      ["darwinMinSamples", fmt(c.darwin.minSamples)],
+    ]),
+    group("━ GRUP 13 — Chart Indicators", [
+      ["enabled", fmt(c.indicators.enabled)],
+      ["entryPreset", fmt(c.indicators.entryPreset)],
+      ["exitPreset", fmt(c.indicators.exitPreset)],
+      ["rsiLength", fmt(c.indicators.rsiLength)],
+      ["intervals", fmt(c.indicators.intervals)],
+      ["candles", fmt(c.indicators.candles)],
+      ["rsiOversold", fmt(c.indicators.rsiOversold)],
+      ["rsiOverbought", fmt(c.indicators.rsiOverbought)],
+      ["requireAllIntervals", fmt(c.indicators.requireAllIntervals)],
+    ]),
+    group("━ GRUP 14 — Koneksi & Relay", [
+      ["lpAgentRelayEnabled", fmt(c.api.lpAgentRelayEnabled)],
+      ["solMode", fmt(c.management.solMode)],
+      ["agentId", fmt(c.hiveMind.agentId)],
+      ["publicApiKey", secret(c.api.publicApiKey)],
+    ]),
+    group("━ GRUP 15 — HiveMind", [
+      ["status", isHiveMindEnabled() ? "enabled" : "disabled"],
+      ["hiveMindPullMode", fmt(c.hiveMind.pullMode)],
+      ["hiveMindUrl", fmt(c.hiveMind.url)],
+    ]),
+    group("━ GMGN (aktif bila screeningSource=gmgn)", [
+      ["interval", fmt(c.gmgn.interval)],
+      ["orderBy", fmt(c.gmgn.orderBy)],
+      ["direction", fmt(c.gmgn.direction)],
+      ["platforms", fmt(c.gmgn.platforms)],
+      ["filters", fmt(c.gmgn.filters)],
+      ["minMcap", fmt(c.gmgn.minMcap)],
+      ["maxMcap", fmt(c.gmgn.maxMcap)],
+      ["minTvl", fmt(c.gmgn.minTvl)],
+      ["minVolume", fmt(c.gmgn.minVolume)],
+      ["minHolders", fmt(c.gmgn.minHolders)],
+      ["minTokenAgeHours", fmt(c.gmgn.minTokenAgeHours)],
+      ["maxTokenAgeHours", fmt(c.gmgn.maxTokenAgeHours)],
+      ["athFilterPct", fmt(c.gmgn.athFilterPct)],
+      ["minTotalFeeSol", fmt(c.gmgn.minTotalFeeSol)],
+      ["requireKol", fmt(c.gmgn.requireKol)],
+      ["minKolCount", fmt(c.gmgn.minKolCount)],
+      ["minSmartDegenCount", fmt(c.gmgn.minSmartDegenCount)],
+      ["maxRugRatio", fmt(c.gmgn.maxRugRatio)],
+      ["maxBundlerRate", fmt(c.gmgn.maxBundlerRate)],
+      ["maxRatTraderRate", fmt(c.gmgn.maxRatTraderRate)],
+      ["maxFreshWalletRate", fmt(c.gmgn.maxFreshWalletRate)],
+      ["maxDevTeamHoldRate", fmt(c.gmgn.maxDevTeamHoldRate)],
+      ["maxBotDegenRate", fmt(c.gmgn.maxBotDegenRate)],
+      ["maxSniperCount", fmt(c.gmgn.maxSniperCount)],
+      ["maxSniperHoldRate", fmt(c.gmgn.maxSniperHoldRate)],
+      ["preferredKolNames", fmt(c.gmgn.preferredKolNames)],
+      ["preferredKolMinHoldPct", fmt(c.gmgn.preferredKolMinHoldPct)],
+      ["dumpKolNames", fmt(c.gmgn.dumpKolNames)],
+      ["dumpKolMinHoldPct", fmt(c.gmgn.dumpKolMinHoldPct)],
+      ["indicatorFilter", fmt(c.gmgn.indicatorFilter)],
+      ["indicatorInterval", fmt(c.gmgn.indicatorInterval)],
+      ["rules.requireBullishSupertrend", fmt(ir.requireBullishSupertrend)],
+      ["rules.rejectAlreadyAtBottom", fmt(ir.rejectAlreadyAtBottom)],
+      ["rules.requireAboveSupertrend", fmt(ir.requireAboveSupertrend)],
+      ["rules.minRsi", fmt(ir.minRsi)],
+      ["rules.maxRsi", fmt(ir.maxRsi)],
+      ["rules.requireBbPosition", fmt(ir.requireBbPosition)],
+    ]),
+  ];
+
+  return `⚙️ Config lengkap (semua grup)\n\n${blocks.join("\n\n")}\n\nUbah lewat /settings (menu tombol) atau chat biasa. Detail tiap setting: SETTINGS-GUIDE.md`;
+}
+
 function parseConfigValue(raw) {
   const value = String(raw ?? "").trim();
   if (!value.length) return "";
@@ -1609,7 +1792,7 @@ function formatHelpText() {
     "/close <n> — close one position by index",
     "/closeall — close all open positions",
     "/set <n> <note> — set note/instruction on position",
-    "/config — show important runtime config",
+    "/config — show full runtime config (grouped)",
     "/settings — button menu for common config",
     "/setcfg <key> <value> — update persisted config",
     "/screen — refresh deterministic candidate list",
@@ -1831,7 +2014,11 @@ async function telegramHandler(msg) {
         const perf = getPerformanceSummary();
         const { lessons } = listLessons({ limit: 10, full: true });
         if (perf) {
-          msg += `\n\n🧠 Learning: ${perf.total_positions_closed} closed | ${perf.win_rate_pct}% win | avg PnL ${perf.avg_pnl_pct >= 0 ? "+" : ""}${perf.avg_pnl_pct}%`;
+          const cur = config.management.solMode ? "◎" : "$";
+          const sign = perf.total_pnl_usd >= 0 ? "+" : "-";
+          const roiStr = perf.roi_pct != null ? ` (${perf.roi_pct >= 0 ? "+" : ""}${perf.roi_pct}%)` : "";
+          msg += `\n\n💰 All-time PnL: ${sign}${cur}${Math.abs(perf.total_pnl_usd)}${roiStr} over ${perf.total_positions_closed} closed`;
+          msg += `\n🧠 Learning: ${perf.win_rate_pct}% win | avg PnL ${perf.avg_pnl_pct >= 0 ? "+" : ""}${perf.avg_pnl_pct}%`;
         }
         const lastBad = lessons.filter(l => l.outcome === "bad" || l.outcome === "poor").slice(-1)[0];
         const lastGood = lessons.filter(l => l.outcome === "good").slice(-1)[0];
@@ -1846,7 +2033,7 @@ async function telegramHandler(msg) {
   }
 
   if (text === "/config") {
-    await sendMessage(formatConfigSnapshot()).catch(() => {});
+    await sendMessage(formatFullConfig()).catch(() => {});
     return;
   }
 

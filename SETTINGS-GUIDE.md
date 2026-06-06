@@ -1101,6 +1101,27 @@ Matikan (balik pabrik): `set candidateMomentum to false`
 
 ---
 
+### narrativeProfileSignal
+
+| | |
+|---|---|
+| **Nilai sekarang** | `false` |
+| **Default** | `false` |
+| **Format** | `true` atau `false` |
+| **Status** | 🧪 EKSPERIMEN |
+| **Penjelasan** | Tiap deploy, screener nge-tag token ke salah satu **kategori narasi** (`animal`, `ai`, `political`, `celebrity`, `meme`, `culture`, `tech_utility`, `other`). Performa posisi yang udah ditutup di-bucket per kategori (mirip profil jam buka). Kalau flag ini ON, bot nyelipin satu baris hint ke prompt screener: narasi mana yang historisnya cuan vs zonk. Sinyal **soft** (cuma bahan pertimbangan, NGGAK nge-blok deploy & NGGAK nimpa hard rule). OFF = nggak ada hint di prompt (pabrik) |
+| **Catatan** | Tag narasi dikumpulin **pasif** (selalu, walau flag OFF) biar datanya numpuk — jadi pas dinyalain udah ada sejarah. Hint baru muncul kalau ada ≥8 sampel per kategori (di bawah itu = netral). Lihat profil kapan aja lewat tool `get_narrative_profile`. Inert sampai data baru numpuk (sama seperti time-of-day dulu) |
+
+**Contoh nyalakan:**
+
+```
+set narrativeProfileSignal to true
+```
+
+Matikan (balik pabrik): `set narrativeProfileSignal to false`
+
+---
+
 ---
 
 # CATATAN — GMGN & DUA SISTEM INDIKATOR

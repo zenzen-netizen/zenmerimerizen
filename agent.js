@@ -50,23 +50,23 @@ const INTENT_TOOLS = {
 };
 
 const INTENT_PATTERNS = [
-  { intent: "decisions",   re: /\b(why did you|why'd you|why was (?:this|that|it)|what made you|what was the reason|why no deploy|why didn't you deploy|why did you close|why did you deploy|why did you skip)\b/i },
-  { intent: "deploy",      re: /\b(deploy|open|add liquidity|lp into|invest in)\b/i },
-  { intent: "close",       re: /\b(close|exit|withdraw|remove liquidity|shut down)\b/i },
-  { intent: "claim",       re: /\b(claim|harvest|collect)\b.*\bfee/i },
-  { intent: "swap",        re: /\b(swap|convert|sell|exchange)\b/i },
-  { intent: "selfupdate",  re: /\b(self.?update|git pull|pull latest|update (the )?bot|update (the )?agent|update yourself)\b/i },
-  { intent: "blocklist",   re: /\b(blacklist|block|unblock|blocklist|blocked deployer|rugger|block dev|block deployer)\b/i },
-  { intent: "config",      re: /\b(config|setting|threshold|update|set |change)\b/i },
-  { intent: "balance",     re: /\b(balance|wallet|sol|how much)\b/i },
-  { intent: "positions",   re: /\b(position|portfolio|open|pnl|yield|range)\b/i },
-  { intent: "strategy",    re: /\b(strategy|strategies)\b/i },
-  { intent: "screen",      re: /\b(screen|candidate|find pool|search|research|token)\b/i },
-  { intent: "memory",      re: /\b(memory|pool history|note|remember)\b/i },
-  { intent: "smartwallet", re: /\b(smart wallet|kol|whale|watch.?list|add wallet|remove wallet|list wallet|tracked wallet|check pool|who.?s in|wallets in|add to (smart|watch|kol))\b/i },
-  { intent: "study",       re: /\b(study top|top lpers?|best lpers?|who.?s lping|lp behavior|lpers?)\b/i },
-  { intent: "performance", re: /\b(performance|history|how.?s the bot|how.?s it doing|stats|report)\b/i },
-  { intent: "lessons",     re: /\b(lesson|learned|teach|pin|unpin|clear lesson|what did you learn)\b/i },
+  { intent: "decisions",   re: /\b(why did you|why'd you|why was (?:this|that|it)|what made you|what was the reason|why no deploy|why didn't you deploy|why did you close|why did you deploy|why did you skip|kenapa kamu|kenapa kau|kenapa tidak|kenapa nggak|kenapa gak|mengapa kamu|apa alasan|apa yang membuat)\b/i },
+  { intent: "deploy",      re: /\b(deploy|open|add liquidity|lp into|invest in|buka posisi|tambah likuiditas|lp ke)\b/i },
+  { intent: "close",       re: /\b(close|exit|withdraw|remove liquidity|shut down|tutup|tarik|cabut|hentikan|keluar dari)\b/i },
+  { intent: "claim",       re: /\b(claim|harvest|collect|klaim|panen|ambil)\b.*\b(fee|biaya|imbal)/i },
+  { intent: "swap",        re: /\b(swap|convert|sell|exchange|tukar|jual|konversi)\b/i },
+  { intent: "selfupdate",  re: /\b(self.?update|git pull|pull latest|update (the )?bot|update (the )?agent|update yourself|perbarui bot|perbarui agent|perbarui diri)\b/i },
+  { intent: "blocklist",   re: /\b(blacklist|block|unblock|blocklist|blocked deployer|rugger|block dev|block deployer|blokir|buka blokir|daftar hitam)\b/i },
+  { intent: "config",      re: /\b(config|konfigurasi|setting|setelan|threshold|ambang|update|set |change|ubah|ganti|atur|setel)\b/i },
+  { intent: "balance",     re: /\b(balance|wallet|sol|how much|saldo|dompet|berapa)\b/i },
+  { intent: "positions",   re: /\b(position|portfolio|open|pnl|yield|range|posisi|portofolio)\b/i },
+  { intent: "strategy",    re: /\b(strategy|strategies|strategi)\b/i },
+  { intent: "screen",      re: /\b(screen|candidate|find pool|search|research|token|cari pool|cari token|kandidat|riset|telusuri)\b/i },
+  { intent: "memory",      re: /\b(memory|pool history|note|remember|memori|riwayat pool|catatan|ingat)\b/i },
+  { intent: "smartwallet", re: /\b(smart wallet|kol|whale|watch.?list|add wallet|remove wallet|list wallet|tracked wallet|check pool|who.?s in|wallets in|add to (smart|watch|kol)|dompet pintar|pantau wallet|tambah wallet|hapus wallet|daftar wallet)\b/i },
+  { intent: "study",       re: /\b(study top|top lpers?|best lpers?|who.?s lping|lp behavior|lpers?|pelajari lper|lper terbaik)\b/i },
+  { intent: "performance", re: /\b(performance|history|how.?s the bot|how.?s it doing|stats|report|performa|kinerja|riwayat|laporan|statistik|gimana)\b/i },
+  { intent: "lessons",     re: /\b(lesson|learned|teach|pin|unpin|clear lesson|what did you learn|pelajaran|ajari|sematkan|lepas sematan)\b/i },
 ];
 
 function getToolsForRole(agentType, goal = "") {
@@ -103,10 +103,10 @@ const client = new OpenAI({
 
 const DEFAULT_MODEL = process.env.LLM_MODEL || "openrouter/healer-alpha";
 
-const MUTATING_TOOL_INTENTS = /\b(deploy|open position|add liquidity|lp into|invest in|close|exit|withdraw|remove liquidity|claim|harvest|collect|swap|convert|sell|exchange|block|unblock|blacklist|add smart wallet|remove smart wallet|add wallet|remove wallet|pin|unpin|clear lesson|add lesson|set active strategy|remove strategy|add strategy|set |change |update |self.?update|pull latest|git pull|update yourself)\b/i;
-const LIVE_DATA_TOOL_INTENTS = /\b(balance|wallet|position|portfolio|pnl|yield|range|show positions|open positions|screen|candidate|find pool|search|research|analyze|check pool|token holders|narrative|study top|top lpers?|lp behavior|who.?s lping|performance|history|stats|report|list smart wallets|list blacklist|list blocked deployers|list lessons)\b/i;
-const CONFIG_READ_ONLY_INTENTS = /\b(check|show|what(?:'s| is)?|review|inspect|see)\b.*\b(config|settings?|thresholds?)\b/i;
-const DECISION_EXPLANATION_INTENTS = /\b(why did you|why'd you|why was (?:this|that|it)|what made you|what was the reason|why no deploy|why didn't you deploy|why did you close|why did you deploy|why did you skip)\b/i;
+const MUTATING_TOOL_INTENTS = /\b(deploy|open position|add liquidity|lp into|invest in|close|exit|withdraw|remove liquidity|claim|harvest|collect|swap|convert|sell|exchange|block|unblock|blacklist|add smart wallet|remove smart wallet|add wallet|remove wallet|pin|unpin|clear lesson|add lesson|set active strategy|remove strategy|add strategy|set |change |update |self.?update|pull latest|git pull|update yourself|buka posisi|tambah likuiditas|tutup|tarik|cabut|hentikan|klaim|panen|tukar|jual|konversi|blokir|buka blokir|ubah|ganti|atur|setel|sematkan|lepas sematan|perbarui|tambah wallet|hapus wallet|tambah strategi|hapus strategi)\b/i;
+const LIVE_DATA_TOOL_INTENTS = /\b(balance|wallet|position|portfolio|pnl|yield|range|show positions|open positions|screen|candidate|find pool|search|research|analyze|check pool|token holders|narrative|study top|top lpers?|lp behavior|who.?s lping|performance|history|stats|report|list smart wallets|list blacklist|list blocked deployers|list lessons|saldo|dompet|posisi|portofolio|cari pool|kandidat|riset|performa|kinerja|riwayat|laporan|statistik|daftar)\b/i;
+const CONFIG_READ_ONLY_INTENTS = /\b(check|show|what(?:'s| is)?|review|inspect|see|cek|lihat|tampilkan|tunjukkan|periksa)\b.*\b(config|konfigurasi|settings?|setelan|thresholds?|ambang)\b/i;
+const DECISION_EXPLANATION_INTENTS = /\b(why did you|why'd you|why was (?:this|that|it)|what made you|what was the reason|why no deploy|why didn't you deploy|why did you close|why did you deploy|why did you skip|kenapa kamu|kenapa kau|kenapa tidak|kenapa nggak|kenapa gak|mengapa kamu|apa alasan|apa yang membuat)\b/i;
 
 function shouldRequireRealToolUse(goal, agentType, interactive = false) {
   if (agentType === "MANAGER") return false;

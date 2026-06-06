@@ -1080,6 +1080,27 @@ Matikan (balik pabrik): `set marketRegimeGate to false`
 
 ---
 
+### candidateMomentum
+
+| | |
+|---|---|
+| **Nilai sekarang** | `false` |
+| **Default** | `false` |
+| **Format** | `true` atau `false` |
+| **Status** | 🧪 EKSPERIMEN |
+| **Penjelasan** | Tiap siklus screening, bot nyimpen snapshot TVL/volume/mcap tiap kandidat (di `candidate-memory.json`). Pas pool itu muncul lagi di siklus berikutnya, bot tambahin baris `momentum: tvl +18%, vol +40% (...)` di blok kandidat yang dibaca screener — nunjukin pool lagi naik daun atau lagi luntur. Sinyal **soft** (cuma bahan pertimbangan buat LLM, NGGAK nge-blok deploy). OFF = nggak nyimpen & nggak nambahin baris (pabrik) |
+| **Catatan** | Momentum baru muncul kalau pool kelihatan ≥2 siklus (pertama kali = "first sighting"). File-nya dibatasi (8 snapshot/pool) & pool yang nggak kelihatan >24 jam dibuang otomatis, jadi nggak membengkak. Kalau snapshot gagal, screening tetap jalan (fail-open). Terpisah dari `pool-memory.json` (yang buat cooldown/riwayat deploy) |
+
+**Contoh nyalakan:**
+
+```
+set candidateMomentum to true
+```
+
+Matikan (balik pabrik): `set candidateMomentum to false`
+
+---
+
 ---
 
 # CATATAN — GMGN & DUA SISTEM INDIKATOR

@@ -458,6 +458,7 @@ const toolMap = {
       exitLiquidityMaxSlippagePct: ["experiments", "exitLiquidityMaxSlippagePct"],
       marketRegimeGate: ["experiments", "marketRegimeGate"],
       marketRegimeMaxDrop24hPct: ["experiments", "marketRegimeMaxDrop24hPct"],
+      candidateMomentum: ["experiments", "candidateMomentum"],
     };
 
     const applied = {};

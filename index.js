@@ -30,6 +30,7 @@ import { renderGuide } from "./guide.js";
 import { getLastBriefingDate, setLastBriefingDate, getTrackedPosition, getTrackedPositions, setPositionInstruction, updatePnlAndCheckExits, queuePeakConfirmation, resolvePendingPeak, queueTrailingDropConfirmation, resolvePendingTrailingDrop } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
 import { recordPositionSnapshot, recallForPool, addPoolNote } from "./pool-memory.js";
+import { recordCandidateSnapshots, getCandidateMomentum, formatCandidateMomentum } from "./candidate-memory.js";
 import { checkSmartWalletsOnPool } from "./smart-wallets.js";
 import { getTokenNarrative, getTokenInfo } from "./tools/token.js";
 import { stageSignals } from "./signal-tracker.js";
@@ -481,6 +482,18 @@ export async function runScreeningCycle({ silent = false } = {}) {
       return screenReport;
     }
     const candidates = (topCandidates?.candidates || topCandidates?.pools || []).slice(0, 10);
+
+    // 🧪 Experiment #1: candidate momentum — snapshot this cycle's candidates so a
+    // later cycle can show TVL/volume drift. OFF by default → skipped (factory
+    // behavior). Fail-open: a snapshot hiccup must never derail screening.
+    if (config.experiments?.candidateMomentum) {
+      try {
+        recordCandidateSnapshots(candidates);
+      } catch (e) {
+        log("experiment", `candidateMomentum snapshot failed — continuing (fail-open): ${e.message}`);
+      }
+    }
+
     const earlyFilteredExamples = topCandidates?.filtered_examples || [];
     const gmgnStageCounts = topCandidates?.stage_counts ?? null;
     const gmgnAllFiltered = topCandidates?.all_filtered ?? [];
@@ -603,6 +616,17 @@ export async function runScreeningCycle({ silent = false } = {}) {
       const netBuyers = ti?.stats_1h?.net_buyers;
       const activeBin = activeBinResults[i]?.status === "fulfilled" ? activeBinResults[i].value?.binId : null;
 
+      // 🧪 Experiment #1: candidate momentum — soft, trusted line (our own metric
+      // deltas, not external text). OFF by default → momentumLine stays null and
+      // drops out of the block. Fail-open.
+      let momentumLine = null;
+      if (config.experiments?.candidateMomentum) {
+        try {
+          const txt = formatCandidateMomentum(getCandidateMomentum(pool.pool));
+          if (txt) momentumLine = `  momentum: ${txt}`;
+        } catch { /* fail-open — omit the line */ }
+      }
+
       // OKX signals
       const okxParts = [
         pool.risk_level     != null ? `risk=${pool.risk_level}`               : null,
@@ -633,6 +657,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
           pvpLine,
           `  smart_wallets: ${sw?.in_pool?.length ?? 0} present${sw?.in_pool?.length ? ` → CONFIDENCE BOOST (${sw.in_pool.map(w => w.name).join(", ")})` : ""}`,
           activeBin != null ? `  active_bin: ${activeBin}` : null,
+          momentumLine,
           n?.narrative ? `  narrative_untrusted: ${sanitizeUntrustedPromptText(n.narrative, 500)}` : `  narrative_untrusted: none`,
           mem ? `  memory_untrusted: ${sanitizeUntrustedPromptText(mem, 500)}` : null,
         ].filter(Boolean).join("\n");
@@ -652,6 +677,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
           `  smart_wallets: ${sw?.in_pool?.length ?? 0} present${sw?.in_pool?.length ? ` → CONFIDENCE BOOST (${sw.in_pool.map(w => w.name).join(", ")})` : ""}`,
           activeBin != null ? `  active_bin: ${activeBin}` : null,
           priceChange != null ? `  1h: price${priceChange >= 0 ? "+" : ""}${priceChange}%, net_buyers=${netBuyers ?? "?"}` : null,
+          momentumLine,
           n?.narrative ? `  narrative_untrusted: ${sanitizeUntrustedPromptText(n.narrative, 500)}` : `  narrative_untrusted: none`,
           mem ? `  memory_untrusted: ${sanitizeUntrustedPromptText(mem, 500)}` : null,
         ].filter(Boolean).join("\n");
@@ -1338,6 +1364,7 @@ export function formatFullConfig() {
       ["exitLiquidityMaxSlippagePct", fmt(c.experiments?.exitLiquidityMaxSlippagePct)],
       ["marketRegimeGate", fmt(c.experiments?.marketRegimeGate)],
       ["marketRegimeMaxDrop24hPct", fmt(c.experiments?.marketRegimeMaxDrop24hPct)],
+      ["candidateMomentum", fmt(c.experiments?.candidateMomentum)],
     ]),
     group(`━ GMGN — ${gmgnActive ? "AKTIF (source=gmgn)" : `tidak aktif (source=${c.screening.source}, blok ini diabaikan)`}`, [
       ["interval", fmt(c.gmgn.interval)],

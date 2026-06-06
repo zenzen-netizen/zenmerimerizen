@@ -296,6 +296,12 @@ export const config = {
     // tx). Skip pools where that cost exceeds exitLiquidityMaxSlippagePct.
     exitLiquidityCheck:          u.exitLiquidityCheck          ?? false,
     exitLiquidityMaxSlippagePct: u.exitLiquidityMaxSlippagePct ?? 10,
+    // #4 Market regime gate — before screening runs, read SOL's 24h price change
+    // (Jupiter price, read-only). If SOL is down more than marketRegimeMaxDrop24hPct
+    // over 24h, treat the market as risk-off and skip the whole screening cycle
+    // (no LLM call, no new deploy). Catches scheduled + freed-slot screening.
+    marketRegimeGate:            u.marketRegimeGate            ?? false,
+    marketRegimeMaxDrop24hPct:   u.marketRegimeMaxDrop24hPct   ?? 8,
   },
 };
 

@@ -456,6 +456,8 @@ const toolMap = {
       // experiments (🧪 GRUP 16 — default OFF = factory behavior)
       exitLiquidityCheck: ["experiments", "exitLiquidityCheck"],
       exitLiquidityMaxSlippagePct: ["experiments", "exitLiquidityMaxSlippagePct"],
+      marketRegimeGate: ["experiments", "marketRegimeGate"],
+      marketRegimeMaxDrop24hPct: ["experiments", "marketRegimeMaxDrop24hPct"],
     };
 
     const applied = {};

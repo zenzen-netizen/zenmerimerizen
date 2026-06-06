@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 import { agentLoop } from "./agent.js";
 import { log } from "./logger.js";
 import { getMyPositions, closePosition, getActiveBin } from "./tools/dlmm.js";
-import { getWalletBalances } from "./tools/wallet.js";
+import { getWalletBalances, getSolMarketRegime } from "./tools/wallet.js";
 import { getTopCandidates } from "./tools/screening.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
 import { config, reloadScreeningThresholds, computeDeployAmount } from "./config.js";
@@ -419,6 +419,37 @@ export async function runScreeningCycle({ silent = false } = {}) {
       });
       _screeningBusy = false;
       return screenReport;
+    }
+
+    // ─── 🧪 Experiment #4: market regime gate ─────────────────
+    // OFF by default → skipped entirely (factory behavior). When ON, read SOL's
+    // 24h price change (Jupiter price, read-only). If SOL is down more than the
+    // limit, the market is risk-off — skip the whole screening cycle (no LLM
+    // call, no new deploy). Catches scheduled + freed-slot screening. Fail-open:
+    // a price hiccup must never block screening, so wrap and swallow errors here.
+    if (config.experiments?.marketRegimeGate) {
+      try {
+        const maxDrop = Number(config.experiments.marketRegimeMaxDrop24hPct ?? 8);
+        const regime = await getSolMarketRegime();
+        if (regime && Number.isFinite(regime.change24hPct) && regime.change24hPct < -maxDrop) {
+          const msg = `risk-off: SOL ${regime.change24hPct.toFixed(1)}% (24h) < -${maxDrop}% limit`;
+          log("experiment", `marketRegimeGate: skipping screening — ${msg}`);
+          screenReport = `🧪 Screening skipped — market ${msg} (experimental gate).`;
+          appendDecision({
+            type: "skip",
+            actor: "SCREENER",
+            summary: "Screening skipped",
+            reason: `🧪 market ${msg}`,
+          });
+          _screeningBusy = false;
+          return screenReport;
+        }
+        if (regime) {
+          log("experiment", `marketRegimeGate: SOL ${regime.change24hPct.toFixed(1)}% (24h) — risk-on (limit -${maxDrop}%)`);
+        }
+      } catch (e) {
+        log("experiment", `marketRegimeGate failed — allowing screening (fail-open): ${e.message}`);
+      }
     }
   } catch (e) {
     log("cron_error", `Screening pre-check failed: ${e.message}`);
@@ -1305,6 +1336,8 @@ export function formatFullConfig() {
     group("━ 🧪 GRUP 16 — Eksperimen (default OFF = pabrik)", [
       ["exitLiquidityCheck", fmt(c.experiments?.exitLiquidityCheck)],
       ["exitLiquidityMaxSlippagePct", fmt(c.experiments?.exitLiquidityMaxSlippagePct)],
+      ["marketRegimeGate", fmt(c.experiments?.marketRegimeGate)],
+      ["marketRegimeMaxDrop24hPct", fmt(c.experiments?.marketRegimeMaxDrop24hPct)],
     ]),
     group(`━ GMGN — ${gmgnActive ? "AKTIF (source=gmgn)" : `tidak aktif (source=${c.screening.source}, blok ini diabaikan)`}`, [
       ["interval", fmt(c.gmgn.interval)],

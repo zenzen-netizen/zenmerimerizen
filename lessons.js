@@ -807,18 +807,25 @@ export function getHourlyProfile() {
   const perf = (data.performance || []).filter((p) => p.open_session && isFiniteNum(p.pnl_pct));
 
   const buckets = {};
-  for (const s of SESSIONS) buckets[s.key] = { wins: 0, count: 0, pnlSum: 0 };
+  for (const s of SESSIONS) buckets[s.key] = { wins: 0, count: 0, pnlSum: 0, holdSum: 0, holdCount: 0 };
   for (const p of perf) {
     const b = buckets[p.open_session];
     if (!b) continue;
     b.count++;
     if (p.pnl_pct > 0) b.wins++;
     b.pnlSum += p.pnl_pct;
+    // Holding time = how long the position stayed open (turnover speed). Soft signal
+    // only; surfaced for the SCREENER prompt and get_time_profile, never gates the cron.
+    if (isFiniteNum(p.minutes_held) && p.minutes_held > 0) { b.holdSum += p.minutes_held; b.holdCount++; }
   }
 
   const total = perf.length;
   const overallWins = perf.filter((p) => p.pnl_pct > 0).length;
   const overallWinRate = total > 0 ? Math.round((overallWins / total) * 100) : null;
+  const held = perf.filter((p) => isFiniteNum(p.minutes_held) && p.minutes_held > 0);
+  const overallAvgHoldMin = held.length > 0
+    ? Math.round(held.reduce((s, p) => s + p.minutes_held, 0) / held.length)
+    : null;
 
   const sessions = SESSIONS.map((s) => {
     const b = buckets[s.key];
@@ -828,6 +835,7 @@ export function getHourlyProfile() {
       count: b.count,
       win_rate_pct: b.count > 0 ? Math.round((b.wins / b.count) * 100) : null,
       avg_pnl_pct: b.count > 0 ? Math.round((b.pnlSum / b.count) * 100) / 100 : null,
+      avg_hold_min: b.holdCount > 0 ? Math.round(b.holdSum / b.holdCount) : null,
     };
   });
 
@@ -836,8 +844,15 @@ export function getHourlyProfile() {
     min_samples: MIN_SESSION_SAMPLES,
     total_with_open_time: total,
     overall_win_rate_pct: overallWinRate,
+    overall_avg_hold_min: overallAvgHoldMin,
     sessions,
   };
+}
+
+// Human-friendly minutes → "210m" / "3.5h" for soft-signal notes.
+function fmtHoldMin(min) {
+  if (min == null || !isFiniteNum(min)) return "?";
+  return min >= 60 ? `${(min / 60).toFixed(1)}h` : `${min}m`;
 }
 
 /**
@@ -875,5 +890,9 @@ export function getTimeProfileForPrompt() {
   const verdict = classifySession(cur.key) === "weak"
     ? "historically WEAK — raise the bar, prefer skipping marginal candidates (good-to-have signal, NEVER overrides hard rules)."
     : "historically OK — deploy normally if a candidate qualifies.";
-  return `TIME-OF-DAY (WIB): current session ${cur.label} — win ${s.win_rate_pct}%, avg PnL ${s.avg_pnl_pct}% over ${s.count} deploys (overall ${prof.overall_win_rate_pct}%). ${verdict}`;
+  // Holding time is a soft turnover hint (e.g. fast turnover = slots free up sooner).
+  const holdNote = s.avg_hold_min != null
+    ? ` Avg holding time ${fmtHoldMin(s.avg_hold_min)}.`
+    : (prof.overall_avg_hold_min != null ? ` Avg holding time ${fmtHoldMin(prof.overall_avg_hold_min)} (overall).` : "");
+  return `TIME-OF-DAY (WIB): current session ${cur.label} — win ${s.win_rate_pct}%, avg PnL ${s.avg_pnl_pct}% over ${s.count} deploys (overall ${prof.overall_win_rate_pct}%).${holdNote} ${verdict}`;
 }

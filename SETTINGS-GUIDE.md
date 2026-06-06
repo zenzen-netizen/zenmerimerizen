@@ -1189,6 +1189,27 @@ Matikan (balik pabrik): `set counterfactualReview to false`
 
 ---
 
+### smartWalletMomentum
+
+| | |
+|---|---|
+| **Nilai sekarang** | `false` |
+| **Default** | `false` |
+| **Format** | `true` atau `false` |
+| **Status** | 🧪 EKSPERIMEN |
+| **Penjelasan** | Lacak **jumlah smart wallet** di tiap kandidat dari siklus ke siklus. Kalau berubah, bot nambahin baris `sw_momentum:` di blok kandidat: smart money lagi **masuk** (bullish) atau **keluar** (bearish), mis. `smart wallets entering (+2): 1→3 over 3 cycles`. Sinyal **soft** (bahan pertimbangan LLM, NGGAK nge-blok deploy) & **trusted** (hitungan kita sendiri, bukan teks eksternal). OFF = nggak nyimpen & nggak nambahin baris (pabrik) |
+| **Catatan** | Baru muncul kalau pool kelihatan ≥2 siklus DAN jumlahnya berubah (kalau flat = nggak ada baris). Nebeng `candidate-memory.json` (buffer `sw_snaps`, 8/pool, ikut prune 24 jam bareng snapshot momentum). Kalau dinyalain, snapshot kandidat tetap direkam walau `candidateMomentum` OFF. Fail-open |
+
+**Contoh nyalakan:**
+
+```
+set smartWalletMomentum to true
+```
+
+Matikan (balik pabrik): `set smartWalletMomentum to false`
+
+---
+
 ---
 
 # CATATAN — GMGN & DUA SISTEM INDIKATOR

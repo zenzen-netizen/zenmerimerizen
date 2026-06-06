@@ -158,3 +158,51 @@ export function formatCandidateMomentum(m) {
   if (parts.length === 0) return null;
   return `${parts.join(", ")} over ${m.samples} samples (~${m.span_min}m)`;
 }
+
+/**
+ * 🧪 Smart-wallet momentum: append this cycle's smart-wallet count per pool to a
+ * per-pool buffer (sw_snaps) inside candidate-memory. Entries are created/pruned
+ * by recordCandidateSnapshots (which runs in the same cycles), so we only append
+ * here. rows: [{ addr, name, sw_count }]. Safe with missing/odd values.
+ */
+export function recordSmartWalletCounts(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return;
+  const db = load();
+  const nowIso = new Date().toISOString();
+  for (const r of rows) {
+    const addr = r?.addr;
+    const count = num(r?.sw_count);
+    if (!addr || count == null) continue;
+    if (!db[addr]) db[addr] = { name: r.name || addr.slice(0, 8), snaps: [] };
+    if (!Array.isArray(db[addr].sw_snaps)) db[addr].sw_snaps = [];
+    db[addr].sw_snaps.push({ ts: nowIso, count });
+    if (db[addr].sw_snaps.length > MAX_SNAPSHOTS) {
+      db[addr].sw_snaps = db[addr].sw_snaps.slice(-MAX_SNAPSHOTS);
+    }
+  }
+  save(db);
+}
+
+/**
+ * Smart-wallet count drift for one pool: oldest → newest retained sw snapshot.
+ * Returns { first, last, delta, samples } or null when there isn't enough history.
+ */
+export function getSmartWalletMomentum(poolAddress) {
+  if (!poolAddress) return null;
+  const snaps = load()[poolAddress]?.sw_snaps || [];
+  if (snaps.length < 2) return null;
+  const first = num(snaps[0].count);
+  const last = num(snaps[snaps.length - 1].count);
+  if (first == null || last == null) return null;
+  return { first, last, delta: last - first, samples: snaps.length };
+}
+
+/**
+ * Render smart-wallet momentum as one compact line, or null when flat / unknown
+ * (caller drops null lines). Only speaks when the count actually moved.
+ */
+export function formatSmartWalletMomentum(m) {
+  if (!m || m.samples < 2 || m.delta === 0) return null;
+  const dir = m.delta > 0 ? `entering (+${m.delta})` : `leaving (${m.delta})`;
+  return `smart wallets ${dir}: ${m.first}→${m.last} over ${m.samples} cycles`;
+}

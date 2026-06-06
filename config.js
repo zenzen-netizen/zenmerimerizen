@@ -302,6 +302,11 @@ export const config = {
     // (no LLM call, no new deploy). Catches scheduled + freed-slot screening.
     marketRegimeGate:            u.marketRegimeGate            ?? false,
     marketRegimeMaxDrop24hPct:   u.marketRegimeMaxDrop24hPct   ?? 8,
+    // #1 Candidate momentum — snapshot each screening candidate's TVL/volume/mcap
+    // every cycle (candidate-memory.json) and annotate the SCREENER's candidate
+    // block with the delta over the retained window. Soft signal only — surfaces
+    // pools that are gaining vs fading; never gates a deploy on its own.
+    candidateMomentum:           u.candidateMomentum           ?? false,
   },
 };
 

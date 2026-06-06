@@ -16,6 +16,7 @@ state.json
 lessons.json
 smart-wallets.json
 pool-memory.json
+candidate-memory.json
 token-blacklist.json
 strategy-library.json
 decision-log.json

@@ -1078,7 +1078,7 @@ let _ttyInterface = null;
 let _latestCandidates = [];
 let _latestCandidatesAt = null;
 let _pendingInput = null; // { key, page, menuMsgId }
-let _pendingConfirmation = null; // { resolve, timer, messageId }
+let _pendingConfirmation = null; // { promise, resolve, timer, messageId, signature }
 
 function setLatestCandidates(candidates = []) {
   _latestCandidates = Array.isArray(candidates) ? candidates : [];
@@ -1240,29 +1240,54 @@ function getConfigValue(key) {
 
 async function requestConfirmation(toolName, args) {
   const changes = args.changes || {};
-  const lines = Object.entries(changes).map(([key, val]) => {
+
+  // Drop no-op entries (requested value already matches live config) so we never
+  // prompt for a change that does nothing. If nothing actually changes, skip the
+  // prompt entirely and let the tool run — it reports a clean no-op.
+  const effective = {};
+  for (const [key, val] of Object.entries(changes)) {
+    const current = getConfigValue(key);
+    if (current !== undefined && String(current) === String(val)) continue;
+    effective[key] = val;
+  }
+  if (Object.keys(effective).length === 0) return true;
+
+  const signature = `${toolName}:${JSON.stringify(effective)}`;
+
+  // Single-flight guard, claimed SYNCHRONOUSLY before any await. Weak models often
+  // emit the same update_config tool call several times in one turn; agent.js runs
+  // them in parallel (Promise.all), so without this each call would send its own
+  // yes/no message (spam) and clobber the shared slot — leaving only one button live.
+  // Identical duplicates collapse onto one prompt; a different change while one is
+  // already pending is denied rather than stacked.
+  if (_pendingConfirmation) {
+    return _pendingConfirmation.signature === signature ? _pendingConfirmation.promise : false;
+  }
+
+  let resolveFn;
+  const promise = new Promise((resolve) => { resolveFn = resolve; });
+  const pending = { promise, resolve: resolveFn, timer: null, messageId: null, signature };
+  _pendingConfirmation = pending; // claim the slot before awaiting the Telegram send
+
+  pending.timer = setTimeout(async () => {
+    if (_pendingConfirmation === pending) _pendingConfirmation = null;
+    if (pending.messageId) await editMessage("⏰ Expired — no changes made.", pending.messageId).catch(() => {});
+    resolveFn(false);
+  }, 30_000);
+
+  const lines = Object.entries(effective).map(([key, val]) => {
     const current = getConfigValue(key);
     return `  ${key}: ${current ?? "unset"} → ${val}`;
   });
-  const text = `⚠️ Update config?\n${lines.join("\n")}`;
-
-  const sent = await sendMessageWithButtons(text, [
+  const sent = await sendMessageWithButtons(`⚠️ Update config?\n${lines.join("\n")}`, [
     [
       { text: "✅ Ya", callback_data: "confirm:yes" },
       { text: "❌ Batal", callback_data: "confirm:no" },
     ],
   ]);
-  const msgId = sent?.result?.message_id;
+  pending.messageId = sent?.result?.message_id ?? null;
 
-  return new Promise((resolve) => {
-    const timer = setTimeout(async () => {
-      _pendingConfirmation = null;
-      if (msgId) await editMessage("⏰ Expired — no changes made.", msgId).catch(() => {});
-      resolve(false);
-    }, 30_000);
-
-    _pendingConfirmation = { resolve, timer, messageId: msgId };
-  });
+  return promise;
 }
 
 function fmtSettingValue(value) {

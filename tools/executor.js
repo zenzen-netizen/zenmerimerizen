@@ -464,6 +464,8 @@ const toolMap = {
       expectedYieldSignal: ["experiments", "expectedYieldSignal"],
       convictionSizing: ["experiments", "convictionSizing"],
       convictionSizingMaxAdjustPct: ["experiments", "convictionSizingMaxAdjustPct"],
+      counterfactualReview: ["experiments", "counterfactualReview"],
+      counterfactualMinMcapGainPct: ["experiments", "counterfactualMinMcapGainPct"],
     };
 
     const applied = {};

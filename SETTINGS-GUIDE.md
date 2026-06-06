@@ -1166,6 +1166,29 @@ Matikan (balik pabrik): `set convictionSizing to false`
 
 ---
 
+### counterfactualReview
+
+| | |
+|---|---|
+| **Nilai sekarang** | `false` |
+| **Default** | `false` |
+| **Format** | `true` atau `false` |
+| **Status** | 🧪 EKSPERIMEN |
+| **Penjelasan** | Belajar dari pool yang kita **lewatkan**. Pakai snapshot kandidat (yang sama dipakai `candidateMomentum`) buat ngebandingin mcap pool yang cuma kita lihat tapi NGGAK kita masuki — pas briefing harian, bot lapor: berapa pool yang kita skip terus malah naik (≥`counterfactualMinMcapGainPct`%, "yang lolos") vs berapa yang malah turun ("skip yang bener"). Ini cuma **bahan refleksi** di briefing — NGGAK nge-blok atau nge-ubah apa pun. OFF = nggak ada section ini (pabrik) |
+| **Catatan** | Kalau dinyalain, snapshot kandidat tetap direkam walau `candidateMomentum` OFF. Horizonnya pendek (candidate-memory cuma simpan ~24 jam), jadi ini review skip RECENT, bukan jangka panjang. Pool dianggap "dimasuki" kalau ada di `pool-memory.json` (riwayat deploy). Fail-open (kalau error, briefing tetap jalan) |
+
+**Contoh nyalakan:**
+
+```
+set counterfactualReview to true
+```
+
+Atur ambang "dianggap pop" (mis. 40%): `set counterfactualMinMcapGainPct to 40`
+
+Matikan (balik pabrik): `set counterfactualReview to false`
+
+---
+
 ---
 
 # CATATAN — GMGN & DUA SISTEM INDIKATOR

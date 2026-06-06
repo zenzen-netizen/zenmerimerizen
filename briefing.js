@@ -3,6 +3,8 @@ import { log } from "./logger.js";
 import { getPerformanceSummary, getHourlyProfile } from "./lessons.js";
 import { config } from "./config.js";
 import { getOpenRouterBalance, getOpenRouter24hCost, getOpenRouterCredits } from "./openrouter-usage.js";
+import { getSkipReview } from "./candidate-memory.js";
+import { getDeployedPoolAddresses } from "./pool-memory.js";
 
 // Escape data-derived text before embedding in HTML messages (lesson rules can
 // contain <, >, & — e.g. "PnL -50% <= -50%" — which break Telegram's HTML parser).
@@ -207,6 +209,37 @@ function buildTimeProfileSection() {
   return lines.join("\n");
 }
 
+// 🧪 Experiment #8: counterfactual skip review. Gated by the flag (default off).
+// Reports pools we passed on whose mcap later popped (the ones that got away) and
+// how many fell (good skips). Fail-open — never breaks the briefing.
+function buildSkipReviewSection() {
+  if (!config.experiments?.counterfactualReview) return null;
+  try {
+    const review = getSkipReview({
+      deployedPoolAddresses: getDeployedPoolAddresses(),
+      minMcapGainPct: config.experiments.counterfactualMinMcapGainPct ?? 25,
+    });
+    if (!review || review.skipped === 0) return null;
+    const lines = [
+      `<b>🧪 Skip Review (recent):</b>`,
+      `👀 Passed on ${review.skipped} pools — ${review.dropped} later fell (good skips)`,
+    ];
+    if (review.gainers.length > 0) {
+      lines.push(
+        ...review.gainers.map(
+          (g) => `📈 ${esc(g.name)}: mcap ${g.mcap_delta_pct >= 0 ? "+" : ""}${g.mcap_delta_pct}% since first seen (~${g.span_min}m)`,
+        ),
+      );
+    } else {
+      lines.push("✅ None of the skipped pools popped meaningfully.");
+    }
+    return lines.join("\n");
+  } catch (e) {
+    log("briefing_error", `skip review failed: ${e.message}`);
+    return null;
+  }
+}
+
 export async function generateBriefing() {
   const state = loadJson(STATE_FILE) || { positions: {}, recentEvents: [] };
   const lessonsData = loadJson(LESSONS_FILE) || { lessons: [], performance: [] };
@@ -269,6 +302,8 @@ export async function generateBriefing() {
     buildLearningSection(lessonsData, last24h) || "",
     "",
     buildTimeProfileSection() || "",
+    "",
+    buildSkipReviewSection() || "",
     "",
     buildRecommendations(lessonsData.performance) || "",
     "────────────────"

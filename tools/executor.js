@@ -9,7 +9,7 @@ import {
   closePosition,
   searchPools,
 } from "./dlmm.js";
-import { getWalletBalances, swapToken } from "./wallet.js";
+import { getWalletBalances, swapToken, quoteSellPriceImpact } from "./wallet.js";
 import { studyTopLPers } from "./study.js";
 import { addLesson, clearAllLessons, clearPerformance, removeLessonsByKeyword, getPerformanceHistory, getHourlyProfile, pinLesson, unpinLesson, listLessons } from "../lessons.js";
 import { setPositionInstruction } from "../state.js";
@@ -453,6 +453,9 @@ const toolMap = {
       rsiOversold: ["indicators", "rsiOversold", ["chartIndicators", "rsiOversold"]],
       rsiOverbought: ["indicators", "rsiOverbought", ["chartIndicators", "rsiOverbought"]],
       requireAllIntervals: ["indicators", "requireAllIntervals", ["chartIndicators", "requireAllIntervals"]],
+      // experiments (🧪 GRUP 16 — default OFF = factory behavior)
+      exitLiquidityCheck: ["experiments", "exitLiquidityCheck"],
+      exitLiquidityMaxSlippagePct: ["experiments", "exitLiquidityMaxSlippagePct"],
     };
 
     const applied = {};
@@ -872,6 +875,34 @@ async function runSafetyChecks(name, args) {
             pass: false,
             reason: `Insufficient SOL: have ${balance.sol} SOL, need ${minRequired} SOL (${amountY} deploy + ${gasReserve} gas reserve).`,
           };
+        }
+      }
+
+      // ─── 🧪 Experiment #3: exit-liquidity check ───────────────
+      // OFF by default → skipped entirely (factory behavior). When ON, probe the
+      // round-trip cost of entering+exiting the full position back to SOL and
+      // reject pools that are too illiquid to leave cleanly. Fail-open: a quote
+      // hiccup must never block a deploy.
+      if (
+        config.experiments?.exitLiquidityCheck &&
+        args.base_mint &&
+        process.env.DRY_RUN !== "true"
+      ) {
+        const maxPct = Number(config.experiments.exitLiquidityMaxSlippagePct ?? 10);
+        try {
+          const probe = await quoteSellPriceImpact({ baseMint: args.base_mint, solNotional: amountY });
+          log(
+            "experiment",
+            `exitLiquidityCheck: round-trip ${probe.roundTripLossPct.toFixed(2)}% (impact ${probe.impactPct.toFixed(2)}%) for ${args.pool_name || args.base_mint} @ ${amountY} SOL — limit ${maxPct}%`,
+          );
+          if (Number.isFinite(probe.roundTripLossPct) && probe.roundTripLossPct > maxPct) {
+            return {
+              pass: false,
+              reason: `🧪 exit-liquidity: round-trip cost ${probe.roundTripLossPct.toFixed(1)}% > ${maxPct}% limit — too illiquid to exit cleanly (experimental gate).`,
+            };
+          }
+        } catch (e) {
+          log("experiment", `exitLiquidityCheck probe failed — allowing deploy (fail-open): ${e.message}`);
         }
       }
 

@@ -284,6 +284,19 @@ export const config = {
     rsiOverbought: indicatorUserConfig.rsiOverbought ?? 80,
     requireAllIntervals: indicatorUserConfig.requireAllIntervals ?? false,
   },
+
+  // ─── Experimental Features (🧪 GRUP 16) ─────────────────────
+  // Every flag defaults to false → OFF = factory behavior: the feature's code
+  // path is skipped entirely, so the bot runs exactly as if it didn't exist.
+  // Toggle via /setcfg or /settings; shown grouped under 🧪 in /config so it's
+  // easy to track what's still experimental.
+  experiments: {
+    // #3 Exit-liquidity check — before a deploy, probe the round-trip cost of
+    // entering and exiting the full position back to SOL (Jupiter quote, no real
+    // tx). Skip pools where that cost exceeds exitLiquidityMaxSlippagePct.
+    exitLiquidityCheck:          u.exitLiquidityCheck          ?? false,
+    exitLiquidityMaxSlippagePct: u.exitLiquidityMaxSlippagePct ?? 10,
+  },
 };
 
 /**

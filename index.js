@@ -1239,7 +1239,22 @@ function getConfigValue(key) {
 }
 
 async function requestConfirmation(toolName, args) {
-  const changes = args.changes || {};
+  // Accept both shapes: { changes: {...} } and the flat { key, value } pair that
+  // weak models use (they cannot fill a free-form object param). Coerce value type
+  // the same way the executor does so the prompt shows the real target value.
+  let changes = (args.changes && typeof args.changes === "object") ? { ...args.changes } : {};
+  if (Object.keys(changes).length === 0 && typeof args.key === "string" && args.key.trim()) {
+    const v = args.value;
+    let coerced = v;
+    if (typeof v === "string") {
+      const lc = v.trim().toLowerCase();
+      if (lc === "true") coerced = true;
+      else if (lc === "false") coerced = false;
+      else if (lc === "off" || lc === "null") coerced = null;
+      else if (v.trim() !== "" && Number.isFinite(Number(v))) coerced = Number(v);
+    }
+    changes = { [args.key.trim()]: coerced };
+  }
 
   // Drop no-op entries (requested value already matches live config) so we never
   // prompt for a change that does nothing. If nothing actually changes, skip the

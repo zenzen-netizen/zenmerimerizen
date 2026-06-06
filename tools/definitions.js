@@ -396,20 +396,30 @@ Strategy: strategy, binsBelow, minBinsBelow, maxBinsBelow, defaultBinsBelow
 Hive/API: hiveMindUrl, hiveMindApiKey, agentId, hiveMindPullMode, publicApiKey, agentMeridianApiUrl, lpAgentRelayEnabled
 Indicators: chartIndicatorsEnabled, indicatorEntryPreset, indicatorExitPreset, rsiLength, indicatorIntervals, indicatorCandles, rsiOversold, rsiOverbought, requireAllIntervals
 
-Reason is optional but helpful — logged as a lesson when provided.`,
+Reason is optional but helpful — logged as a lesson when provided.
+
+To change ONE setting, prefer the flat \`key\`/\`value\` pair (e.g. key="minTokenAgeHours", value="3"). Use the \`changes\` object only for changing several settings at once. Always include the actual value(s) — never call this with empty changes.`,
       parameters: {
         type: "object",
         properties: {
+          key: {
+            type: "string",
+            description: "Single setting name to change (use with `value`). e.g. \"minTokenAgeHours\""
+          },
+          value: {
+            type: "string",
+            description: "New value for `key`. Pass numbers/booleans as text — e.g. \"3\", \"true\", \"off\"."
+          },
           changes: {
             type: "object",
-            description: "Key-value pairs of settings to update. e.g. { \"takeProfitPct\": 8 }"
+            description: "Multiple settings at once as key-value pairs. e.g. { \"takeProfitPct\": 8, \"minHolders\": 600 }"
           },
           reason: {
             type: "string",
             description: "Why you are making this change — what you observed that justified it"
           }
         },
-        required: ["changes"]
+        required: []
       }
     }
   },

@@ -461,6 +461,7 @@ const toolMap = {
       marketRegimeMaxDrop24hPct: ["experiments", "marketRegimeMaxDrop24hPct"],
       candidateMomentum: ["experiments", "candidateMomentum"],
       narrativeProfileSignal: ["experiments", "narrativeProfileSignal"],
+      expectedYieldSignal: ["experiments", "expectedYieldSignal"],
     };
 
     const applied = {};

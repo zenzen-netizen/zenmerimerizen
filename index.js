@@ -7,7 +7,7 @@ import { agentLoop } from "./agent.js";
 import { log } from "./logger.js";
 import { getMyPositions, closePosition, getActiveBin } from "./tools/dlmm.js";
 import { getWalletBalances, getSolMarketRegime } from "./tools/wallet.js";
-import { getTopCandidates } from "./tools/screening.js";
+import { getTopCandidates, formatYieldToMe } from "./tools/screening.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
 import { config, reloadScreeningThresholds, computeDeployAmount } from "./config.js";
 import { evolveThresholds, getPerformanceSummary, listLessons, classifySession, currentWibSession } from "./lessons.js";
@@ -627,6 +627,22 @@ export async function runScreeningCycle({ silent = false } = {}) {
         } catch { /* fail-open — omit the line */ }
       }
 
+      // 🧪 Experiment #2: expected yield-to-me (proxy) — soft, trusted line (our
+      // own footprint + fee-capture estimate, not external text). OFF by default →
+      // yieldLine stays null and drops out of the block. Fail-open.
+      let yieldLine = null;
+      if (config.experiments?.expectedYieldSignal) {
+        try {
+          const txt = formatYieldToMe({
+            deployAmountSol: deployAmount,
+            solPriceUsd: currentBalance.sol_price,
+            tvlUsd: pool.tvl ?? pool.active_tvl,
+            feeActiveTvlRatio: pool.fee_active_tvl_ratio,
+          });
+          if (txt) yieldLine = `  yield_to_me: ${txt}`;
+        } catch { /* fail-open — omit the line */ }
+      }
+
       // OKX signals
       const okxParts = [
         pool.risk_level     != null ? `risk=${pool.risk_level}`               : null,
@@ -658,6 +674,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
           `  smart_wallets: ${sw?.in_pool?.length ?? 0} present${sw?.in_pool?.length ? ` → CONFIDENCE BOOST (${sw.in_pool.map(w => w.name).join(", ")})` : ""}`,
           activeBin != null ? `  active_bin: ${activeBin}` : null,
           momentumLine,
+          yieldLine,
           n?.narrative ? `  narrative_untrusted: ${sanitizeUntrustedPromptText(n.narrative, 500)}` : `  narrative_untrusted: none`,
           mem ? `  memory_untrusted: ${sanitizeUntrustedPromptText(mem, 500)}` : null,
         ].filter(Boolean).join("\n");
@@ -678,6 +695,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
           activeBin != null ? `  active_bin: ${activeBin}` : null,
           priceChange != null ? `  1h: price${priceChange >= 0 ? "+" : ""}${priceChange}%, net_buyers=${netBuyers ?? "?"}` : null,
           momentumLine,
+          yieldLine,
           n?.narrative ? `  narrative_untrusted: ${sanitizeUntrustedPromptText(n.narrative, 500)}` : `  narrative_untrusted: none`,
           mem ? `  memory_untrusted: ${sanitizeUntrustedPromptText(mem, 500)}` : null,
         ].filter(Boolean).join("\n");
@@ -1366,6 +1384,7 @@ export function formatFullConfig() {
       ["marketRegimeMaxDrop24hPct", fmt(c.experiments?.marketRegimeMaxDrop24hPct)],
       ["candidateMomentum", fmt(c.experiments?.candidateMomentum)],
       ["narrativeProfileSignal", fmt(c.experiments?.narrativeProfileSignal)],
+      ["expectedYieldSignal", fmt(c.experiments?.expectedYieldSignal)],
     ]),
     group(`━ GMGN — ${gmgnActive ? "AKTIF (source=gmgn)" : `tidak aktif (source=${c.screening.source}, blok ini diabaikan)`}`, [
       ["interval", fmt(c.gmgn.interval)],

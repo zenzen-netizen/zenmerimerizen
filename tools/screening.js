@@ -30,6 +30,43 @@ function normalizeSymbol(symbol) {
   return String(symbol || "").trim().toUpperCase();
 }
 
+/**
+ * 🧪 Experiment #2 (proxy): rough "expected yield to me" for one candidate.
+ *
+ * The accurate version needs per-bin liquidity distribution from the SDK; this
+ * proxy uses only data we already have at screening time and surfaces two numbers:
+ *   - share of pool TVL  = (deposit × SOL price) / pool TVL  → how big our footprint
+ *     is (also a soft exit-liquidity hint: a large share = we ARE the liquidity)
+ *   - fees/window        = deposit × fee/active-TVL ratio    → fees we'd capture if
+ *     our liquidity earned at the pool's per-dollar rate
+ *
+ * Explicitly flagged as a proxy because it ignores bin concentration. Soft signal
+ * only. Returns one compact line, or null when inputs are unusable (caller drops
+ * the null line) — never throws.
+ */
+export function formatYieldToMe({ deployAmountSol, solPriceUsd, tvlUsd, feeActiveTvlRatio } = {}) {
+  const dep = Number(deployAmountSol);
+  if (!Number.isFinite(dep) || dep <= 0) return null;
+
+  const parts = [];
+  const price = Number(solPriceUsd);
+  const tvl = Number(tvlUsd);
+  if (Number.isFinite(price) && price > 0 && Number.isFinite(tvl) && tvl > 0) {
+    const depUsd = dep * price;
+    const sharePct = (depUsd / tvl) * 100;
+    const shareStr = sharePct < 0.01 ? "<0.01" : sharePct.toFixed(2);
+    parts.push(`~${shareStr}% of pool TVL ($${Math.round(depUsd)} / $${Math.round(tvl)})`);
+  }
+
+  const ratio = Number(feeActiveTvlRatio);
+  if (Number.isFinite(ratio) && ratio > 0) {
+    parts.push(`~${(dep * ratio).toFixed(4)} SOL fees/window`);
+  }
+
+  if (parts.length === 0) return null;
+  return `${parts.join(", ")} (proxy — ignores bin concentration)`;
+}
+
 function scoreCandidate(pool) {
   if (Number.isFinite(Number(pool.gmgn_score))) {
     return Number(pool.gmgn_score) + Number(pool.fee_active_tvl_ratio || 0) * 500;

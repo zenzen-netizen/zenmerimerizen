@@ -312,6 +312,12 @@ export const config = {
     // SCREENER prompt (best/weakest narratives). Tagging is collected passively;
     // this flag only gates the prompt nudge. Never overrides hard rules.
     narrativeProfileSignal:      u.narrativeProfileSignal      ?? false,
+    // #2 Expected yield-to-me (proxy) — annotate each candidate with a rough
+    // estimate of OUR footprint and fee capture: share of pool TVL (deposit USD /
+    // pool TVL) + expected fees/window (deposit × fee/active-TVL ratio). A proxy —
+    // it ignores per-bin liquidity concentration (the accurate version needs the
+    // SDK's bin reserves). Soft signal only; never gates a deploy.
+    expectedYieldSignal:         u.expectedYieldSignal         ?? false,
   },
 };
 

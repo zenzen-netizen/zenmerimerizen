@@ -127,6 +127,57 @@ export async function getWalletBalances() {
  */
 const SOL_MINT = "So11111111111111111111111111111111111111112";
 
+const JUPITER_QUOTE_API = "https://api.jup.ag/swap/v1/quote";
+
+// Read-only Jupiter quote — no signing, no tx. Returns the raw quote object.
+async function jupiterQuote({ inputMint, outputMint, amount }) {
+  const search = new URLSearchParams({
+    inputMint,
+    outputMint,
+    amount: String(amount),
+    slippageBps: "50",
+    restrictIntermediateTokens: "true",
+  });
+  const key = getJupiterApiKey();
+  const res = await fetch(`${JUPITER_QUOTE_API}?${search.toString()}`, {
+    headers: key ? { "x-api-key": key } : {},
+  });
+  if (!res.ok) throw new Error(`quote ${res.status}`);
+  const q = await res.json();
+  if (q.error || !q.outAmount) throw new Error(q.error || "no route");
+  return q;
+}
+
+/**
+ * Probe exit liquidity: how costly is it, right now, to round-trip `solNotional`
+ * SOL through `baseMint` and back to SOL? Two read-only quotes — size in
+ * (SOL→base) then sell back (base→SOL). The realized round-trip loss is
+ * interpretation-free (no reliance on priceImpactPct semantics) and captures
+ * impact in BOTH directions plus fees/spread — exactly the "easy in, hard out"
+ * cost for thin memecoins.
+ *
+ * Returns { roundTripLossPct, impactPct, baseAmount, outSol }. Throws on no
+ * route / bad input so callers can fail-open.
+ */
+export async function quoteSellPriceImpact({ baseMint, solNotional }) {
+  if (!baseMint || normalizeMint(baseMint) === SOL_MINT) throw new Error("no base mint to probe");
+  const solLamports = Math.floor(Number(solNotional) * 1e9);
+  if (!Number.isFinite(solLamports) || solLamports <= 0) throw new Error("bad notional");
+
+  // 1) Size: how much base does solNotional SOL buy?
+  const buy = await jupiterQuote({ inputMint: SOL_MINT, outputMint: baseMint, amount: solLamports });
+  const baseAmount = Number(buy.outAmount);
+  if (!Number.isFinite(baseAmount) || baseAmount <= 0) throw new Error("zero base out");
+
+  // 2) Sell that base straight back to SOL.
+  const sell = await jupiterQuote({ inputMint: baseMint, outputMint: SOL_MINT, amount: baseAmount });
+  const outLamports = Number(sell.outAmount);
+  const roundTripLossPct = ((solLamports - outLamports) / solLamports) * 100;
+  const impactPct = Math.abs(Number(sell.priceImpactPct ?? 0)) * 100; // Jupiter returns a fraction
+
+  return { roundTripLossPct, impactPct, baseAmount, outSol: outLamports / 1e9 };
+}
+
 // Normalize any SOL-like address to the correct wrapped SOL mint
 export function normalizeMint(mint) {
   if (!mint) return mint;

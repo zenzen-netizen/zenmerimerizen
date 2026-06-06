@@ -1122,6 +1122,27 @@ Matikan (balik pabrik): `set narrativeProfileSignal to false`
 
 ---
 
+### expectedYieldSignal
+
+| | |
+|---|---|
+| **Nilai sekarang** | `false` |
+| **Default** | `false` |
+| **Format** | `true` atau `false` |
+| **Status** | 🧪 EKSPERIMEN |
+| **Penjelasan** | Nambahin satu baris `yield_to_me:` di tiap blok kandidat berisi perkiraan kasar **seberapa besar porsi kita di pool** (modal kita dalam USD ÷ TVL pool) dan **perkiraan fee yang kita tangkap per window** (modal × rasio fee/active-TVL). Tujuannya nerjemahin rasio fee yang abstrak jadi angka konkret di ukuran posisi kita sendiri. Sinyal **soft** (cuma bahan pertimbangan LLM, NGGAK nge-blok deploy). OFF = baris ini nggak muncul (pabrik) |
+| **Catatan** | Ini **proxy**, bukan angka presisi — sengaja nggak ngitung di bin mana likuiditas terkonsentrasi (versi akurat butuh distribusi likuiditas per-bin dari SDK). Pakai data yang udah ada di siklus screening (harga SOL dari saldo wallet, TVL & rasio fee dari kandidat), jadi nggak ada panggilan API tambahan. Share pool juga jadi sinyal halus likuiditas: porsi gede = kita yang jadi likuiditasnya = lebih susah keluar. Kalau data kurang, baris-nya di-skip (fail-open) |
+
+**Contoh nyalakan:**
+
+```
+set expectedYieldSignal to true
+```
+
+Matikan (balik pabrik): `set expectedYieldSignal to false`
+
+---
+
 ---
 
 # CATATAN — GMGN & DUA SISTEM INDIKATOR

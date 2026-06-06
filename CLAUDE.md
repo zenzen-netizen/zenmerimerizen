@@ -96,6 +96,17 @@ Sets defined in `agent.js:6-7`. If you add a tool, also add it to the relevant s
 
 **`computeDeployAmount(walletSol)`** — scales position size with wallet balance (compounding). Formula: `clamp(deployable × positionSizePct, floor=deployAmountSol, ceil=maxDeployAmount)`.
 
+### Experimental Features (🧪 GRUP 16)
+
+Opt-in experiments live in `config.experiments` and surface as **GRUP 16 — Eksperimen** in `/config` (and in SETTINGS-GUIDE.md → `/guide`). Convention:
+- **Every flag defaults to `false`** → OFF = factory behavior: the feature's code path is skipped entirely. Toggling OFF always returns the bot to its pre-feature behavior.
+- Keys registered in `CONFIG_MAP` (executor.js) like any other, so `/setcfg` and `update_config` work.
+- Code paths must **fail-open** (an error in an experiment never blocks the normal flow).
+- Current experiments:
+  - `exitLiquidityCheck` (+ `exitLiquidityMaxSlippagePct`): pre-deploy gate in `runSafetyChecks` (executor.js). Probes round-trip cost via `quoteSellPriceImpact()` (wallet.js, read-only Jupiter quotes) and rejects pools too illiquid to exit. Skipped under `DRY_RUN`.
+
+When adding an experiment: add the flag to `config.experiments` (default false), register in `CONFIG_MAP`, add a row to GRUP 16 in `formatFullConfig()` (index.js), document a GRUP 16 entry in SETTINGS-GUIDE.md, and make the code path fail-open.
+
 ---
 
 ## Position Lifecycle

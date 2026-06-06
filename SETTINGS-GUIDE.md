@@ -1000,6 +1000,52 @@ config.js            ← Bot membaca semua file di atas (JANGAN EDIT)
 
 ---
 
+# GRUP 16 — EKSPERIMEN (Fitur Percobaan) 🧪
+
+> Di config.js masuk ke: `config.experiments`
+>
+> **Semua fitur di grup ini DEFAULT OFF (`false`).** OFF = perilaku pabrik — kode fiturnya dilewati total, bot jalan persis seperti tanpa fitur ini. Nyalakan satu-satu buat eksperimen; matikan = balik normal. Di `/config` grup ini ditandai 🧪 biar gampang di-track mana yang masih percobaan.
+
+---
+
+### exitLiquidityCheck
+
+| | |
+|---|---|
+| **Nilai sekarang** | `false` |
+| **Default** | `false` |
+| **Format** | `true` atau `false` |
+| **Status** | 🧪 EKSPERIMEN |
+| **Penjelasan** | Sebelum deploy, bot "tes jual": pakai quote Jupiter (TANPA transaksi beneran) buat beli token seukuran posisi lalu jual balik ke SOL, terus ukur biaya **round-trip**-nya. Kalau biayanya di atas batas → pool di-skip karena likuiditas exit-nya jelek ("masuk gampang, keluar susah"). OFF = nggak ngetes (pabrik) |
+| **Catatan** | Cuma jalan pas LIVE (di-skip saat `DRY_RUN`). Kalau quote-nya gagal/timeout, deploy tetap diizinkan (fail-open) — biar API hiccup nggak ngeblok semua deploy |
+
+---
+
+### exitLiquidityMaxSlippagePct
+
+| | |
+|---|---|
+| **Nilai sekarang** | `10` |
+| **Default** | `10` |
+| **Format** | Angka positif (persen) |
+| **Opsi** | `1` – `50` |
+| **Status** | 🧪 EKSPERIMEN |
+| **Penjelasan** | Batas biaya round-trip dalam %. Diukur: `(SOL masuk − SOL keluar) / SOL masuk × 100`. Di atas batas ini → pool di-skip. Cuma kepakai kalau `exitLiquidityCheck = true` |
+| **Tips** | Kalibrasi dari log `exitLiquidityCheck: round-trip X%`. Memecoin tipis bisa 15–30%. Mulai longgar (mis. `15`), perketat pelan-pelan sambil lihat log |
+
+**Contoh nyalakan:**
+
+```
+set exitLiquidityCheck to true
+set exitLiquidityMaxSlippagePct to 15
+```
+
+Matikan (balik pabrik): `set exitLiquidityCheck to false`
+
+---
+
+---
+
 # CATATAN — GMGN & DUA SISTEM INDIKATOR
 
 > Bagian ini menjawab kebingungan umum: "blok GMGN di `/config` itu semua kepakai atau tidak?"

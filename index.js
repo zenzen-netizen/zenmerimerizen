@@ -1385,6 +1385,8 @@ export function formatFullConfig() {
       ["candidateMomentum", fmt(c.experiments?.candidateMomentum)],
       ["narrativeProfileSignal", fmt(c.experiments?.narrativeProfileSignal)],
       ["expectedYieldSignal", fmt(c.experiments?.expectedYieldSignal)],
+      ["convictionSizing", fmt(c.experiments?.convictionSizing)],
+      ["convictionSizingMaxAdjustPct", fmt(c.experiments?.convictionSizingMaxAdjustPct)],
     ]),
     group(`━ GMGN — ${gmgnActive ? "AKTIF (source=gmgn)" : `tidak aktif (source=${c.screening.source}, blok ini diabaikan)`}`, [
       ["interval", fmt(c.gmgn.interval)],

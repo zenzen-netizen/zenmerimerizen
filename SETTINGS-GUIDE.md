@@ -1143,6 +1143,29 @@ Matikan (balik pabrik): `set expectedYieldSignal to false`
 
 ---
 
+### convictionSizing
+
+| | |
+|---|---|
+| **Nilai sekarang** | `false` |
+| **Default** | `false` |
+| **Format** | `true` atau `false` |
+| **Status** | 🧪 EKSPERIMEN |
+| **Penjelasan** | Bikin ukuran deploy ikut **keyakinan** screener pada setup itu: `high` → posisi lebih gede, `low` → lebih kecil, `medium` (atau kosong) → nggak berubah. Besarnya geseran dibatasi `convictionSizingMaxAdjustPct` (default ±30%). **PENTING:** hasilnya SELALU di-clamp ulang ke rentang min–max yang kamu set (`deployAmountSol` … `maxDeployAmount`), jadi **nggak akan pernah** nembus batas itu — keyakinan cuma nentuin posisi di DALAM pita min/max, bukan menggantikannya. OFF = ukuran deploy persis seperti biasa (pabrik) |
+| **Catatan** | Ini **satu-satunya** eksperimen yang menggerakkan modal beneran, makanya pitanya sengaja sempit & di-clamp. Cek saldo & exit-liquidity tetap memvalidasi jumlah HASIL geseran (digeser dulu, baru dicek). Screener dikasih tahu lewat baris prompt (saat ON) buat ngisi `conviction` di `deploy_position`; kalau modelnya nggak ngisi → dianggap medium = nggak berubah. Param `conviction` di tool nganggur saat flag OFF |
+
+**Contoh nyalakan:**
+
+```
+set convictionSizing to true
+```
+
+Atur besar geseran maksimal (mis. jadi ±20%): `set convictionSizingMaxAdjustPct to 20`
+
+Matikan (balik pabrik): `set convictionSizing to false`
+
+---
+
 ---
 
 # CATATAN — GMGN & DUA SISTEM INDIKATOR

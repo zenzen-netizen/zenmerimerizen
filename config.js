@@ -318,6 +318,12 @@ export const config = {
     // it ignores per-bin liquidity concentration (the accurate version needs the
     // SDK's bin reserves). Soft signal only; never gates a deploy.
     expectedYieldSignal:         u.expectedYieldSignal         ?? false,
+    // #6 Conviction sizing — let the SCREENER's conviction nudge the deploy size:
+    // high → bigger, low → smaller, by at most convictionSizingMaxAdjustPct, and
+    // ALWAYS re-clamped to [deployAmountSol, maxDeployAmount] so it can never breach
+    // the configured min/max sizing. medium/omitted = no change. See applyConvictionSizing.
+    convictionSizing:            u.convictionSizing            ?? false,
+    convictionSizingMaxAdjustPct: u.convictionSizingMaxAdjustPct ?? 30,
   },
 };
 
@@ -342,6 +348,30 @@ export function computeDeployAmount(walletSol) {
   const dynamic    = deployable * pct;
   const result     = Math.min(ceil, Math.max(floor, dynamic));
   return parseFloat(result.toFixed(2));
+}
+
+/**
+ * 🧪 Experiment #6: conviction sizing. Nudge a chosen deploy amount up or down
+ * based on the SCREENER's conviction in the setup, but strictly INSIDE the same
+ * [floor=deployAmountSol, ceil=maxDeployAmount] rails computeDeployAmount uses —
+ * so it can NEVER breach the configured min/max sizing (the user's worry).
+ *
+ *   high → amt × (1 + adj),  low → amt × (1 - adj),  medium/unknown → amt
+ *   adj = convictionSizingMaxAdjustPct / 100   (e.g. 30 → ±30%)
+ *
+ * Returns the input unchanged when the experiment is off or conviction is
+ * medium/missing (multiplier 1.0 = factory behavior). Fail-safe on bad input.
+ */
+export function applyConvictionSizing(amountSol, conviction) {
+  const amt = Number(amountSol);
+  if (!Number.isFinite(amt) || amt <= 0) return amountSol;
+  if (!config.experiments?.convictionSizing) return amt;
+  const adj = Math.max(0, Number(config.experiments.convictionSizingMaxAdjustPct ?? 30)) / 100;
+  const mult = conviction === "high" ? 1 + adj : conviction === "low" ? 1 - adj : 1;
+  if (mult === 1) return amt;
+  const floor = config.management.deployAmountSol;
+  const ceil  = config.risk.maxDeployAmount;
+  return parseFloat(Math.min(ceil, Math.max(floor, amt * mult)).toFixed(2));
 }
 
 /**

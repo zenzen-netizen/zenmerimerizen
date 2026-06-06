@@ -1173,6 +1173,7 @@ export function formatFullConfig() {
   const secret = (v) => (v && String(v).length ? "(set)" : "(unset)");
   const group = (title, rows) => [title, ...rows.map(([k, v]) => `  ${k}: ${v}`)].join("\n");
   const ir = c.gmgn.indicatorRules || {};
+  const gmgnActive = String(c.screening.source).toLowerCase() === "gmgn";
 
   const blocks = [
     group("━ GRUP 1 — Risiko & Modal", [
@@ -1299,7 +1300,7 @@ export function formatFullConfig() {
       ["hiveMindPullMode", fmt(c.hiveMind.pullMode)],
       ["hiveMindUrl", fmt(c.hiveMind.url)],
     ]),
-    group("━ GMGN (aktif bila screeningSource=gmgn)", [
+    group(`━ GMGN — ${gmgnActive ? "AKTIF (source=gmgn)" : `tidak aktif (source=${c.screening.source}, blok ini diabaikan)`}`, [
       ["interval", fmt(c.gmgn.interval)],
       ["orderBy", fmt(c.gmgn.orderBy)],
       ["direction", fmt(c.gmgn.direction)],

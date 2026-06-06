@@ -483,14 +483,15 @@ export async function runScreeningCycle({ silent = false } = {}) {
     }
     const candidates = (topCandidates?.candidates || topCandidates?.pools || []).slice(0, 10);
 
-    // 🧪 Experiment #1: candidate momentum — snapshot this cycle's candidates so a
-    // later cycle can show TVL/volume drift. OFF by default → skipped (factory
-    // behavior). Fail-open: a snapshot hiccup must never derail screening.
-    if (config.experiments?.candidateMomentum) {
+    // 🧪 Experiments #1 (candidate momentum) + #8 (counterfactual skip review):
+    // both need this cycle's candidate snapshots, so record when EITHER is on.
+    // OFF by default → skipped (factory behavior). Fail-open: a snapshot hiccup
+    // must never derail screening.
+    if (config.experiments?.candidateMomentum || config.experiments?.counterfactualReview) {
       try {
         recordCandidateSnapshots(candidates);
       } catch (e) {
-        log("experiment", `candidateMomentum snapshot failed — continuing (fail-open): ${e.message}`);
+        log("experiment", `candidate snapshot failed — continuing (fail-open): ${e.message}`);
       }
     }
 
@@ -1387,6 +1388,8 @@ export function formatFullConfig() {
       ["expectedYieldSignal", fmt(c.experiments?.expectedYieldSignal)],
       ["convictionSizing", fmt(c.experiments?.convictionSizing)],
       ["convictionSizingMaxAdjustPct", fmt(c.experiments?.convictionSizingMaxAdjustPct)],
+      ["counterfactualReview", fmt(c.experiments?.counterfactualReview)],
+      ["counterfactualMinMcapGainPct", fmt(c.experiments?.counterfactualMinMcapGainPct)],
     ]),
     group(`━ GMGN — ${gmgnActive ? "AKTIF (source=gmgn)" : `tidak aktif (source=${c.screening.source}, blok ini diabaikan)`}`, [
       ["interval", fmt(c.gmgn.interval)],

@@ -104,6 +104,46 @@ export function getCandidateMomentum(poolAddress) {
 }
 
 /**
+ * 🧪 Experiment #8: counterfactual skip review. Looks at pools we snapshotted
+ * but never deployed into (address not among deployedPoolAddresses) and measures
+ * their mcap drift from oldest → newest retained snapshot. Surfaces the biggest
+ * "ones that got away" (gained ≥ minMcapGainPct) plus how many skips fell (which
+ * validates the skip). Reflection only — never gates anything.
+ *
+ * Bounded by candidate-memory's own retention (≤8 snaps/pool, 24h prune), so the
+ * horizon is short — fine for a daily briefing of recent skips.
+ */
+export function getSkipReview({ deployedPoolAddresses = [], minMcapGainPct = 25, limit = 3 } = {}) {
+  const deployed = new Set((deployedPoolAddresses || []).filter(Boolean));
+  const db = load();
+  const gainers = [];
+  let skipped = 0;
+  let dropped = 0;
+
+  for (const [addr, entry] of Object.entries(db)) {
+    if (deployed.has(addr)) continue;
+    const snaps = entry?.snaps || [];
+    if (snaps.length < 2) continue;
+    const first = num(snaps[0].mcap);
+    const last = num(snaps[snaps.length - 1].mcap);
+    if (first == null || last == null || first <= 0) continue;
+
+    skipped++;
+    const deltaPct = ((last - first) / first) * 100;
+    if (deltaPct < 0) dropped++;
+    if (deltaPct >= minMcapGainPct) {
+      const spanMin = Math.round(
+        (new Date(snaps[snaps.length - 1].ts).getTime() - new Date(snaps[0].ts).getTime()) / 60000,
+      );
+      gainers.push({ name: entry.name || addr.slice(0, 8), addr, mcap_delta_pct: round2(deltaPct), samples: snaps.length, span_min: spanMin });
+    }
+  }
+
+  gainers.sort((a, b) => b.mcap_delta_pct - a.mcap_delta_pct);
+  return { skipped, dropped, gainers: gainers.slice(0, limit) };
+}
+
+/**
  * Render a momentum object as one compact line for the candidate block, or null
  * if there's nothing useful to say (caller drops null lines).
  */

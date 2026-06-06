@@ -324,6 +324,13 @@ export const config = {
     // the configured min/max sizing. medium/omitted = no change. See applyConvictionSizing.
     convictionSizing:            u.convictionSizing            ?? false,
     convictionSizingMaxAdjustPct: u.convictionSizingMaxAdjustPct ?? 30,
+    // #8 Counterfactual skip review — reuse the candidate snapshots to review
+    // pools we LOOKED at but did NOT deploy into, and report in the daily briefing
+    // which skips later popped (mcap gain ≥ counterfactualMinMcapGainPct) vs fell.
+    // Reflection only — never gates anything. Short horizon (candidate-memory's 24h
+    // retention). When on, candidate snapshots are recorded even if #1 is off.
+    counterfactualReview:        u.counterfactualReview        ?? false,
+    counterfactualMinMcapGainPct: u.counterfactualMinMcapGainPct ?? 25,
   },
 };
 

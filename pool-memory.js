@@ -240,6 +240,14 @@ export function isBaseMintOnCooldown(baseMint) {
  * Tool handler: get_pool_memory
  * Returns deploy history and summary for a pool.
  */
+/**
+ * All pool addresses we have ever deployed into (the pool-memory keys). Used by
+ * the 🧪 counterfactual skip-review to tell "deployed" from "merely looked at".
+ */
+export function getDeployedPoolAddresses() {
+  return Object.keys(load());
+}
+
 export function getPoolMemory({ pool_address }) {
   if (!pool_address) return { error: "pool_address required" };
 

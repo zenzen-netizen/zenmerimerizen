@@ -6,6 +6,7 @@ import { getOpenRouterBalance, getOpenRouter24hCost, getOpenRouterCredits } from
 import { getSkipReview } from "./candidate-memory.js";
 import { getDeployedPoolAddresses } from "./pool-memory.js";
 import { getWalletBalances } from "./tools/wallet.js";
+import { getGasStats } from "./gas-tracker.js";
 import {
   computeTradeStats, formatStatsBlock, formatBreakdown, buildVerdict,
   buildRecommendations, buildRoleCostLines, estimateGasSol, buildTradeReport,
@@ -104,7 +105,7 @@ const LESSONS_FILE = "./lessons.json";
 
 // Combined cost section: LLM (broken down per agent role) + gas (estimate) + the
 // bottom line "did trading cover ALL costs?". `windowLabel` describes the period.
-function buildCostSection({ costData, balance, credits, gasSol, solPrice, netPnlUsd, windowLabel = "24h" }) {
+function buildCostSection({ costData, balance, credits, gasSol, gasIsEst = true, solPrice, netPnlUsd, windowLabel = "24h", windowDays = 1 }) {
   if (!costData && !balance && !credits && !gasSol) return null;
   const lines = [`<b>💵 Costs (${esc(windowLabel)}):</b>`];
 
@@ -118,10 +119,20 @@ function buildCostSection({ costData, balance, credits, gasSol, solPrice, netPnl
     lines.push(`🤖 LLM: $${llmCost.toFixed(4)}`);
   }
 
-  // ── Gas (estimate from on-chain action counts) ──
+  // ── Gas: real (from gas-tracker) when available, else estimate ──
   const gasUsd = gasSol != null && solPrice ? gasSol * solPrice : null;
   if (gasSol > 0) {
-    lines.push(`⛽ Gas (est): ~${gasSol.toFixed(4)} SOL${gasUsd != null ? ` (~$${gasUsd.toFixed(2)})` : ""}`);
+    lines.push(`⛽ Gas${gasIsEst ? " (est)" : ""}: ${gasIsEst ? "~" : ""}${gasSol.toFixed(4)} SOL${gasUsd != null ? ` (${gasIsEst ? "~" : ""}$${gasUsd.toFixed(2)})` : ""}`);
+    // gasReserve runway — how long the configured reserve lasts at this burn rate.
+    const reserve = config.management?.gasReserve;
+    if (reserve > 0 && windowDays > 0) {
+      const dailyBurn = gasSol / windowDays;
+      if (dailyBurn > 0) {
+        const runwayDays = reserve / dailyBurn;
+        const flag = runwayDays < 7 ? " ⚠️ tipis" : "";
+        lines.push(`🪫 gasReserve ${reserve} SOL ≈ ${runwayDays.toFixed(0)}d runway @ ${dailyBurn.toFixed(4)} SOL/hari${flag}`);
+      }
+    }
   }
 
   // ── Bottom line: trading net vs ALL costs (LLM + gas) ──
@@ -225,7 +236,9 @@ export async function generateBriefing() {
     getOpenRouterCredits(),
     getWalletBalances().catch(() => null),
   ]);
-  const gasSol = estimateGasSol(countOnChainActions(last24h.getTime()));
+  const gasStatsW = getGasStats(last24h.getTime());
+  const gasSol = gasStatsW.hasData ? gasStatsW.sol : estimateGasSol(countOnChainActions(last24h.getTime()));
+  const gasIsEst = !gasStatsW.hasData;
   const solPrice = wallet?.sol_price || 0;
 
   // 6. Format Message
@@ -255,7 +268,7 @@ export async function generateBriefing() {
     `<b>Current Portfolio:</b>`,
     `📂 Open Positions: ${openPositions.length}`,
     "",
-    buildCostSection({ costData, balance, credits, gasSol, solPrice, netPnlUsd: totalPnLUsd, windowLabel: "24h" }) || "",
+    buildCostSection({ costData, balance, credits, gasSol, gasIsEst, solPrice, netPnlUsd: totalPnLUsd, windowLabel: "24h", windowDays: 1 }) || "",
     "",
     buildLearningSection(lessonsData, last24h) || "",
     "",
@@ -298,7 +311,9 @@ export async function generatePeriodicBriefing(period = "week") {
     getOpenRouterCredits(),
     getWalletBalances().catch(() => null),
   ]);
-  const gasSol = estimateGasSol(countOnChainActions(since));
+  const gasStatsW = getGasStats(since);
+  const gasSol = gasStatsW.hasData ? gasStatsW.sol : estimateGasSol(countOnChainActions(since));
+  const gasIsEst = !gasStatsW.hasData;
   const solPrice = wallet?.sol_price || 0;
   const gasUsd = gasSol && solPrice ? gasSol * solPrice : null;
   // Longer windows: the account-level usage figure is the best LLM total we have
@@ -313,7 +328,15 @@ export async function generatePeriodicBriefing(period = "week") {
 
   const costLines = [`<b>💵 Costs (${days}d):</b>`];
   if (llmWindow != null) costLines.push(`🤖 LLM (${period}): $${llmWindow.toFixed(4)}`);
-  if (gasSol > 0) costLines.push(`⛽ Gas (est): ~${gasSol.toFixed(4)} SOL${gasUsd != null ? ` (~$${gasUsd.toFixed(2)})` : ""}`);
+  if (gasSol > 0) {
+    costLines.push(`⛽ Gas${gasIsEst ? " (est)" : ""}: ${gasIsEst ? "~" : ""}${gasSol.toFixed(4)} SOL${gasUsd != null ? ` (${gasIsEst ? "~" : ""}$${gasUsd.toFixed(2)})` : ""}`);
+    const reserve = config.management?.gasReserve;
+    const dailyBurn = gasSol / days;
+    if (reserve > 0 && dailyBurn > 0) {
+      const runwayDays = reserve / dailyBurn;
+      costLines.push(`🪫 gasReserve ${reserve} SOL ≈ ${runwayDays.toFixed(0)}d runway @ ${dailyBurn.toFixed(4)} SOL/hari${runwayDays < 7 ? " ⚠️ tipis" : ""}`);
+    }
+  }
   const totalCost = (llmWindow ?? 0) + (gasUsd ?? 0);
   if (totalCost > 0) {
     const real = netPnl - totalCost;

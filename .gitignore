@@ -35,3 +35,4 @@ docs/
 
 # Test files
 test-*.js
+gas-log.json

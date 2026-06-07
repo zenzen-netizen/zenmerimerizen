@@ -364,6 +364,9 @@ const toolMap = {
       minSolToOpen: ["management", "minSolToOpen"],
       deployAmountSol: ["management", "deployAmountSol"],
       gasReserve: ["management", "gasReserve"],
+      gasReserveAutoTune: ["management", "gasReserveAutoTune"],
+      gasReserveBufferDays: ["management", "gasReserveBufferDays"],
+      gasReserveFloorSol: ["management", "gasReserveFloorSol"],
       positionSizePct: ["management", "positionSizePct"],
       minAgeBeforeYieldCheck: ["management", "minAgeBeforeYieldCheck"],
       // risk

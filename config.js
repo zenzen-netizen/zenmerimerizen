@@ -186,6 +186,12 @@ export const config = {
     minSolToOpen:          u.minSolToOpen          ?? 0.55,
     deployAmountSol:       u.deployAmountSol       ?? 0.5,
     gasReserve:            u.gasReserve            ?? 0.2,
+    // gasReserve auto-tune (default OFF): when on, periodically right-sizes
+    // gasReserve from REAL measured gas burn (keep gasReserveBufferDays of runway,
+    // never below gasReserveFloorSol). OFF = gasReserve stays exactly as you set it.
+    gasReserveAutoTune:    u.gasReserveAutoTune    ?? false,
+    gasReserveBufferDays:  u.gasReserveBufferDays  ?? 14,
+    gasReserveFloorSol:    u.gasReserveFloorSol    ?? 0.03,
     positionSizePct:       u.positionSizePct       ?? 0.35,
     // Trailing take-profit
     trailingTakeProfit:    u.trailingTakeProfit    ?? true,
@@ -394,6 +400,23 @@ export function applyConvictionSizing(amountSol, conviction) {
   const floor = config.management.deployAmountSol;
   const ceil  = config.risk.maxDeployAmount;
   return parseFloat(Math.min(ceil, Math.max(floor, amt * mult)).toFixed(2));
+}
+
+/**
+ * Update one live config value AND persist it to user-config.json (flat key, the
+ * shape config reads on startup). Used by auto-tuners outside the update_config
+ * tool path. Returns true on a successful write. Fail-open.
+ */
+export function persistConfigChange(section, field, flatKey, value) {
+  if (config[section]) config[section][field] = value;
+  try {
+    const u = fs.existsSync(USER_CONFIG_PATH) ? JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")) : {};
+    u[flatKey] = value;
+    fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(u, null, 2));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

@@ -9,7 +9,8 @@ import { getMyPositions, closePosition, getActiveBin } from "./tools/dlmm.js";
 import { getWalletBalances, getSolMarketRegime } from "./tools/wallet.js";
 import { getTopCandidates, formatYieldToMe } from "./tools/screening.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
-import { config, reloadScreeningThresholds, computeDeployAmount } from "./config.js";
+import { config, reloadScreeningThresholds, computeDeployAmount, persistConfigChange } from "./config.js";
+import { getGasStats } from "./gas-tracker.js";
 import { evolveThresholds, getPerformanceSummary, getAllPerformance, listLessons, classifySession, currentWibSession } from "./lessons.js";
 import { buildTradeReport } from "./reports.js";
 import { executeTool, registerCronRestarter } from "./tools/executor.js";
@@ -252,8 +253,38 @@ async function runPeriodicBriefing(period) {
   }
 }
 
+/**
+ * gasReserve auto-tune (default OFF). When on, right-sizes gasReserve from REAL
+ * measured gas burn: keep `gasReserveBufferDays` of runway, never below
+ * `gasReserveFloorSol`. Only adjusts on a meaningful change (>20% and >0.005 SOL)
+ * to avoid churn. Needs ≥8 real gas records. Fail-open. OFF = gasReserve untouched.
+ */
+async function maybeAutoTuneGasReserve() {
+  try {
+    if (!config.management?.gasReserveAutoTune) return;
+    const sinceMs = Date.now() - 7 * 86400000;
+    const stats = getGasStats(sinceMs);
+    if (!stats.hasData || stats.count < 8) return;
+    const firstMs = Math.max(sinceMs, new Date(stats.firstTs).getTime());
+    const spanDays = Math.min(7, Math.max(1, (Date.now() - firstMs) / 86400000));
+    const dailyBurn = stats.sol / spanDays;
+    if (dailyBurn <= 0) return;
+    const buffer = config.management.gasReserveBufferDays ?? 14;
+    const floor = config.management.gasReserveFloorSol ?? 0.03;
+    const target = parseFloat(Math.max(floor, dailyBurn * buffer).toFixed(3));
+    const current = config.management.gasReserve;
+    if (Math.abs(target - current) / Math.max(current, 0.001) < 0.2 || Math.abs(target - current) < 0.005) return;
+    persistConfigChange("management", "gasReserve", "gasReserve", target);
+    log("cron", `gasReserve auto-tuned ${current} → ${target} SOL (burn ${dailyBurn.toFixed(5)}/d × ${buffer}d, floor ${floor})`);
+    if (telegramEnabled()) sendMessage(`🪫 gasReserve auto-tuned: ${current} → ${target} SOL (≈${buffer}d runway @ ${dailyBurn.toFixed(5)} SOL/hari, dari gas nyata)`).catch(() => {});
+  } catch (error) {
+    log("cron_error", `gasReserve auto-tune failed (fail-open): ${error.message}`);
+  }
+}
+
 async function runBriefing() {
   log("cron", "Starting morning briefing");
+  await maybeAutoTuneGasReserve(); // daily, before composing the briefing
   try {
     const briefing = await generateBriefing();
     if (telegramEnabled()) {

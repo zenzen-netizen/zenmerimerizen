@@ -1420,7 +1420,10 @@ export function formatFullConfig() {
       ["deployAmountSol", fmt(c.management.deployAmountSol)],
       ["positionSizePct", fmt(c.management.positionSizePct)],
       ["minSolToOpen", fmt(c.management.minSolToOpen)],
-      ["gasReserve", fmt(c.management.gasReserve)],
+      ["gasReserve", `${fmt(c.management.gasReserve)}${c.management.gasReserveAutoTune ? " (auto-tune ON)" : " (manual)"}`],
+      ["gasReserveAutoTune", fmt(c.management.gasReserveAutoTune)],
+      ["gasReserveBufferDays", fmt(c.management.gasReserveBufferDays)],
+      ["gasReserveFloorSol", fmt(c.management.gasReserveFloorSol)],
     ]),
     group("━ GRUP 2 — Exit Rules", [
       ["stopLossPct", fmt(c.management.stopLossPct)],
@@ -1551,6 +1554,10 @@ export function formatFullConfig() {
       ["counterfactualReview", fmt(c.experiments?.counterfactualReview)],
       ["counterfactualMinMcapGainPct", fmt(c.experiments?.counterfactualMinMcapGainPct)],
       ["smartWalletMomentum", fmt(c.experiments?.smartWalletMomentum)],
+    ]),
+    group("━ GRUP 17 — Laporan", [
+      ["learningReportEvery", `${fmt(c.reports?.learningReportEvery)}${c.reports?.learningReportEvery > 0 ? " (ON)" : " (OFF)"}`],
+      ["learningReportTrendN", fmt(c.reports?.learningReportTrendN)],
     ]),
     group(`━ GMGN — ${gmgnActive ? "AKTIF (source=gmgn)" : `tidak aktif (source=${c.screening.source}, blok ini diabaikan)`}`, [
       ["interval", fmt(c.gmgn.interval)],

@@ -607,16 +607,16 @@ export async function runScreeningCycle({ silent = false } = {}) {
     }
     const candidates = (topCandidates?.candidates || topCandidates?.pools || []).slice(0, 10);
 
-    // 🧪 Experiments #1 (candidate momentum) + #8 (counterfactual skip review):
-    // both need this cycle's candidate snapshots, so record when EITHER is on.
-    // OFF by default → skipped (factory behavior). Fail-open: a snapshot hiccup
-    // must never derail screening.
-    if (config.experiments?.candidateMomentum || config.experiments?.counterfactualReview || config.experiments?.smartWalletMomentum) {
-      try {
-        recordCandidateSnapshots(candidates);
-      } catch (e) {
-        log("experiment", `candidate snapshot failed — continuing (fail-open): ${e.message}`);
-      }
+    // 🔬 Shadow-logging data layer: ALWAYS record candidate snapshots (cheap, 24h
+    // ephemeral) so momentum / sw-momentum / counterfactual have data to read AND
+    // so we can freeze a pool's signal values onto a position at deploy — even when
+    // the experiments are OFF (recording ≠ influencing; deploys stay neutral).
+    // The experiment flags now only gate whether the signal is shown to the LLM.
+    // Fail-open: a snapshot hiccup must never derail screening.
+    try {
+      recordCandidateSnapshots(candidates);
+    } catch (e) {
+      log("experiment", `candidate snapshot failed — continuing (fail-open): ${e.message}`);
     }
 
     const earlyFilteredExamples = topCandidates?.filtered_examples || [];
@@ -726,18 +726,17 @@ export async function runScreeningCycle({ silent = false } = {}) {
       }
     }
 
-    // 🧪 Smart-wallet momentum: record this cycle's smart-wallet count per passing
-    // candidate (sw is known here). OFF by default → skipped. Fail-open.
-    if (config.experiments?.smartWalletMomentum) {
-      try {
-        recordSmartWalletCounts(passing.map(({ pool, sw }) => ({
-          addr: pool.pool,
-          name: pool.name,
-          sw_count: sw?.in_pool?.length ?? 0,
-        })));
-      } catch (e) {
-        log("experiment", `smartWalletMomentum record failed — continuing (fail-open): ${e.message}`);
-      }
+    // 🔬 Shadow-logging: ALWAYS record this cycle's smart-wallet count per passing
+    // candidate (sw is known here) so sw-momentum has data even when the experiment
+    // is off. Recording ≠ influencing. Fail-open.
+    try {
+      recordSmartWalletCounts(passing.map(({ pool, sw }) => ({
+        addr: pool.pool,
+        name: pool.name,
+        sw_count: sw?.in_pool?.length ?? 0,
+      })));
+    } catch (e) {
+      log("experiment", `smartWalletMomentum record failed — continuing (fail-open): ${e.message}`);
     }
 
     // Pre-fetch active_bin for all passing candidates in parallel

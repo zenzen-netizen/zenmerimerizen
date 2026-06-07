@@ -30,6 +30,32 @@ import { normalizeMint } from "./wallet.js";
 import { appendDecision } from "../decision-log.js";
 import { getAndClearStagedSignals } from "../signal-tracker.js";
 import { trackTxGas } from "../gas-tracker.js";
+import { getCandidateMomentum, getSmartWalletMomentum } from "../candidate-memory.js";
+
+/**
+ * 🔬 Shadow-logging: snapshot the experiment signals' VALUES for a pool at deploy
+ * time so we can later correlate them with PnL — WITHOUT letting them influence
+ * the deploy (that stays gated by the experiment flags). momentum & sw-momentum
+ * are ephemeral (24h candidate-memory) so they MUST be frozen here; expected-yield
+ * is omitted because it's derivable later from the stored signal_snapshot. Returns
+ * null when there's no warm-up data yet (e.g. first sighting). Fail-open.
+ */
+function captureShadowSignals(poolAddress) {
+  try {
+    const m = getCandidateMomentum(poolAddress);
+    const sw = getSmartWalletMomentum(poolAddress);
+    const out = {};
+    if (m && !m.first_sighting && m.samples >= 2) {
+      out.momentum = { tvl_pct: m.tvl_delta_pct, vol_pct: m.volume_delta_pct, mcap_pct: m.mcap_delta_pct, samples: m.samples };
+    }
+    if (sw && sw.samples >= 2) {
+      out.sw = { count: sw.last, delta: sw.delta, samples: sw.samples };
+    }
+    return Object.keys(out).length ? out : null;
+  } catch {
+    return null;
+  }
+}
 
 // ─── Lazy SDK loader ───────────────────────────────────────────
 // @meteora-ag/dlmm → @coral-xyz/anchor uses CJS directory imports
@@ -865,6 +891,7 @@ export async function deployPosition({
           active_bin: activeBin.binId,
           initial_value_usd,
           narrative_category,
+          shadow_signals: captureShadowSignals(pool_address),
           signal_snapshot: signalSnapshot,
         });
       }
@@ -1004,6 +1031,7 @@ export async function deployPosition({
       active_bin: activeBin.binId,
       initial_value_usd,
       narrative_category,
+      shadow_signals: captureShadowSignals(pool_address),
       signal_snapshot: signalSnapshot,
     });
 
@@ -1845,6 +1873,7 @@ export async function closePosition({ position_address, reason }) {
             amount_sol: tracked.amount_sol,
             deployed_at: tracked.deployed_at || null,
             narrative_category: tracked.narrative_category || null,
+            shadow_signals: tracked.shadow_signals || null,
             peak_pnl_pct: tracked.peak_pnl_pct ?? null,
             trough_pnl_pct: tracked.trough_pnl_pct ?? null,
             fees_earned_usd: feesUsd,
@@ -2139,6 +2168,7 @@ export async function closePosition({ position_address, reason }) {
         amount_sol: tracked.amount_sol,
         deployed_at: tracked.deployed_at || null,
         narrative_category: tracked.narrative_category || null,
+        shadow_signals: tracked.shadow_signals || null,
         peak_pnl_pct: tracked.peak_pnl_pct ?? null,
         trough_pnl_pct: tracked.trough_pnl_pct ?? null,
         fees_earned_usd: feesUsd,

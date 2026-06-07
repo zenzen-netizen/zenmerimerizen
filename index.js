@@ -24,10 +24,12 @@ import {
   notifyOutOfRange,
   isEnabled as telegramEnabled,
   createLiveMessage,
+  pinMessage,
+  unpinMessage,
 } from "./telegram.js";
 import { generateBriefing } from "./briefing.js";
 import { renderGuide } from "./guide.js";
-import { getLastBriefingDate, setLastBriefingDate, getTrackedPosition, getTrackedPositions, setPositionInstruction, updatePnlAndCheckExits, queuePeakConfirmation, resolvePendingPeak, queueTrailingDropConfirmation, resolvePendingTrailingDrop } from "./state.js";
+import { getLastBriefingDate, setLastBriefingDate, getLastBriefingPinId, setLastBriefingPinId, getTrackedPosition, getTrackedPositions, setPositionInstruction, updatePnlAndCheckExits, queuePeakConfirmation, resolvePendingPeak, queueTrailingDropConfirmation, resolvePendingTrailingDrop } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
 import { recordPositionSnapshot, recallForPool, addPoolNote } from "./pool-memory.js";
 import { recordCandidateSnapshots, getCandidateMomentum, formatCandidateMomentum, recordSmartWalletCounts, getSmartWalletMomentum, formatSmartWalletMomentum } from "./candidate-memory.js";
@@ -162,12 +164,33 @@ function scheduleTrailingDropConfirmation(positionAddress) {
   _trailingDropConfirmTimers.set(positionAddress, timer);
 }
 
+/**
+ * Send a briefing and keep only the latest one pinned: pin the new message (the
+ * first chunk = top of the report), unpin the previous briefing pin, and remember
+ * the new id. Pinning is best-effort — any failure (Telegram off, missing pin
+ * rights) is logged and never breaks the briefing send.
+ */
+async function sendAndPinBriefing(briefing) {
+  const sent = await sendHTML(briefing);
+  const msgId = sent?.firstMessageId ?? sent?.result?.message_id ?? null;
+  if (!msgId) return sent;
+  try {
+    const prev = getLastBriefingPinId();
+    await pinMessage(msgId);
+    if (prev && prev !== msgId) await unpinMessage(prev);
+    setLastBriefingPinId(msgId);
+  } catch (error) {
+    log("cron_error", `Briefing pin failed (continuing): ${error.message}`);
+  }
+  return sent;
+}
+
 async function runBriefing() {
   log("cron", "Starting morning briefing");
   try {
     const briefing = await generateBriefing();
     if (telegramEnabled()) {
-      await sendHTML(briefing);
+      await sendAndPinBriefing(briefing);
     }
     setLastBriefingDate();
   } catch (error) {
@@ -2096,7 +2119,7 @@ async function telegramHandler(msg) {
   if (text === "/briefing") {
     try {
       const briefing = await generateBriefing();
-      await sendHTML(briefing);
+      await sendAndPinBriefing(briefing);
     } catch (e) {
       await sendMessage(`Error: ${e.message}`).catch(() => {});
     }

@@ -157,14 +157,39 @@ export async function sendMessageWithButtons(text, inlineKeyboard) {
 export async function sendHTML(html) {
   if (!TOKEN || !chatId) return;
   const chunks = splitText(html);
-  let last;
+  let last, firstMessageId = null;
   for (const chunk of chunks) {
-    const result = await postTelegram("sendMessage", { text: chunk, parse_mode: "HTML" });
-    if (result) { last = result; continue; }
-    const plain = chunk.replace(/<[^>]+>/g, "");
-    last = await postTelegram("sendMessage", { text: plain });
+    let result = await postTelegram("sendMessage", { text: chunk, parse_mode: "HTML" });
+    if (!result) {
+      const plain = chunk.replace(/<[^>]+>/g, "");
+      result = await postTelegram("sendMessage", { text: plain });
+    }
+    if (result) {
+      last = result;
+      if (firstMessageId == null) firstMessageId = result?.result?.message_id ?? null;
+    }
   }
+  // Expose the first chunk's id so callers can pin the top of a multi-part message.
+  if (last) last.firstMessageId = firstMessageId;
   return last;
+}
+
+/**
+ * Pin a message in the chat. Silent by default (no extra "pinned a message"
+ * notification). Best-effort: returns null if Telegram is off or lacks rights.
+ */
+export async function pinMessage(messageId, { silent = true } = {}) {
+  if (!messageId) return null;
+  return postTelegram("pinChatMessage", { message_id: messageId, disable_notification: silent });
+}
+
+/**
+ * Unpin a specific message — used to drop the previous briefing pin so only the
+ * latest briefing stays pinned. Best-effort.
+ */
+export async function unpinMessage(messageId) {
+  if (!messageId) return null;
+  return postTelegram("unpinChatMessage", { message_id: messageId });
 }
 
 // Escape data-derived text before embedding in HTML parse_mode messages.

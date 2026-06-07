@@ -552,6 +552,21 @@ export function setLastBriefingDate() {
 }
 
 /**
+ * Telegram message id of the currently-pinned daily briefing, so the next
+ * briefing can unpin it and keep only the latest one pinned. Survives restarts.
+ */
+export function getLastBriefingPinId() {
+  const state = load();
+  return state._lastBriefingPinId || null;
+}
+
+export function setLastBriefingPinId(messageId) {
+  const state = load();
+  state._lastBriefingPinId = messageId || null;
+  save(state);
+}
+
+/**
  * Reconcile local state with actual on-chain positions.
  * Marks any local open positions as closed if they are not in the on-chain list.
  */

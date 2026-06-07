@@ -338,6 +338,15 @@ export const config = {
     // when on; piggybacks on the candidate-memory store.
     smartWalletMomentum:         u.smartWalletMomentum         ?? false,
   },
+
+  // Trade reports — milestone learning report (auto every N closes) + on-demand
+  // /report. learningReportEvery=0 disables the auto milestone report; /report
+  // still works. learningReportTrendN = how many recent closes the "last N vs
+  // prior N" trend compares.
+  reports: {
+    learningReportEvery: u.learningReportEvery ?? 10,
+    learningReportTrendN: u.learningReportTrendN ?? 10,
+  },
 };
 
 /**

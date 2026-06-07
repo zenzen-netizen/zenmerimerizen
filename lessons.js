@@ -772,6 +772,11 @@ export function getPerformanceHistory({ hours = 24, limit = 50 } = {}) {
   };
 }
 
+/** Full closed-position performance array (for the reports engine). */
+export function getAllPerformance() {
+  return load().performance || [];
+}
+
 /**
  * Get performance stats summary.
  */

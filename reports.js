@@ -65,6 +65,25 @@ export function computeTradeStats(records = []) {
     else curLossStreak = 0;
   }
 
+  // ── PnL movement (peak/trough during the trade) — only records that carry it ──
+  // Shows how much trades ran up before exit (give-back) and how deep they dipped.
+  const withMove = perf.filter((p) => Number.isFinite(p.peak_pnl_pct) && Number.isFinite(p.pnl_pct));
+  let movement = null;
+  if (withMove.length >= 4) {
+    const avgPeak = mean(withMove.map((p) => p.peak_pnl_pct));
+    const avgExit = mean(withMove.map((p) => p.pnl_pct));
+    const troughs = fin(withMove.map((p) => p.trough_pnl_pct));
+    const leftOnTable = withMove.filter((p) => p.peak_pnl_pct - p.pnl_pct >= 5).length;
+    movement = {
+      samples: withMove.length,
+      avg_peak_pct: r2(avgPeak),
+      avg_exit_pct: r2(avgExit),
+      avg_trough_pct: troughs.length ? r2(mean(troughs)) : null,
+      giveback_pct: r2(avgPeak - avgExit),     // peak run-up not captured at exit
+      left_on_table: leftOnTable,              // trades that gave back ≥5pp from peak
+    };
+  }
+
   const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : (grossProfit > 0 ? Infinity : null);
   const payoffRatio = (avgWinUsd != null && avgLossUsd != null && avgLossUsd !== 0)
     ? avgWinUsd / Math.abs(avgLossUsd) : null;
@@ -94,10 +113,24 @@ export function computeTradeStats(records = []) {
     avg_range_efficiency: r2(mean(fin(perf.map((p) => p.range_efficiency)))),
     max_drawdown_usd: r2(maxDD),
     max_consecutive_losses: maxLossStreak,
+    movement,
     by_strategy: groupStats(perf, "strategy"),
     by_session: groupStats(perf, "open_session"),
     by_narrative: groupStats(perf, "narrative_category"),
   };
+}
+
+/** PnL movement block (peak → exit give-back, trough). Null until data accrues. */
+export function formatMovement(st) {
+  const m = st?.movement;
+  if (!m) return null;
+  const lines = [
+    `<b>📈 PnL Movement (${m.samples} tracked):</b>`,
+    `  avg peak ${pct(m.avg_peak_pct)} → avg exit ${pct(m.avg_exit_pct)} (give-back ${pct(m.giveback_pct)})`,
+  ];
+  if (m.avg_trough_pct != null) lines.push(`  avg trough (worst dip) ${pct(m.avg_trough_pct)}`);
+  if (m.left_on_table > 0) lines.push(`  ${m.left_on_table} trade(s) gave back ≥5pp from peak`);
+  return lines.join("\n");
 }
 
 // Per-bucket {count, win_rate_pct, avg_pnl_pct, net_usd} sorted best-first by net.
@@ -186,7 +219,7 @@ export function formatTrend(allPerf, n) {
  * is weak, and surfaces the real leak (avg loss >> avg win, a weak bucket, a
  * single tail loss). Returns an HTML block or null.
  */
-export function buildRecommendations(allPerf, st = null) {
+export function buildRecommendations(allPerf, st = null, opts = {}) {
   const perf = (allPerf || []).filter((p) => Number.isFinite(p.pnl_pct) && Number.isFinite(p.pnl_usd));
   if (perf.length < 4) return null;
   const stats = st || computeTradeStats(perf);
@@ -249,6 +282,22 @@ export function buildRecommendations(allPerf, st = null) {
     if (weakNarr.length) recs.push(`Weak narratives: ${weakNarr.map(esc).join(", ")} — be stricter on these`);
   } catch { /* fail-open */ }
 
+  // ── PnL movement → take-profit / trailing / stop tuning ──
+  const mv = stats.movement;
+  if (mv && mv.giveback_pct >= 3) {
+    const tp = m.trailingTakeProfit ? "tighten" : "enable";
+    recs.push(`Leaving ~${pct(mv.giveback_pct)} on the table (avg peak ${pct(mv.avg_peak_pct)} → exit ${pct(mv.avg_exit_pct)}) — ${tp} trailing TP (<code>trailingTriggerPct</code>/<code>trailingDropPct</code>) or raise <code>takeProfitPct</code> to lock gains nearer the peak`);
+  }
+  if (mv && mv.avg_trough_pct != null && mv.avg_trough_pct <= -10) {
+    recs.push(`Trades dip to avg trough ${pct(mv.avg_trough_pct)} before exit — a tighter <code>stopLossPct</code> would cap the deep drawdowns`);
+  }
+
+  // ── Gas efficiency — fixed gas vs %-based profit (only meaningful if gas is real & material) ──
+  if (opts.gasPerTradeUsd > 0 && stats.avg_win_usd > 0 && opts.gasPerTradeUsd >= stats.avg_win_usd * 0.3) {
+    const eat = (opts.gasPerTradeUsd / stats.avg_win_usd) * 100;
+    recs.push(`Gas ~$${opts.gasPerTradeUsd.toFixed(4)}/trade eats ${eat.toFixed(0)}% of the avg win ($${stats.avg_win_usd.toFixed(2)}) — size up or trade less so %-profit dwarfs fixed gas`);
+  }
+
   // Only suggest scaling UP when genuinely earning it.
   if (!netNeg && !weakPF && stats.win_rate_pct > 60 && (stats.profit_factor === Infinity || stats.profit_factor >= 1.5)) {
     const cur = m.positionSizePct ?? 0.35;
@@ -292,6 +341,7 @@ export function buildTradeReport(perf, { title, statsLabel = "Summary", trendN =
   const parts = [`<b>${esc(title)}</b>`, "────────────────", formatStatsBlock(st, statsLabel)];
   const verdict = buildVerdict(st); if (verdict) parts.push(verdict);
   if (includeTrend) { const t = formatTrend(records, trendN); if (t) parts.push("", t); }
+  const mv = formatMovement(st); if (mv) parts.push("", mv);
   if (includeBreakdown) { const b = formatBreakdown(st); if (b) parts.push("", b); }
   const recs = buildRecommendations(records, st); if (recs) parts.push("", recs);
   parts.push("────────────────");

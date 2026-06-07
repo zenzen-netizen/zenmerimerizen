@@ -92,6 +92,7 @@ import { config } from "./config.js";
 import { getStateSummary } from "./state.js";
 import { getLessonsForPrompt, getPerformanceSummary } from "./lessons.js";
 import { getDecisionSummary } from "./decision-log.js";
+import { recordLlmCost } from "./llm-cost-tracker.js";
 
 // Supports OpenRouter (default) or any OpenAI-compatible local server (e.g. LM Studio)
 // To use LM Studio: set LLM_BASE_URL=http://localhost:1234/v1 and LLM_API_KEY=lm-studio in .env
@@ -212,9 +213,15 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
             tools: getToolsForRole(agentType, goal),
             temperature: config.llm.temperature,
             max_tokens: maxOutputTokens ?? (agentType === "GENERAL" ? config.llm.generalMaxTokens : config.llm.maxTokens),
+            usage: { include: true }, // OpenRouter returns per-call cost in response.usage
           };
           if (!omitToolChoice) reqParams.tool_choice = toolChoice;
           response = await client.chat.completions.create(reqParams);
+          // Record this call's cost per role (local, no external feed needed). Fail-open.
+          try {
+            const u = response?.usage;
+            if (u) recordLlmCost({ role: agentType, model: usedModel, cost: u.cost ?? u.total_cost ?? null, tokens: u.total_tokens ?? 0 });
+          } catch { /* never break the call */ }
         } catch (error) {
           if (providerMode === "system" && isSystemRoleError(error)) {
             providerMode = "user_embedded";

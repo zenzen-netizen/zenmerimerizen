@@ -36,3 +36,4 @@ docs/
 # Test files
 test-*.js
 gas-log.json
+llm-cost-log.json

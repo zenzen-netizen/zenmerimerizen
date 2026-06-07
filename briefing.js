@@ -7,6 +7,7 @@ import { getSkipReview } from "./candidate-memory.js";
 import { getDeployedPoolAddresses } from "./pool-memory.js";
 import { getWalletBalances } from "./tools/wallet.js";
 import { getGasStats } from "./gas-tracker.js";
+import { getLlmCostStats } from "./llm-cost-tracker.js";
 import {
   computeTradeStats, formatStatsBlock, formatBreakdown, formatMovement, buildVerdict,
   buildRecommendations, buildRoleCostLines, estimateGasSol, buildTradeReport,
@@ -105,18 +106,29 @@ const LESSONS_FILE = "./lessons.json";
 
 // Combined cost section: LLM (broken down per agent role) + gas (estimate) + the
 // bottom line "did trading cover ALL costs?". `windowLabel` describes the period.
-function buildCostSection({ costData, balance, credits, gasSol, gasIsEst = true, solPrice, netPnlUsd, windowLabel = "24h", windowDays = 1 }) {
-  if (!costData && !balance && !credits && !gasSol) return null;
+function buildCostSection({ costData, balance, credits, llmStats, gasSol, gasIsEst = true, solPrice, netPnlUsd, windowLabel = "24h", windowDays = 1 }) {
+  if (!costData && !balance && !credits && !gasSol && !llmStats?.hasData) return null;
   const lines = [`<b>💵 Costs (${esc(windowLabel)}):</b>`];
 
-  // ── LLM, per role ──
-  const llmCost = costData && costData.calls > 0 ? costData.totalCost : (balance?.usageDaily ?? null);
-  const roleLines = buildRoleCostLines(costData);
-  if (roleLines) {
-    lines.push(`🤖 LLM: $${(llmCost ?? 0).toFixed(4)} (${costData.calls} calls, ${costData.totalTokens.toLocaleString()} tokens)`);
-    lines.push(...roleLines);
-  } else if (llmCost != null) {
-    lines.push(`🤖 LLM: $${llmCost.toFixed(4)}`);
+  // ── LLM, per role — prefer LOCAL per-call tracking (true per-role, no external
+  //    feed); fall back to OpenRouter activity (model→role), then the daily total. ──
+  let llmUsd = 0;
+  if (llmStats?.hasData) {
+    llmUsd = llmStats.totalCost;
+    lines.push(`🤖 LLM: $${llmUsd.toFixed(4)} (${llmStats.calls} calls, ${llmStats.totalTokens.toLocaleString()} tokens)`);
+    for (const [role, s] of Object.entries(llmStats.byRole).sort((a, b) => b[1].cost - a[1].cost)) {
+      lines.push(`  • ${esc(role)}: $${s.cost.toFixed(4)} (${s.calls} calls)`);
+    }
+  } else {
+    const llmCost = costData && costData.calls > 0 ? costData.totalCost : (balance?.usageDaily ?? null);
+    llmUsd = llmCost ?? 0;
+    const roleLines = buildRoleCostLines(costData);
+    if (roleLines) {
+      lines.push(`🤖 LLM: $${llmUsd.toFixed(4)} (${costData.calls} calls, ${costData.totalTokens.toLocaleString()} tokens)`);
+      lines.push(...roleLines);
+    } else if (llmCost != null) {
+      lines.push(`🤖 LLM: $${llmCost.toFixed(4)}`);
+    }
   }
 
   // ── Gas: real (from gas-tracker) when available, else estimate ──
@@ -136,7 +148,6 @@ function buildCostSection({ costData, balance, credits, gasSol, gasIsEst = true,
   }
 
   // ── Bottom line: trading net vs ALL costs (LLM + gas) ──
-  const llmUsd = llmCost ?? 0;
   const totalCost = llmUsd + (gasUsd ?? 0);
   if (Number.isFinite(netPnlUsd) && totalCost > 0) {
     const real = netPnlUsd - totalCost;
@@ -269,7 +280,7 @@ export async function generateBriefing() {
     `<b>Current Portfolio:</b>`,
     `📂 Open Positions: ${openPositions.length}`,
     "",
-    buildCostSection({ costData, balance, credits, gasSol, gasIsEst, solPrice, netPnlUsd: totalPnLUsd, windowLabel: "24h", windowDays: 1 }) || "",
+    buildCostSection({ costData, balance, credits, llmStats: getLlmCostStats(last24h.getTime()), gasSol, gasIsEst, solPrice, netPnlUsd: totalPnLUsd, windowLabel: "24h", windowDays: 1 }) || "",
     "",
     buildLearningSection(lessonsData, last24h) || "",
     "",
@@ -321,9 +332,11 @@ export async function generatePeriodicBriefing(period = "week") {
   const gasIsEst = !gasStatsW.hasData;
   const solPrice = wallet?.sol_price || 0;
   const gasUsd = gasSol && solPrice ? gasSol * solPrice : null;
-  // Longer windows: the account-level usage figure is the best LLM total we have
-  // (per-role split is only available for the rolling 24h activity feed).
+  // Prefer local per-call LLM tracking (true per-role); fall back to the account
+  // usage figure for the window when there's no local data yet.
+  const llmStats = getLlmCostStats(since);
   const llmWindow = period === "month" ? balance?.usageMonthly : period === "week" ? balance?.usageWeekly : balance?.usageDaily;
+  const llmTotal = llmStats.hasData ? llmStats.totalCost : (llmWindow ?? 0);
 
   const report = buildTradeReport(windowPerf, {
     title: `${emoji} ${label} Briefing — last ${days}d`,
@@ -332,7 +345,14 @@ export async function generatePeriodicBriefing(period = "week") {
   });
 
   const costLines = [`<b>💵 Costs (${days}d):</b>`];
-  if (llmWindow != null) costLines.push(`🤖 LLM (${period}): $${llmWindow.toFixed(4)}`);
+  if (llmStats.hasData) {
+    costLines.push(`🤖 LLM: $${llmStats.totalCost.toFixed(4)} (${llmStats.calls} calls)`);
+    for (const [role, s] of Object.entries(llmStats.byRole).sort((a, b) => b[1].cost - a[1].cost)) {
+      costLines.push(`  • ${role}: $${s.cost.toFixed(4)} (${s.calls} calls)`);
+    }
+  } else if (llmWindow != null) {
+    costLines.push(`🤖 LLM (${period}): $${llmWindow.toFixed(4)}`);
+  }
   if (gasSol > 0) {
     costLines.push(`⛽ Gas${gasIsEst ? " (est)" : ""}: ${gasIsEst ? "~" : ""}${gasSol.toFixed(4)} SOL${gasUsd != null ? ` (${gasIsEst ? "~" : ""}$${gasUsd.toFixed(2)})` : ""}`);
     const reserve = config.management?.gasReserve;
@@ -342,7 +362,7 @@ export async function generatePeriodicBriefing(period = "week") {
       costLines.push(`🪫 gasReserve ${reserve} SOL ≈ ${runwayDays.toFixed(0)}d runway @ ${dailyBurn.toFixed(4)} SOL/hari${runwayDays < 7 ? " ⚠️ tipis" : ""}`);
     }
   }
-  const totalCost = (llmWindow ?? 0) + (gasUsd ?? 0);
+  const totalCost = llmTotal + (gasUsd ?? 0);
   if (totalCost > 0) {
     const real = netPnl - totalCost;
     costLines.push(`📊 Net − biaya: ${money(netPnl)} − $${totalCost.toFixed(4)} = ${money(real)} ${real >= 0 ? "✅" : "🔴"}`);

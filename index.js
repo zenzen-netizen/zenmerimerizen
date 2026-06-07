@@ -1667,6 +1667,25 @@ function settingValue(key) {
     rsiLength: config.indicators.rsiLength,
     indicatorIntervals: config.indicators.intervals,
     requireAllIntervals: config.indicators.requireAllIntervals,
+    // 🧪 GRUP 16 — Experiments
+    candidateMomentum: config.experiments.candidateMomentum,
+    smartWalletMomentum: config.experiments.smartWalletMomentum,
+    expectedYieldSignal: config.experiments.expectedYieldSignal,
+    narrativeProfileSignal: config.experiments.narrativeProfileSignal,
+    counterfactualReview: config.experiments.counterfactualReview,
+    counterfactualMinMcapGainPct: config.experiments.counterfactualMinMcapGainPct,
+    exitLiquidityCheck: config.experiments.exitLiquidityCheck,
+    exitLiquidityMaxSlippagePct: config.experiments.exitLiquidityMaxSlippagePct,
+    marketRegimeGate: config.experiments.marketRegimeGate,
+    marketRegimeMaxDrop24hPct: config.experiments.marketRegimeMaxDrop24hPct,
+    convictionSizing: config.experiments.convictionSizing,
+    convictionSizingMaxAdjustPct: config.experiments.convictionSizingMaxAdjustPct,
+    // 📊 GRUP 17 — Reports & Gas
+    learningReportEvery: config.reports.learningReportEvery,
+    learningReportTrendN: config.reports.learningReportTrendN,
+    gasReserveAutoTune: config.management.gasReserveAutoTune,
+    gasReserveBufferDays: config.management.gasReserveBufferDays,
+    gasReserveFloorSol: config.management.gasReserveFloorSol,
   };
   return values[key];
 }
@@ -1777,6 +1796,20 @@ function inputButton(key, label, { digits = 0 } = {}) {
   return [settingButton(`${label}: ${shown} ✏`, `cfg:input:${key}`)];
 }
 
+// Which settings page a given key lives on — used to return to the right page after
+// a toggle/step/set/input. Single source of truth (was duplicated in two callbacks).
+function pageForKey(key) {
+  if (["gmgnPreferredKolNames", "gmgnPreferredKolMinHoldPct", "gmgnDumpKolNames", "gmgnDumpKolMinHoldPct"].includes(key)) return "kol";
+  if (["gmgnMinVolume", "gmgnMaxBundlerRate", "gmgnMinTokenAgeHours", "gmgnMaxTokenAgeHours"].includes(key)) return "screen";
+  if (key.startsWith("gmgn") && key !== "gmgnRequireKol") return "gmgn";
+  if (key.startsWith("indicator") || key === "chartIndicatorsEnabled" || key === "rsiLength" || key === "requireAllIntervals") return "indicators";
+  if (["minBinsBelow", "maxBinsBelow"].includes(key)) return "strategy";
+  if (["useDiscordSignals", "blockPvpSymbols", "managementIntervalMin", "screeningIntervalMin", "maxScreeningIntervalMin", "adaptiveScreening", "screeningSource", "gmgnRequireKol"].includes(key)) return "screen";
+  if (["candidateMomentum", "smartWalletMomentum", "expectedYieldSignal", "narrativeProfileSignal", "counterfactualReview", "counterfactualMinMcapGainPct", "exitLiquidityCheck", "exitLiquidityMaxSlippagePct", "marketRegimeGate", "marketRegimeMaxDrop24hPct", "convictionSizing", "convictionSizingMaxAdjustPct"].includes(key)) return "experiments";
+  if (["learningReportEvery", "learningReportTrendN", "gasReserveAutoTune", "gasReserveBufferDays", "gasReserveFloorSol"].includes(key)) return "reports";
+  return "risk";
+}
+
 function renderSettingsMenu(page = "main") {
   const title = page === "main" ? "Settings menu" : `Settings: ${page}`;
   const summary = [
@@ -1787,6 +1820,7 @@ function renderSettingsMenu(page = "main") {
     `Strategy: ${config.strategy.strategy} | deploy ${config.management.deployAmountSol} SOL | max pos ${config.risk.maxPositions}`,
     `TP/SL: ${config.management.takeProfitPct}% / ${config.management.stopLossPct}% | trailing ${config.management.trailingTakeProfit ? "on" : "off"}`,
     `Indicators: ${config.indicators.enabled ? "on" : "off"} | entry ${config.indicators.entryPreset} | ${fmtSettingValue(config.indicators.intervals)}`,
+    `🧪 Experiments ON: ${Object.entries(config.experiments).filter(([, v]) => v === true).map(([k]) => k).join(", ") || "none"}`,
   ].join("\n");
 
   const nav = [
@@ -1800,6 +1834,10 @@ function renderSettingsMenu(page = "main") {
       settingButton("Indicators", "cfg:page:indicators"),
       settingButton("GMGN", "cfg:page:gmgn"),
       settingButton("KOL", "cfg:page:kol"),
+    ],
+    [
+      settingButton("🧪 Experiments", "cfg:page:experiments"),
+      settingButton("📊 Reports", "cfg:page:reports"),
     ],
   ];
 
@@ -1907,6 +1945,29 @@ function renderSettingsMenu(page = "main") {
       ],
       inputButton("rsiLength", "RSI length"),
     ];
+  } else if (page === "experiments") {
+    // 🧪 GRUP 16 — semua default OFF = perilaku pabrik. Soft signals dulu, lalu gate, lalu sizing.
+    rows = [
+      [toggleButton("candidateMomentum", "Candidate momentum"), toggleButton("smartWalletMomentum", "Smart-wallet mom.")],
+      [toggleButton("expectedYieldSignal", "Expected yield"), toggleButton("narrativeProfileSignal", "Narrative profile")],
+      [toggleButton("counterfactualReview", "Counterfactual review")],
+      inputButton("counterfactualMinMcapGainPct", "Counterfactual min mcap gain %"),
+      [toggleButton("exitLiquidityCheck", "Exit-liquidity GATE")],
+      inputButton("exitLiquidityMaxSlippagePct", "Exit max slippage %", { digits: 1 }),
+      [toggleButton("marketRegimeGate", "Market-regime GATE")],
+      inputButton("marketRegimeMaxDrop24hPct", "Regime max SOL drop 24h %", { digits: 1 }),
+      [toggleButton("convictionSizing", "Conviction sizing (moves capital)")],
+      inputButton("convictionSizingMaxAdjustPct", "Conviction max adjust %"),
+    ];
+  } else if (page === "reports") {
+    // 📊 GRUP 17 — laporan & gas reserve auto-tune
+    rows = [
+      inputButton("learningReportEvery", "Learning report every N closes (0=off)"),
+      inputButton("learningReportTrendN", "Trend window N"),
+      [toggleButton("gasReserveAutoTune", "Gas reserve auto-tune")],
+      inputButton("gasReserveBufferDays", "Gas buffer days"),
+      inputButton("gasReserveFloorSol", "Gas reserve floor SOL", { digits: 2 }),
+    ];
   } else {
     rows = [
       [
@@ -1962,13 +2023,7 @@ async function applySettingsMenuCallback(msg) {
   if (action === "input") {
     const inputKey = parts[2];
     const currentVal = settingValue(inputKey);
-    const inputPage = ["gmgnPreferredKolNames", "gmgnPreferredKolMinHoldPct", "gmgnDumpKolNames", "gmgnDumpKolMinHoldPct"].includes(inputKey) ? "kol"
-      : ["gmgnMinVolume", "gmgnMaxBundlerRate", "gmgnMinTokenAgeHours", "gmgnMaxTokenAgeHours"].includes(inputKey) ? "screen"
-      : inputKey.startsWith("gmgn") && inputKey !== "gmgnRequireKol" ? "gmgn"
-      : inputKey.startsWith("indicator") || inputKey === "chartIndicatorsEnabled" || inputKey === "rsiLength" || inputKey === "requireAllIntervals" ? "indicators"
-      : ["minBinsBelow", "maxBinsBelow"].includes(inputKey) ? "strategy"
-      : ["useDiscordSignals", "blockPvpSymbols", "managementIntervalMin", "screeningIntervalMin", "maxScreeningIntervalMin", "adaptiveScreening", "screeningSource", "gmgnRequireKol"].includes(inputKey) ? "screen"
-      : "risk";
+    const inputPage = pageForKey(inputKey);
     _pendingInput = { key: inputKey, page: inputPage, menuMsgId: msg.messageId };
     await answerCallbackQuery(msg.callbackQueryId);
     await sendMessage(`Enter new value for ${inputKey} (current: ${currentVal ?? "off"}):\nSend a number, or "off" to clear.`);
@@ -2024,17 +2079,7 @@ async function applySettingsMenuCallback(msg) {
     await answerCallbackQuery(msg.callbackQueryId, "Config update failed");
     return;
   }
-  page = ["gmgnPreferredKolNames", "gmgnPreferredKolMinHoldPct", "gmgnDumpKolNames", "gmgnDumpKolMinHoldPct"].includes(key) ? "kol"
-    : ["gmgnMinVolume", "gmgnMaxBundlerRate", "gmgnMinTokenAgeHours", "gmgnMaxTokenAgeHours"].includes(key) ? "screen"
-    : key.startsWith("gmgn") && key !== "gmgnRequireKol"
-      ? "gmgn"
-      : key.startsWith("indicator") || key === "chartIndicatorsEnabled" || key === "rsiLength" || key === "requireAllIntervals"
-        ? "indicators"
-        : ["minBinsBelow", "maxBinsBelow"].includes(key)
-          ? "strategy"
-          : ["useDiscordSignals", "blockPvpSymbols", "managementIntervalMin", "screeningIntervalMin", "maxScreeningIntervalMin", "adaptiveScreening", "screeningSource", "gmgnRequireKol"].includes(key)
-            ? "screen"
-            : "risk";
+  page = pageForKey(key);
   await answerCallbackQuery(msg.callbackQueryId, `Updated ${key}`);
   await showSettingsMenu({ messageId: msg.messageId, page });
 }

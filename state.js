@@ -567,6 +567,21 @@ export function setLastBriefingPinId(messageId) {
 }
 
 /**
+ * Highest closed-position milestone already reported by the auto learning report,
+ * so we fire once per milestone (e.g. 10, 20, 30) and never duplicate on restart.
+ */
+export function getLastReportedMilestone() {
+  const state = load();
+  return state._lastReportedMilestone || 0;
+}
+
+export function setLastReportedMilestone(n) {
+  const state = load();
+  state._lastReportedMilestone = n;
+  save(state);
+}
+
+/**
  * Reconcile local state with actual on-chain positions.
  * Marks any local open positions as closed if they are not in the on-chain list.
  */

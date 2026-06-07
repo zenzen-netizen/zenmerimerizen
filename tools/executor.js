@@ -467,6 +467,9 @@ const toolMap = {
       counterfactualReview: ["experiments", "counterfactualReview"],
       counterfactualMinMcapGainPct: ["experiments", "counterfactualMinMcapGainPct"],
       smartWalletMomentum: ["experiments", "smartWalletMomentum"],
+      // reports
+      learningReportEvery: ["reports", "learningReportEvery"],
+      learningReportTrendN: ["reports", "learningReportTrendN"],
     };
 
     const applied = {};

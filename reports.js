@@ -280,6 +280,25 @@ export function buildVerdict(st) {
 }
 
 /**
+ * Compose a full trade report (HTML) from a windowed set of performance records.
+ * Shared by the milestone learning report, the /report command, and the
+ * weekly/monthly digests — they differ only in which records they pass in and
+ * the title/labels. Returns null when there's nothing to say.
+ */
+export function buildTradeReport(perf, { title, statsLabel = "Summary", trendN = 10, includeBreakdown = true, includeTrend = true } = {}) {
+  const records = (perf || []).filter((p) => p && Number.isFinite(p.pnl_usd));
+  if (records.length === 0) return `<b>${esc(title || "Trade Report")}</b>\nNo closed positions in this window yet.`;
+  const st = computeTradeStats(records);
+  const parts = [`<b>${esc(title)}</b>`, "────────────────", formatStatsBlock(st, statsLabel)];
+  const verdict = buildVerdict(st); if (verdict) parts.push(verdict);
+  if (includeTrend) { const t = formatTrend(records, trendN); if (t) parts.push("", t); }
+  if (includeBreakdown) { const b = formatBreakdown(st); if (b) parts.push("", b); }
+  const recs = buildRecommendations(records, st); if (recs) parts.push("", recs);
+  parts.push("────────────────");
+  return parts.filter((l) => l != null).join("\n");
+}
+
+/**
  * Rough per-action Solana network-fee estimate (SOL). Real fees vary with
  * priority fees and bin-array creation; position rent is reclaimed on close so it
  * is excluded. This is a deliberate ESTIMATE — precise accounting needs per-tx

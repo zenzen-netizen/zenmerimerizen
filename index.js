@@ -10,7 +10,8 @@ import { getWalletBalances, getSolMarketRegime } from "./tools/wallet.js";
 import { getTopCandidates, formatYieldToMe } from "./tools/screening.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
 import { config, reloadScreeningThresholds, computeDeployAmount } from "./config.js";
-import { evolveThresholds, getPerformanceSummary, listLessons, classifySession, currentWibSession } from "./lessons.js";
+import { evolveThresholds, getPerformanceSummary, getAllPerformance, listLessons, classifySession, currentWibSession } from "./lessons.js";
+import { buildTradeReport } from "./reports.js";
 import { executeTool, registerCronRestarter } from "./tools/executor.js";
 import {
   startPolling,
@@ -29,7 +30,7 @@ import {
 } from "./telegram.js";
 import { generateBriefing } from "./briefing.js";
 import { renderGuide } from "./guide.js";
-import { getLastBriefingDate, setLastBriefingDate, getLastBriefingPinId, setLastBriefingPinId, getTrackedPosition, getTrackedPositions, setPositionInstruction, updatePnlAndCheckExits, queuePeakConfirmation, resolvePendingPeak, queueTrailingDropConfirmation, resolvePendingTrailingDrop } from "./state.js";
+import { getLastBriefingDate, setLastBriefingDate, getLastBriefingPinId, setLastBriefingPinId, getLastReportedMilestone, setLastReportedMilestone, getTrackedPosition, getTrackedPositions, setPositionInstruction, updatePnlAndCheckExits, queuePeakConfirmation, resolvePendingPeak, queueTrailingDropConfirmation, resolvePendingTrailingDrop } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
 import { recordPositionSnapshot, recallForPool, addPoolNote } from "./pool-memory.js";
 import { recordCandidateSnapshots, getCandidateMomentum, formatCandidateMomentum, recordSmartWalletCounts, getSmartWalletMomentum, formatSmartWalletMomentum } from "./candidate-memory.js";
@@ -183,6 +184,49 @@ async function sendAndPinBriefing(briefing) {
     log("cron_error", `Briefing pin failed (continuing): ${error.message}`);
   }
   return sent;
+}
+
+/**
+ * Milestone learning report: every `learningReportEvery` closed positions (10,
+ * 20, 30…), fire a deep trade review once. Idempotent via a persisted milestone
+ * counter so it never double-sends across restarts/cycles. Fail-open — never
+ * blocks the management flow. learningReportEvery=0 disables it (/report still works).
+ */
+async function maybeFireLearningReport() {
+  try {
+    const every = config.reports?.learningReportEvery ?? 0;
+    if (!every || every < 1) return;
+    const perf = getAllPerformance();
+    const milestone = Math.floor(perf.length / every) * every;
+    if (milestone < every) return;                       // first milestone not reached
+    if (milestone <= getLastReportedMilestone()) return; // already reported this milestone
+    const report = buildTradeReport(perf, {
+      title: `🎓 Learning Report — ${milestone} closed positions`,
+      statsLabel: "All-time",
+      trendN: config.reports?.learningReportTrendN ?? 10,
+    });
+    if (telegramEnabled() && report) await sendHTML(report);
+    setLastReportedMilestone(milestone);
+    log("cron", `Learning report fired at milestone ${milestone} closes`);
+  } catch (error) {
+    log("cron_error", `Learning report failed (fail-open): ${error.message}`);
+  }
+}
+
+/**
+ * Build an on-demand trade report for the /report command. No arg = all-time
+ * learning report; `week`/`month`/`day` (and ID synonyms) restrict the window.
+ */
+function buildReportForArg(arg = "") {
+  const a = String(arg).trim().toLowerCase();
+  const all = getAllPerformance();
+  const now = Date.now();
+  const within = (days) => all.filter((p) => new Date(p.closed_at || p.recorded_at || 0).getTime() >= now - days * 86400000);
+  let perf = all, title = "🎓 Trade Report (all-time)", statsLabel = "All-time";
+  if (["week", "weekly", "7d", "minggu", "mingguan"].includes(a)) { perf = within(7); title = "📅 Weekly Trade Report (7d)"; statsLabel = "Last 7 days"; }
+  else if (["month", "monthly", "30d", "bulan", "bulanan"].includes(a)) { perf = within(30); title = "📆 Monthly Trade Report (30d)"; statsLabel = "Last 30 days"; }
+  else if (["day", "today", "24h", "hari", "harian"].includes(a)) { perf = within(1); title = "📈 Trade Report (24h)"; statsLabel = "Last 24h"; }
+  return buildTradeReport(perf, { title, statsLabel, trendN: config.reports?.learningReportTrendN ?? 10 });
 }
 
 async function runBriefing() {
@@ -401,6 +445,9 @@ After executing, write a brief one-line result per position.
     }
     drainTelegramQueue().catch(() => {});
   }
+  // After the cycle settles (closes may have happened) check the close-count
+  // milestone and fire the learning report if a new one was crossed.
+  await maybeFireLearningReport();
   return mgmtReport;
 }
 
@@ -1942,6 +1989,7 @@ function formatHelpText() {
     "/candidates — show latest cached candidates",
     "/deploy <n> — deploy candidate by cached index",
     "/briefing — morning briefing",
+    "/report [week|month] — trade learning report (on-demand)",
     "/hive — HiveMind sync status",
     "/hive pull — manual HiveMind pull now",
     "/pause — stop cron cycles",
@@ -2120,6 +2168,15 @@ async function telegramHandler(msg) {
     try {
       const briefing = await generateBriefing();
       await sendAndPinBriefing(briefing);
+    } catch (e) {
+      await sendMessage(`Error: ${e.message}`).catch(() => {});
+    }
+    return;
+  }
+
+  if (text === "/report" || text.startsWith("/report ")) {
+    try {
+      await sendHTML(buildReportForArg(text.slice("/report".length)));
     } catch (e) {
       await sendMessage(`Error: ${e.message}`).catch(() => {});
     }
@@ -2512,6 +2569,7 @@ Commands:
   /status        Refresh wallet + positions
   /candidates    Refresh top pool list
   /briefing      Show morning briefing (last 24h)
+  /report        Trade learning report — /report [week|month|day]
   /guide         Panduan setting (TOC) — /guide <no|katakunci|all>
   /learn         Study top LPers from the best current pool and save lessons
   /learn <addr>  Study top LPers from a specific pool address
@@ -2590,6 +2648,12 @@ Commands:
         const briefing = await generateBriefing();
         console.log(`\n${briefing.replace(/<[^>]*>/g, "")}\n`);
       });
+      return;
+    }
+
+    if (input === "/report" || input.startsWith("/report ")) {
+      console.log(`\n${buildReportForArg(input.slice("/report".length)).replace(/<[^>]*>/g, "")}\n`);
+      rl.prompt();
       return;
     }
 

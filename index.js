@@ -28,9 +28,9 @@ import {
   pinMessage,
   unpinMessage,
 } from "./telegram.js";
-import { generateBriefing } from "./briefing.js";
+import { generateBriefing, generatePeriodicBriefing } from "./briefing.js";
 import { renderGuide } from "./guide.js";
-import { getLastBriefingDate, setLastBriefingDate, getLastBriefingPinId, setLastBriefingPinId, getLastReportedMilestone, setLastReportedMilestone, getTrackedPosition, getTrackedPositions, setPositionInstruction, updatePnlAndCheckExits, queuePeakConfirmation, resolvePendingPeak, queueTrailingDropConfirmation, resolvePendingTrailingDrop } from "./state.js";
+import { getLastBriefingDate, setLastBriefingDate, getLastBriefingPinId, setLastBriefingPinId, getLastReportedMilestone, setLastReportedMilestone, getLastPeriodicBriefing, setLastPeriodicBriefing, getTrackedPosition, getTrackedPositions, setPositionInstruction, updatePnlAndCheckExits, queuePeakConfirmation, resolvePendingPeak, queueTrailingDropConfirmation, resolvePendingTrailingDrop } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
 import { recordPositionSnapshot, recallForPool, addPoolNote } from "./pool-memory.js";
 import { recordCandidateSnapshots, getCandidateMomentum, formatCandidateMomentum, recordSmartWalletCounts, getSmartWalletMomentum, formatSmartWalletMomentum } from "./candidate-memory.js";
@@ -214,19 +214,42 @@ async function maybeFireLearningReport() {
 }
 
 /**
- * Build an on-demand trade report for the /report command. No arg = all-time
- * learning report; `week`/`month`/`day` (and ID synonyms) restrict the window.
+ * On-demand /report. No arg = all-time learning report; `week`/`month`/`day` (and
+ * ID synonyms) produce the richer windowed periodic digest (activity + cost too).
+ * Async because the windowed digest fetches cost/wallet data.
  */
-function buildReportForArg(arg = "") {
+async function buildReportForArg(arg = "") {
   const a = String(arg).trim().toLowerCase();
-  const all = getAllPerformance();
-  const now = Date.now();
-  const within = (days) => all.filter((p) => new Date(p.closed_at || p.recorded_at || 0).getTime() >= now - days * 86400000);
-  let perf = all, title = "🎓 Trade Report (all-time)", statsLabel = "All-time";
-  if (["week", "weekly", "7d", "minggu", "mingguan"].includes(a)) { perf = within(7); title = "📅 Weekly Trade Report (7d)"; statsLabel = "Last 7 days"; }
-  else if (["month", "monthly", "30d", "bulan", "bulanan"].includes(a)) { perf = within(30); title = "📆 Monthly Trade Report (30d)"; statsLabel = "Last 30 days"; }
-  else if (["day", "today", "24h", "hari", "harian"].includes(a)) { perf = within(1); title = "📈 Trade Report (24h)"; statsLabel = "Last 24h"; }
-  return buildTradeReport(perf, { title, statsLabel, trendN: config.reports?.learningReportTrendN ?? 10 });
+  if (["week", "weekly", "7d", "minggu", "mingguan"].includes(a)) return generatePeriodicBriefing("week");
+  if (["month", "monthly", "30d", "bulan", "bulanan"].includes(a)) return generatePeriodicBriefing("month");
+  if (["day", "today", "24h", "hari", "harian"].includes(a)) return generatePeriodicBriefing("day");
+  return buildTradeReport(getAllPerformance(), { title: "🎓 Trade Report (all-time)", statsLabel: "All-time", trendN: config.reports?.learningReportTrendN ?? 10 });
+}
+
+/**
+ * Scheduled weekly/monthly digest. Deduped by period key (the week's Monday date
+ * or "YYYY-MM") so a restart near the cron tick won't re-send. Pinned like the
+ * daily briefing (latest digest stays pinned). Fail-open.
+ */
+async function runPeriodicBriefing(period) {
+  try {
+    const now = new Date();
+    let key;
+    if (period === "month") {
+      key = now.toISOString().slice(0, 7); // YYYY-MM
+    } else {
+      const d = new Date(now); const dow = (d.getUTCDay() + 6) % 7; // 0 = Monday
+      d.setUTCDate(d.getUTCDate() - dow);
+      key = d.toISOString().slice(0, 10); // this week's Monday (UTC)
+    }
+    if (getLastPeriodicBriefing(period) === key) return; // already sent this period
+    log("cron", `Starting ${period} briefing (${key})`);
+    const html = await generatePeriodicBriefing(period);
+    if (telegramEnabled()) await sendAndPinBriefing(html);
+    setLastPeriodicBriefing(period, key);
+  } catch (error) {
+    log("cron_error", `${period} briefing failed: ${error.message}`);
+  }
 }
 
 async function runBriefing() {
@@ -1014,6 +1037,16 @@ Summarize the current portfolio health, total fees earned, and performance of al
     await maybeRunMissedBriefing();
   }, { timezone: 'UTC' });
 
+  // Weekly digest — Monday 01:30 UTC (staggered after the daily briefing).
+  const weeklyTask = cron.schedule(`30 1 * * 1`, async () => {
+    await runPeriodicBriefing("week");
+  }, { timezone: 'UTC' });
+
+  // Monthly digest — 1st of month 02:00 UTC.
+  const monthlyTask = cron.schedule(`0 2 1 * *`, async () => {
+    await runPeriodicBriefing("month");
+  }, { timezone: 'UTC' });
+
   // Lightweight 30s PnL poller — updates trailing TP state between management cycles, no LLM
   let _pnlPollBusy = false;
   const pnlPollInterval = setInterval(async () => {
@@ -1069,7 +1102,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
     }
   }, 30_000);
 
-  _cronTasks = [mgmtTask, screenTask, healthTask, briefingTask, briefingWatchdog];
+  _cronTasks = [mgmtTask, screenTask, healthTask, briefingTask, briefingWatchdog, weeklyTask, monthlyTask];
   // Store interval ref so stopCronJobs can clear it
   _cronTasks._pnlPollInterval = pnlPollInterval;
   log("cron", `Cycles started — management every ${config.schedule.managementIntervalMin}m, screening every ${config.schedule.screeningIntervalMin}m`);
@@ -2176,7 +2209,7 @@ async function telegramHandler(msg) {
 
   if (text === "/report" || text.startsWith("/report ")) {
     try {
-      await sendHTML(buildReportForArg(text.slice("/report".length)));
+      await sendHTML(await buildReportForArg(text.slice("/report".length)));
     } catch (e) {
       await sendMessage(`Error: ${e.message}`).catch(() => {});
     }
@@ -2652,8 +2685,10 @@ Commands:
     }
 
     if (input === "/report" || input.startsWith("/report ")) {
-      console.log(`\n${buildReportForArg(input.slice("/report".length)).replace(/<[^>]*>/g, "")}\n`);
-      rl.prompt();
+      await runBusy(async () => {
+        const rep = await buildReportForArg(input.slice("/report".length));
+        console.log(`\n${rep.replace(/<[^>]*>/g, "")}\n`);
+      });
       return;
     }
 

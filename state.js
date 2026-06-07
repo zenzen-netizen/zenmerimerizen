@@ -582,6 +582,21 @@ export function setLastReportedMilestone(n) {
 }
 
 /**
+ * Dedup key for scheduled periodic briefings (week/month), so a restart near the
+ * cron tick doesn't re-send the same period. Key = identifier of that period
+ * (e.g. the week's Monday date, or "YYYY-MM").
+ */
+export function getLastPeriodicBriefing(period) {
+  return load()[`_lastBriefing_${period}`] || null;
+}
+
+export function setLastPeriodicBriefing(period, key) {
+  const state = load();
+  state[`_lastBriefing_${period}`] = key;
+  save(state);
+}
+
+/**
  * Reconcile local state with actual on-chain positions.
  * Marks any local open positions as closed if they are not in the on-chain list.
  */

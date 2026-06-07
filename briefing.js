@@ -104,6 +104,24 @@ function buildLearningSection(lessonsData, since) {
 const STATE_FILE = "./state.json";
 const LESSONS_FILE = "./lessons.json";
 
+// At-a-glance ON/OFF + auto/manual status so the user can tell what's active from
+// the briefing alone (e.g. gas reserve auto vs manual, which experiments are on).
+function buildFeatureStatus() {
+  const m = config.management || {}, s = config.schedule || {}, r = config.reports || {}, e = config.experiments || {};
+  const onoff = (b) => (b ? "on" : "off");
+  const modes = [
+    `gas reserve ${m.gasReserveAutoTune ? "AUTO" : "manual"}`,
+    `learning report ${r.learningReportEvery > 0 ? `/${r.learningReportEvery}` : "off"}`,
+    `trailing TP ${onoff(m.trailingTakeProfit)}`,
+    `adaptive screening ${onoff(s.adaptiveScreening)}`,
+    `auto-swap ${onoff(m.autoSwapAfterClaim)}`,
+  ];
+  const expOn = Object.entries(e).filter(([, v]) => v === true).map(([k]) => k);
+  const lines = [`⚙️ <b>Mode:</b> ${modes.join(" · ")}`];
+  lines.push(expOn.length ? `🧪 Experiments ON (${expOn.length}): ${expOn.map(esc).join(", ")}` : "🧪 Experiments: semua off");
+  return lines.join("\n");
+}
+
 // Combined cost section: LLM (broken down per agent role) + gas (estimate) + the
 // bottom line "did trading cover ALL costs?". `windowLabel` describes the period.
 function buildCostSection({ costData, balance, credits, llmStats, gasSol, gasIsEst = true, solPrice, netPnlUsd, windowLabel = "24h", windowDays = 1 }) {
@@ -142,7 +160,8 @@ function buildCostSection({ costData, balance, credits, llmStats, gasSol, gasIsE
       if (dailyBurn > 0) {
         const runwayDays = reserve / dailyBurn;
         const flag = runwayDays < 7 ? " ⚠️ tipis" : "";
-        lines.push(`🪫 gasReserve ${reserve} SOL ≈ ${runwayDays.toFixed(0)}d runway @ ${dailyBurn.toFixed(4)} SOL/hari${flag}`);
+        const mode = config.management?.gasReserveAutoTune ? " (auto-tune)" : " (manual)";
+        lines.push(`🪫 gasReserve ${reserve} SOL${mode} ≈ ${runwayDays.toFixed(0)}d runway @ ${dailyBurn.toFixed(4)} SOL/hari${flag}`);
       }
     }
   }
@@ -280,6 +299,8 @@ export async function generateBriefing() {
     `<b>Current Portfolio:</b>`,
     `📂 Open Positions: ${openPositions.length}`,
     "",
+    buildFeatureStatus(),
+    "",
     buildCostSection({ costData, balance, credits, llmStats: getLlmCostStats(last24h.getTime()), gasSol, gasIsEst, solPrice, netPnlUsd: totalPnLUsd, windowLabel: "24h", windowDays: 1 }) || "",
     "",
     buildLearningSection(lessonsData, last24h) || "",
@@ -359,7 +380,8 @@ export async function generatePeriodicBriefing(period = "week") {
     const dailyBurn = gasSol / days;
     if (reserve > 0 && dailyBurn > 0) {
       const runwayDays = reserve / dailyBurn;
-      costLines.push(`🪫 gasReserve ${reserve} SOL ≈ ${runwayDays.toFixed(0)}d runway @ ${dailyBurn.toFixed(4)} SOL/hari${runwayDays < 7 ? " ⚠️ tipis" : ""}`);
+      const mode = config.management?.gasReserveAutoTune ? " (auto-tune)" : " (manual)";
+      costLines.push(`🪫 gasReserve ${reserve} SOL${mode} ≈ ${runwayDays.toFixed(0)}d runway @ ${dailyBurn.toFixed(4)} SOL/hari${runwayDays < 7 ? " ⚠️ tipis" : ""}`);
     }
   }
   const totalCost = llmTotal + (gasUsd ?? 0);
@@ -372,6 +394,7 @@ export async function generatePeriodicBriefing(period = "week") {
   const parts = [
     report,
     `<b>Activity (${days}d):</b> 📥 ${opened} opened | 📤 ${windowPerf.length} closed`,
+    buildFeatureStatus(),
     costLines.length > 1 ? costLines.join("\n") : null,
     buildTimeProfileSection(),
   ];

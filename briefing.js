@@ -8,7 +8,7 @@ import { getDeployedPoolAddresses } from "./pool-memory.js";
 import { getWalletBalances } from "./tools/wallet.js";
 import {
   computeTradeStats, formatStatsBlock, formatBreakdown, buildVerdict,
-  buildRecommendations, buildRoleCostLines, estimateGasSol,
+  buildRecommendations, buildRoleCostLines, estimateGasSol, buildTradeReport,
 } from "./reports.js";
 
 const money = (n) => `${n >= 0 ? "+" : "-"}$${Math.abs(n).toFixed(2)}`;
@@ -269,6 +269,65 @@ export async function generateBriefing() {
 
   // Collapse runs of blank lines left by skipped (null) sections.
   return lines.filter((l, i) => !(l === "" && lines[i - 1] === "")).join("\n");
+}
+
+/**
+ * Periodic digest (day / week / month) — broader than the daily morning briefing:
+ * the full profitability report over the window (stats, verdict, trend, strategy/
+ * session/narrative breakdown, recommendations) + activity counts + cost over the
+ * window (LLM aggregate from the account + gas estimate). Used by the scheduled
+ * weekly/monthly crons and by on-demand /report week|month|day.
+ */
+export async function generatePeriodicBriefing(period = "week") {
+  const days = period === "month" ? 30 : period === "day" ? 1 : 7;
+  const meta = { day: ["📈", "Daily"], week: ["📅", "Weekly"], month: ["📆", "Monthly"] }[period] || ["📅", "Weekly"];
+  const [emoji, label] = meta;
+
+  const lessonsData = loadJson(LESSONS_FILE) || { performance: [], lessons: [] };
+  const state = loadJson(STATE_FILE) || { positions: {} };
+  const now = Date.now();
+  const since = now - days * 86400000;
+
+  const windowPerf = (lessonsData.performance || []).filter((p) => new Date(p.closed_at || p.recorded_at || 0).getTime() >= since);
+  const allPositions = Object.values(state.positions || {});
+  const opened = allPositions.filter((p) => new Date(p.deployed_at).getTime() >= since).length;
+  const netPnl = windowPerf.reduce((s, p) => s + (p.pnl_usd || 0), 0);
+
+  const [balance, credits, wallet] = await Promise.all([
+    getOpenRouterBalance(),
+    getOpenRouterCredits(),
+    getWalletBalances().catch(() => null),
+  ]);
+  const gasSol = estimateGasSol(countOnChainActions(since));
+  const solPrice = wallet?.sol_price || 0;
+  const gasUsd = gasSol && solPrice ? gasSol * solPrice : null;
+  // Longer windows: the account-level usage figure is the best LLM total we have
+  // (per-role split is only available for the rolling 24h activity feed).
+  const llmWindow = period === "month" ? balance?.usageMonthly : period === "week" ? balance?.usageWeekly : balance?.usageDaily;
+
+  const report = buildTradeReport(windowPerf, {
+    title: `${emoji} ${label} Briefing — last ${days}d`,
+    statsLabel: `Last ${days}d`,
+    trendN: period === "month" ? 10 : 7,
+  });
+
+  const costLines = [`<b>💵 Costs (${days}d):</b>`];
+  if (llmWindow != null) costLines.push(`🤖 LLM (${period}): $${llmWindow.toFixed(4)}`);
+  if (gasSol > 0) costLines.push(`⛽ Gas (est): ~${gasSol.toFixed(4)} SOL${gasUsd != null ? ` (~$${gasUsd.toFixed(2)})` : ""}`);
+  const totalCost = (llmWindow ?? 0) + (gasUsd ?? 0);
+  if (totalCost > 0) {
+    const real = netPnl - totalCost;
+    costLines.push(`📊 Net − biaya: ${money(netPnl)} − $${totalCost.toFixed(4)} = ${money(real)} ${real >= 0 ? "✅" : "🔴"}`);
+  }
+  if (credits?.balance != null) costLines.push(`💳 Saldo OpenRouter: $${credits.balance.toFixed(2)}`);
+
+  const parts = [
+    report,
+    `<b>Activity (${days}d):</b> 📥 ${opened} opened | 📤 ${windowPerf.length} closed`,
+    costLines.length > 1 ? costLines.join("\n") : null,
+    buildTimeProfileSection(),
+  ];
+  return parts.filter(Boolean).join("\n\n");
 }
 
 function loadJson(file) {

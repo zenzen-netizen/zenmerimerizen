@@ -289,7 +289,8 @@ const toolMap = {
     }
     return { error: "invalid mode" };
   },
-  update_config: ({ changes, key, value, reason = "" }) => {
+  update_config: (args = {}) => {
+    let { changes, key, value, path, reason = "" } = args;
     // Weak models (e.g. Gemini) cannot fill a free-form object param, so they send
     // empty changes. Accept a flat key/value pair as an alternative and coerce the
     // value type the same way the /settings input field does.
@@ -484,10 +485,31 @@ const toolMap = {
     );
     const STRATEGY_BIN_KEYS = new Set(["binsBelow", "minBinsBelow", "maxBinsBelow", "defaultBinsBelow"]);
 
+    // Robust arg recovery — weak models invent shapes instead of changes/key+value:
+    //   { path: "management.gasReserveAutoTune", value: true }
+    //   { management: { gasReserveAutoTune: true } }   (section-nested)
+    //   { gasReserveAutoTune: true }                   (bare flat key at top level)
+    // Fold all of them into `changes` so casual chat works regardless of phrasing.
+    const resolveKey = (k) => (CONFIG_MAP[k] ? k : CONFIG_MAP_LOWER[String(k).toLowerCase()]?.[0]);
+    const KNOWN_SECTIONS = new Set(["screening", "management", "risk", "schedule", "llm", "strategy", "hiveMind", "api", "gmgn", "indicators", "chartIndicators", "experiments", "reports", "tokens", "darwin"]);
+    if (Object.keys(changes).length === 0 && typeof path === "string" && path.trim()) {
+      const rk = resolveKey(path.trim().split(".").pop());
+      if (rk) changes[rk] = value;
+    }
+    for (const [k, v] of Object.entries(args)) {
+      if (["changes", "key", "value", "path", "reason"].includes(k)) continue;
+      if (v && typeof v === "object" && !Array.isArray(v) && KNOWN_SECTIONS.has(k)) {
+        for (const [sk, sv] of Object.entries(v)) { const rk = resolveKey(sk); if (rk) changes[rk] = sv; }
+      } else {
+        const rk = resolveKey(k);
+        if (rk) changes[rk] = v;
+      }
+    }
+
     for (const [key, val] of Object.entries(changes)) {
       const match = CONFIG_MAP[key] ? [key, CONFIG_MAP[key]] : CONFIG_MAP_LOWER[key.toLowerCase()];
       if (!match) { unknown.push(key); continue; }
-      let normalizedVal = val;
+      let normalizedVal = coerceConfigValue(val);
       if (STRATEGY_BIN_KEYS.has(match[0])) {
         const numericVal = Number(val);
         if (!Number.isFinite(numericVal)) {

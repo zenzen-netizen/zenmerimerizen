@@ -8,7 +8,7 @@ import { getDeployedPoolAddresses } from "./pool-memory.js";
 import { getWalletBalances } from "./tools/wallet.js";
 import { getGasStats } from "./gas-tracker.js";
 import {
-  computeTradeStats, formatStatsBlock, formatBreakdown, buildVerdict,
+  computeTradeStats, formatStatsBlock, formatBreakdown, formatMovement, buildVerdict,
   buildRecommendations, buildRoleCostLines, estimateGasSol, buildTradeReport,
 } from "./reports.js";
 
@@ -258,6 +258,7 @@ export async function generateBriefing() {
     "",
     formatStatsBlock(statsAll, "All-time"),
     buildVerdict(statsAll) || "",
+    formatMovement(statsAll) ? "\n" + formatMovement(statsAll) : "",
     "",
     `<b>Lessons Learned (24h):</b>`,
     tradingLessons.length > 0
@@ -275,6 +276,8 @@ export async function generateBriefing() {
     buildTimeProfileSection() || "",
     "",
     buildSkipReviewSection() || "",
+    "",
+    formatBreakdown(statsAll, { sessions: false }) || "",
     "",
     buildRecommendations(lessonsData.performance, statsAll, {
       gasPerTradeUsd: solPrice && perfLast24h.length ? (gasSol * solPrice) / perfLast24h.length : 0,

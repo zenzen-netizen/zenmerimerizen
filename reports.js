@@ -299,16 +299,17 @@ export function buildTradeReport(perf, { title, statsLabel = "Summary", trendN =
 }
 
 /**
- * Rough per-action Solana network-fee estimate (SOL). Real fees vary with
- * priority fees and bin-array creation; position rent is reclaimed on close so it
- * is excluded. This is a deliberate ESTIMATE — precise accounting needs per-tx
- * meta.fee capture. Always labelled "est" wherever surfaced.
+ * Rough per-action Solana network-fee estimate (SOL), used ONLY as a fallback
+ * until real per-tx fees accrue in gas-log.json. Calibrated to MEASURED on-chain
+ * fees (median ~0.000005 SOL/tx = base fee, avg ~0.000017; a deploy is a few txs).
+ * Earlier defaults were ~100× too high — Solana base fees are tiny and the bot
+ * pays little/no priority fee. Real capture (gas-tracker.js) overrides this.
  */
 export const GAS_EST_SOL = {
-  deploy_position: 0.0035,
-  close_position: 0.002,
-  claim_fees: 0.001,
-  swap_token: 0.001,
+  deploy_position: 0.00004, // ~2-3 txs
+  close_position: 0.00003,
+  claim_fees: 0.000015,
+  swap_token: 0.000015,
 };
 
 /** Estimated gas (SOL) from a map of { tool: count }. */

@@ -1212,6 +1212,76 @@ Matikan (balik pabrik): `set smartWalletMomentum to false`
 
 ---
 
+# GRUP 17 — LAPORAN, GAS & ANALITIK (Reports)
+
+> Sistem laporan performa & biaya. Semua laporan pakai satu mesin analitik (`reports.js`) jadi metriknya konsisten.
+
+### Jenis laporan
+- **Briefing Harian** — otomatis tiap 01:00 UTC (+ watchdog kalau bot sempat mati). Isi: aktivitas 24 jam, blok statistik all-time (profit factor, avg win vs avg loss, max drawdown, expectancy), **verdict** (baca singkat kesehatan trading), lessons (audit ubah-config dipisah), **biaya** (LLM per-role + gas + net-vs-semua-biaya), time profile, rekomendasi.
+- **Briefing Weekly** — otomatis Senin 01:30 UTC. **Monthly** — tanggal 1 jam 02:00 UTC. Cakupan lebih luas (jendela 7d/30d) + tren + breakdown.
+- **Learning Report (milestone)** — otomatis tiap kelipatan `learningReportEvery` posisi tutup (mis. 10, 20, 30…). Review mendalam: tren "N terakhir vs N sebelumnya", breakdown per strategy/sesi/narasi, movement PnL, rekomendasi.
+- **`/report`** — minta laporan kapan saja. `/report` = all-time; `/report week` / `/report month` / `/report day` = per jendela waktu.
+
+### Fitur otomatis
+- **Auto-pin**: tiap briefing otomatis di-pin di Telegram, yang lama di-unpin (selalu yang terbaru nempel).
+- **Cost per-role**: biaya LLM dipecah Screening / Management / General (presisi kalau modelnya beda).
+- **Gas nyata**: bot mencatat fee transaksi asli (`gas-log.json`) → laporan pakai angka nyata (fallback estimasi sampai data terkumpul).
+- **PnL movement**: tiap posisi dilacak peak & trough-nya → rekomendasi tweak `takeProfitPct` / trailing / `stopLossPct` (data mulai terkumpul untuk posisi yang dibuka setelah fitur ini aktif).
+
+### learningReportEvery
+
+| | |
+|---|---|
+| **Nilai sekarang** | `10` |
+| **Default** | `10` |
+| **Format** | angka (0 = matikan laporan milestone otomatis) |
+| **Penjelasan** | Tiap berapa posisi tutup, Learning Report otomatis dikirim. `10` = tiap 10/20/30 close. `0` = matikan (tapi `/report` tetap jalan manual) |
+
+**Contoh:** `set learningReportEvery to 20`
+
+### learningReportTrendN
+
+| | |
+|---|---|
+| **Nilai sekarang** | `10` |
+| **Default** | `10` |
+| **Format** | angka |
+| **Penjelasan** | Berapa trade terakhir yang dibandingkan dengan N sebelumnya di bagian tren ("apakah edge membaik?") |
+
+**Contoh:** `set learningReportTrendN to 15`
+
+### gasReserveAutoTune
+
+| | |
+|---|---|
+| **Nilai sekarang** | `false` |
+| **Default** | `false` |
+| **Format** | `true` atau `false` |
+| **Penjelasan** | Kalau ON, tiap hari `gasReserve` disetel ulang otomatis dari gas NYATA yang terukur — simpan `gasReserveBufferDays` hari runway, tak pernah di bawah `gasReserveFloorSol`. OFF = `gasReserve` tetap persis seperti kamu set (pabrik) |
+| **Catatan** | Hanya menyesuaikan kalau perubahannya berarti (>20% & >0.005 SOL) dan sudah ada ≥8 catatan gas. Karena gas Solana biasanya receh, efeknya cenderung **menurunkan** reserve → modal lebih banyak buat deploy. Fail-open |
+
+**Contoh nyalakan:** `set gasReserveAutoTune to true`
+
+### gasReserveBufferDays
+
+| | |
+|---|---|
+| **Nilai sekarang** | `14` |
+| **Default** | `14` |
+| **Format** | angka (hari) |
+| **Penjelasan** | Berapa hari runway gas yang dijaga saat auto-tune ON (target reserve = burn harian × hari ini) |
+
+### gasReserveFloorSol
+
+| | |
+|---|---|
+| **Nilai sekarang** | `0.03` |
+| **Default** | `0.03` |
+| **Format** | angka (SOL) |
+| **Penjelasan** | Batas bawah `gasReserve` saat auto-tune ON — reserve tak akan pernah disetel di bawah ini (biar selalu ada gas buat transaksi) |
+
+---
+
 # CATATAN — GMGN & DUA SISTEM INDIKATOR
 
 > Bagian ini menjawab kebingungan umum: "blok GMGN di `/config` itu semua kepakai atau tidak?"

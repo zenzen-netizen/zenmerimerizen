@@ -15,7 +15,8 @@ state.js            Position registry (state.json): tracks bin ranges, OOR times
 lessons.js          Learning engine: records closed-position perf, derives lessons, evolves thresholds
 pool-memory.js      Per-pool deploy history + snapshots (pool-memory.json)
 strategy-library.js Saved LP strategies (strategy-library.json)
-briefing.js         Daily Telegram briefing (HTML)
+reports.js          Trade-analytics engine (profit factor, drawdown, breakdowns) + report composer
+briefing.js         Daily/weekly/monthly Telegram briefings (HTML)
 telegram.js         Telegram bot: polling, notifications (deploy/close/swap/OOR)
 hive-mind.js        Optional collective intelligence server sync
 smart-wallets.js    KOL/alpha wallet tracker (smart-wallets.json)
@@ -227,6 +228,40 @@ Closed-position performance is bucketed by the **open hour** (deploy time) in **
 - **Analysis**: `getHourlyProfile()` → per-session win-rate / avg PnL / sample count (tool `get_time_profile`, SCREENER + GENERAL). `classifySession()` → `weak | ok | insufficient`. A session needs `MIN_SESSION_SAMPLES` (8) before it can steer anything; below that = neutral. "weak" = win-rate ≥15pp under overall AND negative avg PnL.
 - **Soft brake (prompt.js)**: `getTimeProfileForPrompt()` injects one line into the SCREENER prompt about the current session. Good-to-have signal only — it NEVER overrides hard screening rules.
 - **Adaptive interval (index.js)**: when `schedule.adaptiveScreening` is true, the **screening** cron tick is gated by `shouldRunScheduledScreening()`. Effective interval = floor `screeningIntervalMin` … ceiling `maxScreeningIntervalMin`; stretched to the ceiling only during historically weak sessions (saves LLM tokens). Manual mode (default) = fixed `screeningIntervalMin`. **Management & PnL-poll cadence are never throttled**; event-driven screening triggers (freed slot) bypass the gate. The gate reads config live, so toggling needs no cron restart.
+
+---
+
+## Trade Reports & Briefings (reports.js + briefing.js)
+
+`reports.js` is the shared analytics engine — pure functions over the closed-position
+`performance[]` array (from lessons.json via `getAllPerformance()`):
+- `computeTradeStats(records)` — net/ROI, win rate, **profit factor**, avg win vs avg loss,
+  **payoff ratio**, expectancy, **max drawdown**, worst loss streak, biggest win/loss, and
+  per-strategy/session/narrative breakdowns.
+- `buildRecommendations(perf, stats)` — **profitability-aware**: refuses to suggest bigger
+  size while net-negative or profit factor weak; flags the leak (lopsided payoff, tail loss,
+  worst strategy, weak session/narrative). Replaced the old win-rate-only logic in the briefing.
+- `buildVerdict(stats)` — plain-language health read (catches "high win-rate but net-negative").
+- `buildTradeReport(perf, opts)` — composes a full report (stats + verdict + trend + breakdown
+  + recs). Shared by the milestone report, `/report`, and weekly/monthly digests.
+- `buildRoleCostLines(costData)` — LLM cost **per agent role** by mapping each model back to
+  screening/management/general (precise when models differ, labelled estimate when shared).
+- `estimateGasSol(counts)` + `GAS_EST_SOL` — rough per-action gas estimate (deploy/close/claim/
+  swap × per-action SOL). Precise gas would need per-tx `meta.fee` capture (not yet done).
+
+Briefings (briefing.js):
+- **Daily** (`generateBriefing`, cron 01:00 UTC + missed-watchdog): 24h activity/perf, all-time
+  stats block + verdict, cleaned lessons (config-change audit excluded → counted), cost section
+  (LLM per-role + gas est + net-vs-all-cost), learning/time-profile/skip-review, recommendations.
+- **Weekly/Monthly** (`generatePeriodicBriefing`, cron Mon 01:30 / 1st 02:00 UTC): the windowed
+  trade report + activity + window cost. Deduped by period key in state.json.
+- **Milestone learning report** (`maybeFireLearningReport` in index.js, hooked at end of
+  `runManagementCycle`): every `config.reports.learningReportEvery` closes (default 10; 0=off),
+  fires once per milestone (`state._lastReportedMilestone` dedup), fail-open.
+- **`/report [week|month|day]`** (Telegram + REPL): on-demand; no arg = all-time learning report.
+- All briefings auto-pin via `sendAndPinBriefing` (latest pinned, previous unpinned).
+
+Config: `config.reports.{learningReportEvery, learningReportTrendN}` (in CONFIG_MAP).
 
 ---
 

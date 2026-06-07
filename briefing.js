@@ -1,10 +1,45 @@
 import fs from "fs";
 import { log } from "./logger.js";
-import { getPerformanceSummary, getHourlyProfile } from "./lessons.js";
+import { getHourlyProfile } from "./lessons.js";
 import { config } from "./config.js";
 import { getOpenRouterBalance, getOpenRouter24hCost, getOpenRouterCredits } from "./openrouter-usage.js";
 import { getSkipReview } from "./candidate-memory.js";
 import { getDeployedPoolAddresses } from "./pool-memory.js";
+import { getWalletBalances } from "./tools/wallet.js";
+import {
+  computeTradeStats, formatStatsBlock, formatBreakdown, buildVerdict,
+  buildRecommendations, buildRoleCostLines, estimateGasSol,
+} from "./reports.js";
+
+const money = (n) => `${n >= 0 ? "+" : "-"}$${Math.abs(n).toFixed(2)}`;
+
+// On-chain tools whose successful calls cost network/gas fees.
+const ONCHAIN_TOOLS = ["deploy_position", "close_position", "claim_fees", "swap_token"];
+
+/**
+ * Count successful on-chain actions since `sinceMs` from the daily actions logs,
+ * for the gas ESTIMATE. Skips log files whose date is entirely before the window.
+ * Fail-open → {} on any error (gas line is simply omitted).
+ */
+function countOnChainActions(sinceMs) {
+  const counts = {};
+  try {
+    const dir = "./logs";
+    if (!fs.existsSync(dir)) return counts;
+    const sinceDay = new Date(sinceMs).toISOString().slice(0, 10);
+    const files = fs.readdirSync(dir).filter((f) => /^actions-\d{4}-\d{2}-\d{2}\.jsonl$/.test(f) && f.slice(8, 18) >= sinceDay);
+    for (const f of files) {
+      for (const line of fs.readFileSync(`${dir}/${f}`, "utf8").split("\n")) {
+        if (!line.trim()) continue;
+        let o; try { o = JSON.parse(line); } catch { continue; }
+        if (!o.success || !ONCHAIN_TOOLS.includes(o.tool)) continue;
+        if (new Date(o.timestamp).getTime() < sinceMs) continue;
+        counts[o.tool] = (counts[o.tool] || 0) + 1;
+      }
+    }
+  } catch (e) { log("briefing_error", `gas action count failed: ${e.message}`); }
+  return counts;
+}
 
 // Escape data-derived text before embedding in HTML messages (lesson rules can
 // contain <, >, & — e.g. "PnL -50% <= -50%" — which break Telegram's HTML parser).
@@ -60,127 +95,44 @@ function buildLearningSection(lessonsData, since) {
   return lines.join("\n");
 }
 
-const fin = (arr) => arr.filter((n) => Number.isFinite(n));
-const mean = (arr) => (arr.length ? arr.reduce((s, x) => s + x, 0) / arr.length : null);
-
-// Turns closed-position performance into concrete, actionable config tweaks the
-// operator can apply to push for more profit. Mirrors evolveThresholds' winner/loser
-// logic, but covers dimensions the auto-evolver doesn't touch (bin_step, strategy,
-// OOR wait, position sizing) and always references REAL config keys.
-function buildRecommendations(allPerf) {
-  const perf = (allPerf || []).filter((p) => Number.isFinite(p.pnl_pct));
-  if (perf.length < 4) return null; // not enough closed positions to advise confidently
-
-  const winners = perf.filter((p) => p.pnl_pct > 0);
-  const losers = perf.filter((p) => p.pnl_pct < -5);
-  if (winners.length < 2 && losers.length < 2) return null;
-
-  const s = config.screening || {};
-  const m = config.management || {};
-  const recs = [];
-
-  // 1. Fee/active-TVL floor — raise toward worst winner if there's clear headroom.
-  const wFee = fin(winners.map((p) => p.fee_tvl_ratio));
-  if (wFee.length >= 2) {
-    const minWinFee = Math.min(...wFee);
-    const cur = s.minFeeActiveTvlRatio ?? 0.05;
-    if (minWinFee > cur * 1.3) {
-      const target = Number((minWinFee * 0.85).toFixed(2));
-      recs.push(`Raise <code>minFeeActiveTvlRatio</code> ${cur} → ~${target} (worst winner had fee/TVL ${minWinFee.toFixed(2)})`);
-    }
-  }
-
-  // 2. Organic floor — winners consistently more organic than losers.
-  const wOrg = fin(winners.map((p) => p.organic_score));
-  const lOrg = fin(losers.map((p) => p.organic_score));
-  if (wOrg.length >= 2 && lOrg.length >= 2) {
-    const wAvg = mean(wOrg), lAvg = mean(lOrg);
-    const cur = s.minOrganic ?? 60;
-    const target = Math.round(Math.min(...wOrg) - 3);
-    if (wAvg - lAvg >= 10 && target > cur) {
-      recs.push(`Raise <code>minOrganic</code> ${cur} → ~${Math.min(target, 90)} (winners avg ${wAvg.toFixed(0)} vs losers ${lAvg.toFixed(0)})`);
-    }
-  }
-
-  // 3. bin_step ceiling — if losers cluster at higher bin_step, tighten the cap.
-  const wBin = fin(winners.map((p) => p.bin_step));
-  const lBin = fin(losers.map((p) => p.bin_step));
-  if (wBin.length >= 2 && lBin.length >= 2) {
-    const wAvg = mean(wBin), lAvg = mean(lBin);
-    if (lAvg - wAvg >= 10) {
-      recs.push(`Lower <code>maxBinStep</code> toward ~${Math.round(wAvg + 10)} (losers avg bin_step ${lAvg.toFixed(0)} vs winners ${wAvg.toFixed(0)})`);
-    }
-  }
-
-  // 4. Range efficiency — low in-range time means ranges too tight or OOR exits too fast.
-  const allEff = fin(perf.map((p) => p.range_efficiency));
-  if (allEff.length >= 3) {
-    const effAvg = mean(allEff);
-    if (effAvg < 50) {
-      recs.push(`Avg in-range only ${effAvg.toFixed(0)}% — widen ranges (more bins_below) or extend <code>outOfRangeWaitMinutes</code> (now ${m.outOfRangeWaitMinutes ?? 30})`);
-    }
-  }
-
-  // 5. Best-performing strategy — favor it when screening.
-  const byStrat = {};
-  for (const p of perf) {
-    if (!p.strategy) continue;
-    (byStrat[p.strategy] ??= []).push(p.pnl_pct);
-  }
-  const stratStats = Object.entries(byStrat)
-    .filter(([, a]) => a.length >= 2)
-    .map(([k, a]) => [k, mean(a)])
-    .sort((a, b) => b[1] - a[1]);
-  if (stratStats.length >= 2 && stratStats[0][1] > 0) {
-    recs.push(`Best strategy: <b>${esc(stratStats[0][0])}</b> (avg PnL +${stratStats[0][1].toFixed(1)}%) — favor it in screening`);
-  }
-
-  // 6. Position sizing — scale risk with realized win rate.
-  if (perf.length >= 6) {
-    const winRate = winners.length / perf.length;
-    const cur = m.positionSizePct ?? 0.35;
-    if (winRate < 0.4 && cur > 0.2) {
-      recs.push(`Win rate ${(winRate * 100).toFixed(0)}% — lower <code>positionSizePct</code> ${cur} → ${(cur * 0.8).toFixed(2)} until edge improves`);
-    } else if (winRate > 0.65 && cur < 0.5) {
-      recs.push(`Win rate ${(winRate * 100).toFixed(0)}% — room to raise <code>positionSizePct</code> ${cur} → ${Math.min(0.5, cur * 1.2).toFixed(2)} to compound faster`);
-    }
-  }
-
-  if (recs.length === 0) return null;
-  return ["💡 <b>Config Recommendations:</b>", ...recs.slice(0, 5).map((r) => `  • ${r}`)].join("\n");
-}
+// Recommendations now come from reports.js (buildRecommendations) — a single,
+// profitability-aware engine shared by the briefing, the milestone learning
+// report, and the weekly/monthly digests.
 
 const STATE_FILE = "./state.json";
 const LESSONS_FILE = "./lessons.json";
 
-function buildLlmCostSection(costData, balance, credits, netPnlUsd) {
-  if (!costData && !balance && !credits) return null;
-  const lines = ["<b>🤖 LLM Usage:</b>"];
-  const cost24h = costData && costData.calls > 0 ? costData.totalCost : null;
-  if (cost24h != null) {
-    lines.push(`💸 24h cost: $${cost24h.toFixed(4)} (${costData.calls} calls, ${costData.totalTokens.toLocaleString()} tokens)`);
-    const models = Object.entries(costData.byModel)
-      .sort((a, b) => b[1].cost - a[1].cost);
-    for (const [model, stats] of models) {
-      const short = model.split("/").pop();
-      lines.push(`  • ${esc(short)}: $${stats.cost.toFixed(4)} (${stats.calls} calls)`);
-    }
-  } else if (balance?.usageDaily != null) {
-    lines.push(`💸 Today: $${balance.usageDaily.toFixed(4)}`);
-    if (balance.usageWeekly != null) lines.push(`💸 This week: $${balance.usageWeekly.toFixed(4)}`);
-    if (balance.usageMonthly != null) lines.push(`💸 This month: $${balance.usageMonthly.toFixed(2)}`);
-  } else if (balance?.usage != null) {
-    lines.push(`💸 Total spent: $${balance.usage.toFixed(4)}`);
+// Combined cost section: LLM (broken down per agent role) + gas (estimate) + the
+// bottom line "did trading cover ALL costs?". `windowLabel` describes the period.
+function buildCostSection({ costData, balance, credits, gasSol, solPrice, netPnlUsd, windowLabel = "24h" }) {
+  if (!costData && !balance && !credits && !gasSol) return null;
+  const lines = [`<b>💵 Costs (${esc(windowLabel)}):</b>`];
+
+  // ── LLM, per role ──
+  const llmCost = costData && costData.calls > 0 ? costData.totalCost : (balance?.usageDaily ?? null);
+  const roleLines = buildRoleCostLines(costData);
+  if (roleLines) {
+    lines.push(`🤖 LLM: $${(llmCost ?? 0).toFixed(4)} (${costData.calls} calls, ${costData.totalTokens.toLocaleString()} tokens)`);
+    lines.push(...roleLines);
+  } else if (llmCost != null) {
+    lines.push(`🤖 LLM: $${llmCost.toFixed(4)}`);
   }
-  // Bottom line: did today's trading cover the AI bill? Prefer the detailed
-  // /activity cost; fall back to the account's usage_daily when /activity is empty.
-  const todayCost = cost24h ?? (balance?.usageDaily ?? null);
-  if (todayCost != null && Number.isFinite(netPnlUsd)) {
-    const real = netPnlUsd - todayCost;
-    const verdict = real >= 0 ? "✅ profit bersih" : "🔴 rugi setelah biaya AI";
-    const money = (n) => `${n >= 0 ? "+" : "-"}$${Math.abs(n).toFixed(2)}`;
-    lines.push(`📊 Net vs biaya LLM (24h): ${money(netPnlUsd)} − $${todayCost.toFixed(4)} = ${money(real)} ${verdict}`);
+
+  // ── Gas (estimate from on-chain action counts) ──
+  const gasUsd = gasSol != null && solPrice ? gasSol * solPrice : null;
+  if (gasSol > 0) {
+    lines.push(`⛽ Gas (est): ~${gasSol.toFixed(4)} SOL${gasUsd != null ? ` (~$${gasUsd.toFixed(2)})` : ""}`);
   }
+
+  // ── Bottom line: trading net vs ALL costs (LLM + gas) ──
+  const llmUsd = llmCost ?? 0;
+  const totalCost = llmUsd + (gasUsd ?? 0);
+  if (Number.isFinite(netPnlUsd) && totalCost > 0) {
+    const real = netPnlUsd - totalCost;
+    const verdict = real >= 0 ? "✅ profit bersih" : "🔴 rugi setelah biaya";
+    lines.push(`📊 Net − semua biaya: ${money(netPnlUsd)} − $${totalCost.toFixed(4)} (LLM $${llmUsd.toFixed(4)}${gasUsd != null ? ` + gas $${gasUsd.toFixed(2)}` : ""}) = ${money(real)} ${verdict}`);
+  }
+
   if (credits?.balance != null) {
     lines.push(`💳 Saldo OpenRouter: $${credits.balance.toFixed(2)}`);
     if (credits.balance < 5) lines.push(`⚠️ Saldo menipis — pertimbangkan top up`);
@@ -257,19 +209,24 @@ export async function generateBriefing() {
   const totalPnLUsd = perfLast24h.reduce((sum, p) => sum + (p.pnl_usd || 0), 0);
   const totalFeesUsd = perfLast24h.reduce((sum, p) => sum + (p.fees_earned_usd || 0), 0);
 
-  // 3. Lessons Learned
+  // 3. Lessons — separate genuine trading lessons from config-change audit noise.
   const lessonsLast24h = (lessonsData.lessons || []).filter(l => new Date(l.created_at) > last24h);
+  const tradingLessons = lessonsLast24h.filter(l => l.sourceType !== "config_change" && !(l.tags || []).includes("config_change"));
+  const configChangeCount = lessonsLast24h.length - tradingLessons.length;
 
-  // 4. Current State
+  // 4. Current State + all-time stats (risk metrics, not just win-rate)
   const openPositions = allPositions.filter(p => !p.closed);
-  const perfSummary = getPerformanceSummary();
+  const statsAll = computeTradeStats(lessonsData.performance || []);
 
-  // 5. LLM cost data
-  const [costData, balance, credits] = await Promise.all([
+  // 5. Cost data (LLM + SOL price for gas USD) + gas estimate over the 24h window
+  const [costData, balance, credits, wallet] = await Promise.all([
     getOpenRouter24hCost(),
     getOpenRouterBalance(),
     getOpenRouterCredits(),
+    getWalletBalances().catch(() => null),
   ]);
+  const gasSol = estimateGasSol(countOnChainActions(last24h.getTime()));
+  const solPrice = wallet?.sol_price || 0;
 
   // 6. Format Message
   const lines = [
@@ -279,25 +236,26 @@ export async function generateBriefing() {
     `📥 Positions Opened: ${openedLast24h.length}`,
     `📤 Positions Closed: ${closedLast24h.length}`,
     "",
-    `<b>Performance:</b>`,
+    `<b>Performance (24h):</b>`,
     `💰 Net PnL: ${totalPnLUsd >= 0 ? "+" : ""}$${totalPnLUsd.toFixed(2)}`,
     `💎 Fees Earned: $${totalFeesUsd.toFixed(2)}`,
     perfLast24h.length > 0
-      ? `📈 Win Rate (24h): ${Math.round((perfLast24h.filter(p => p.pnl_usd > 0).length / perfLast24h.length) * 100)}%`
+      ? `📈 Win Rate (24h): ${Math.round((perfLast24h.filter(p => p.pnl_usd > 0).length / perfLast24h.length) * 100)}% (${perfLast24h.length} closed)`
       : "📈 Win Rate (24h): N/A",
     "",
+    formatStatsBlock(statsAll, "All-time"),
+    buildVerdict(statsAll) || "",
+    "",
     `<b>Lessons Learned (24h):</b>`,
-    lessonsLast24h.length > 0
-      ? lessonsLast24h.map(l => `• ${esc(l.rule)}`).join("\n")
-      : "• No new lessons recorded overnight.",
+    tradingLessons.length > 0
+      ? tradingLessons.slice(0, 6).map(l => `• ${esc(l.rule)}`).join("\n")
+      : "• No new trading lessons overnight.",
+    configChangeCount > 0 ? `🔧 Config changes (24h): ${configChangeCount}` : "",
     "",
     `<b>Current Portfolio:</b>`,
     `📂 Open Positions: ${openPositions.length}`,
-    perfSummary
-      ? `📊 All-time PnL: $${perfSummary.total_pnl_usd.toFixed(2)}${perfSummary.roi_pct != null ? ` (${perfSummary.roi_pct >= 0 ? "+" : ""}${perfSummary.roi_pct}%)` : ""} | ${perfSummary.win_rate_pct}% win over ${perfSummary.total_positions_closed} closed`
-      : "",
     "",
-    buildLlmCostSection(costData, balance, credits, totalPnLUsd) || "",
+    buildCostSection({ costData, balance, credits, gasSol, solPrice, netPnlUsd: totalPnLUsd, windowLabel: "24h" }) || "",
     "",
     buildLearningSection(lessonsData, last24h) || "",
     "",
@@ -305,7 +263,7 @@ export async function generateBriefing() {
     "",
     buildSkipReviewSection() || "",
     "",
-    buildRecommendations(lessonsData.performance) || "",
+    buildRecommendations(lessonsData.performance, statsAll) || "",
     "────────────────"
   ];
 

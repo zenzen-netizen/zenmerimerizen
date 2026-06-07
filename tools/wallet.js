@@ -8,6 +8,7 @@ import {
 import bs58 from "bs58";
 import { log } from "../logger.js";
 import { config } from "../config.js";
+import { trackTxGas } from "../gas-tracker.js";
 
 let _connection = null;
 let _wallet = null;
@@ -307,6 +308,7 @@ export async function swapToken({
     }
 
     log("swap", `SUCCESS tx: ${result.signature}`);
+    trackTxGas(getConnection(), result.signature, "swap"); // real gas capture, fail-open
     if (referralParams && order.feeBps !== referralParams.referralFee) {
       log(
         "swap_warn",

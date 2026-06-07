@@ -276,7 +276,9 @@ export async function generateBriefing() {
     "",
     buildSkipReviewSection() || "",
     "",
-    buildRecommendations(lessonsData.performance, statsAll) || "",
+    buildRecommendations(lessonsData.performance, statsAll, {
+      gasPerTradeUsd: solPrice && perfLast24h.length ? (gasSol * solPrice) / perfLast24h.length : 0,
+    }) || "",
     "────────────────"
   ];
 

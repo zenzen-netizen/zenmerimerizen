@@ -99,6 +99,7 @@ function makePositionRecord({
     closed_at: null,
     notes: [],
     peak_pnl_pct: 0,
+    trough_pnl_pct: 0, // lowest PnL% seen while open — for report movement analysis
     pending_peak_pnl_pct: null,
     pending_peak_started_at: null,
     pending_trailing_current_pnl_pct: null,
@@ -459,6 +460,15 @@ export function updatePnlAndCheckExits(position_address, positionData, mgmtConfi
   }
 
   let changed = false;
+
+  // Track the lowest PnL% seen while open (trough) — paired with peak_pnl_pct, it
+  // feeds the learning report's movement analysis (how much ran up/down before exit).
+  if (currentPnlPct != null && !pnl_pct_suspicious) {
+    if (pos.trough_pnl_pct == null || currentPnlPct < pos.trough_pnl_pct) {
+      pos.trough_pnl_pct = currentPnlPct;
+      changed = true;
+    }
+  }
 
   // Activate trailing TP once trigger threshold is reached
   if (mgmtConfig.trailingTakeProfit && !pos.trailing_active && (pos.peak_pnl_pct ?? 0) >= mgmtConfig.trailingTriggerPct) {

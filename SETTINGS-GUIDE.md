@@ -25,6 +25,9 @@ LLM memanggil `update_config`, lalu bot kirim tombol konfirmasi **✅ Ya / ❌ B
 **Opsi 3 — Lewat menu Telegram:**
 Ketik `/settings` di Telegram → ada tombol untuk setting yang paling sering diubah.
 
+**Opsi 4 — Ganti SEKALIGUS pakai preset:**
+`/preset use <nama>` menukar seluruh `user-config.json` dengan profil tersimpan (mis. ganti dari profil `mainzen` ke `bigcapagresif` sekali jalan). Lihat **Config Presets** di bawah.
+
 **Lihat config saat ini:**
 - `/config` → tampilkan **seluruh** config runtime, dikelompokkan sama persis dengan grup di panduan ini (GRUP 1–15 + blok GMGN). Nilainya dibaca langsung dari config bot yang sedang jalan (real-time), bukan dari file panduan ini.
 - `/status` → snapshot wallet + posisi + all-time PnL.
@@ -41,6 +44,43 @@ config.js            ← Bot membaca semua file di atas (JANGAN EDIT)
 ```
 
 ---
+
+## Config Presets (Simpan & Ganti Profil Config)
+
+Sebuah **config preset** = snapshot LENGKAP `user-config.json` yang disimpan di folder
+`presets/<nama>.json`. Gunanya: simpan beberapa "profil" bot lalu tukar cepat tanpa ngisi
+ulang puluhan setting (mis. profil `mainzen` untuk small/mid degen vs `bigcapagresif` untuk
+fee-farm pool besar). Folder `presets/` **local-only** (gitignore — berisi API key/identitas).
+
+> Beda dari "preset" lain: ini **bukan** preset wizard `setup.js` (degen/moderate/safe, cuma
+> saat instalasi) dan **bukan** indicator preset (`entryPreset`/`exitPreset`, sinyal teknikal).
+> Ini snapshot config utuh.
+
+**Lewat Telegram / REPL — command `/preset`:**
+| Command | Aksi |
+|---------|------|
+| `/preset list` | Daftar semua preset (● = cocok dengan config sekarang, 🧪 = dry-run) |
+| `/preset save <nama>` | Simpan config saat ini jadi preset baru |
+| `/preset show <nama>` | Lihat setting apa saja yang berubah kalau preset itu di-load |
+| `/preset use <nama>` | Load preset → tulis ke `user-config.json` (auto-backup dulu) |
+| `/preset rm <nama>` | Hapus preset |
+
+**Lewat menu tombol:**
+`/settings` → tombol **🗂️ Presets** → tap nama preset → konfirmasi **✅ Load & restart** (otomatis backup dulu). Biar tidak perlu ngetik nama.
+
+**Lewat terminal (bot boleh dalam keadaan mati):**
+```
+node preset.js list
+node preset.js save mainzen
+node preset.js show bigcapagresif
+node preset.js use  bigcapagresif
+```
+
+**Penting soal restart:** `/preset use` selalu **backup** config lama dulu (`presets/_backup.json`
+→ rollback: `/preset use _backup`), lalu menukar file. Mayoritas setting berlaku setelah
+**restart proses** karena key level-env (`DRY_RUN`, wallet, RPC, model LLM) dibaca sekali saat
+start — restart cron saja tidak cukup. Kalau bot jalan di bawah **pm2**, `/preset use` otomatis
+restart (pm2 menghidupkan lagi); kalau tidak, jalankan `pm2 restart meridian` manual.
 
 ---
 

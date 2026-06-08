@@ -15,6 +15,7 @@ state.js            Position registry (state.json): tracks bin ranges, OOR times
 lessons.js          Learning engine: records closed-position perf, derives lessons, evolves thresholds
 pool-memory.js      Per-pool deploy history + snapshots (pool-memory.json)
 strategy-library.js Saved LP strategies (strategy-library.json)
+preset-manager.js   Config presets: save/load full user-config.json snapshots (presets/<name>.json)
 reports.js          Trade-analytics engine (profit factor, drawdown, breakdowns) + report composer
 briefing.js         Daily/weekly/monthly Telegram briefings (HTML)
 telegram.js         Telegram bot: polling, notifications (deploy/close/swap/OOR)
@@ -168,6 +169,7 @@ Handled directly in `index.js` (bypass LLM):
 | `/positions` | List open positions with progress bar |
 | `/close <n>` | Close position by list index |
 | `/set <n> <note>` | Set note on position by list index |
+| `/preset [list\|save\|use\|show\|rm <name>]` | Config presets — save/load full `user-config.json` snapshots (`preset-manager.js`). `use` auto-backs up to `presets/_backup.json` then swaps the file; auto-restarts under pm2 (env-level keys need a fresh process). Same logic in CLI `preset.js` and the `/settings` → **🗂️ Presets** button page (`cfg:preset:ask/go` callbacks → confirm → load+restart). |
 
 Progress bar format: `[████████░░░░░░░░░░░░] 40%` (no bin numbers, no arrows)
 

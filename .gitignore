@@ -11,6 +11,9 @@ node_modules/
 user-config.json
 gmgn-config.json
 
+# Saved config presets (full snapshots — contain API keys/identity, local-only)
+presets/
+
 # Runtime state (position tracking, lessons — user-specific)
 state.json
 lessons.json

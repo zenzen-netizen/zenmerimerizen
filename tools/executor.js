@@ -487,6 +487,14 @@ const toolMap = {
       Object.entries(CONFIG_MAP).map(([k, v]) => [k.toLowerCase(), [k, v]])
     );
     const STRATEGY_BIN_KEYS = new Set(["binsBelow", "minBinsBelow", "maxBinsBelow", "defaultBinsBelow"]);
+    // Keys whose config value is an array of strings. /setcfg + casual chat pass these as
+    // a comma-separated string ("trending,top,new"); split them so the Array.isArray()
+    // checks downstream (discoverPools categories, indicator intervals, launchpad lists)
+    // actually see an array instead of silently falling back to factory behavior.
+    // "off"/"null"/"" coerce to null upstream → cleared (factory), never a bogus [""].
+    const ARRAY_KEYS = new Set([
+      "screeningCategories", "allowedLaunchpads", "blockedLaunchpads", "indicatorIntervals",
+    ]);
 
     // Robust arg recovery — weak models invent shapes instead of changes/key+value:
     //   { path: "management.gasReserveAutoTune", value: true }
@@ -513,6 +521,9 @@ const toolMap = {
       const match = CONFIG_MAP[key] ? [key, CONFIG_MAP[key]] : CONFIG_MAP_LOWER[key.toLowerCase()];
       if (!match) { unknown.push(key); continue; }
       let normalizedVal = coerceConfigValue(val);
+      if (ARRAY_KEYS.has(match[0]) && typeof normalizedVal === "string") {
+        normalizedVal = normalizedVal.split(",").map((s) => s.trim()).filter(Boolean);
+      }
       if (STRATEGY_BIN_KEYS.has(match[0])) {
         const numericVal = Number(val);
         if (!Number.isFinite(numericVal)) {

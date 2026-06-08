@@ -471,9 +471,9 @@ restart (pm2 menghidupkan lagi); kalau tidak, jalankan `pm2 restart meridian` ma
 |---|---|
 | **Nilai sekarang** | `["trending", "top", "new"]` |
 | **Default** | `null` (= factory: pakai `category` saja) |
-| **Format** | Array string (atur lewat file/preset, bukan `/setcfg`) |
+| **Format** | Array string. Atur lewat: file/preset (array JSON), `/setcfg screeningCategories trending,top,new` (string koma → otomatis jadi array; `off`/`null` = kosongkan), atau toggle ✅/⬜ per kategori di `/settings` → **Screen**. |
 | **Opsi valid** | `"trending"` `"top"` `"new"` |
-| **Penjelasan** | **Multi-category merge.** Ambil tiap kategori di daftar lalu gabung + dedupe by pool_address. Semua filter kualitas (mcap/organic/fee-tvl/dst) tetap sama, jadi ini **memperluas kolam kandidat tanpa menurunkan keketatan**. Diukur: `trending+top+new` ≈ 235 pool distinct vs 100 (trending saja) = ~2.35×. `null`/`[]` → balik ke perilaku satu-kategori (`category`). Fail-open: kategori yang gagal fetch hanya menyumbang 0 pool, tidak menggagalkan cycle. |
+| **Penjelasan** | **Multi-category merge.** Ambil tiap kategori di daftar lalu gabung + dedupe by pool_address. Semua filter kualitas (mcap/organic/fee-tvl/dst) tetap sama, jadi ini **memperluas kolam kandidat tanpa menurunkan keketatan**. Catatan: di bawah filter ketat, ketiga kategori sering balikin set yang identik (merge jadi ~1.0×, inert) — manfaatnya muncul kalau gate dilonggarin atau regime market beda. `null`/`[]` → balik ke perilaku satu-kategori (`category`). Fail-open: kategori yang gagal fetch hanya menyumbang 0 pool, tidak menggagalkan cycle. |
 
 ---
 

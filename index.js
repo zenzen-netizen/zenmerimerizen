@@ -33,6 +33,7 @@ import { generateBriefing, generatePeriodicBriefing } from "./briefing.js";
 import { renderGuide } from "./guide.js";
 import { getLastBriefingDate, setLastBriefingDate, getLastBriefingPinId, setLastBriefingPinId, getLastReportedMilestone, setLastReportedMilestone, getLastPeriodicBriefing, setLastPeriodicBriefing, getTrackedPosition, getTrackedPositions, setPositionInstruction, updatePnlAndCheckExits, queuePeakConfirmation, resolvePendingPeak, queueTrailingDropConfirmation, resolvePendingTrailingDrop } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
+import { listPresets, savePreset, applyPreset, getPresetDiff, deletePreset, validName, presetExists } from "./preset-manager.js";
 import { recordPositionSnapshot, recallForPool, addPoolNote } from "./pool-memory.js";
 import { recordCandidateSnapshots, getCandidateMomentum, formatCandidateMomentum, recordSmartWalletCounts, getSmartWalletMomentum, formatSmartWalletMomentum } from "./candidate-memory.js";
 import { checkSmartWalletsOnPool } from "./smart-wallets.js";
@@ -1822,6 +1823,7 @@ function renderSettingsMenu(page = "main") {
     `Indicators: ${config.indicators.enabled ? "on" : "off"} | entry ${config.indicators.entryPreset} | ${fmtSettingValue(config.indicators.intervals)}`,
     `🧪 Experiments ON: ${Object.entries(config.experiments).filter(([, v]) => v === true).map(([k]) => k).join(", ") || "none"}`,
   ].join("\n");
+  let bodyText = summary;
 
   const nav = [
     [
@@ -1838,6 +1840,7 @@ function renderSettingsMenu(page = "main") {
     [
       settingButton("🧪 Experiments", "cfg:page:experiments"),
       settingButton("📊 Reports", "cfg:page:reports"),
+      settingButton("🗂️ Presets", "cfg:page:presets"),
     ],
   ];
 
@@ -1968,6 +1971,21 @@ function renderSettingsMenu(page = "main") {
       inputButton("gasReserveBufferDays", "Gas buffer days"),
       inputButton("gasReserveFloorSol", "Gas reserve floor SOL", { digits: 2 }),
     ];
+  } else if (page === "presets") {
+    // 🗂️ Config presets — tap a preset to load it (full user-config.json swap).
+    const presets = listPresets();
+    const lines = presets.length
+      ? presets.map((p) => p.error
+          ? `⚠ ${p.name}`
+          : `${p.isCurrent ? "●" : "○"} ${p.name} — ${p.dryRun ? "🧪 dry-run" : "live"} · ${p.keys} keys${p.isCurrent ? " (current)" : ""}`)
+      : ["(belum ada preset)"];
+    bodyText = ["🗂️ Config Presets", "", ...lines, "", "Tap preset untuk load (auto-backup + restart).", "Simpan baru: /preset save <nama>"].join("\n");
+    rows = presets.length
+      ? presets.map((p) => [settingButton(
+          `${p.isCurrent ? "●" : "▶"} ${p.name}${p.error ? " ⚠" : p.dryRun ? " 🧪" : ""}`,
+          p.error ? "cfg:noop" : `cfg:preset:ask:${p.name}`,
+        )])
+      : [[settingButton("/preset save <nama> dulu", "cfg:noop")]];
   } else {
     rows = [
       [
@@ -1987,7 +2005,7 @@ function renderSettingsMenu(page = "main") {
     ];
   }
 
-  return { text: summary, keyboard: [...nav, ...rows, ...footer] };
+  return { text: bodyText, keyboard: [...nav, ...rows, ...footer] };
 }
 
 async function showSettingsMenu({ messageId = null, page = "main" } = {}) {
@@ -2043,6 +2061,39 @@ async function applySettingsMenuCallback(msg) {
     page = parts[2] || "main";
     await answerCallbackQuery(msg.callbackQueryId);
     await showSettingsMenu({ messageId: msg.messageId, page });
+    return;
+  }
+  if (action === "preset") {
+    const sub = parts[2];
+    const name = parts.slice(3).join(":");
+    if (!presetExists(name)) {
+      await answerCallbackQuery(msg.callbackQueryId, "Preset tidak ada");
+      await showSettingsMenu({ messageId: msg.messageId, page: "presets" });
+      return;
+    }
+    if (sub === "ask") {
+      const diffs = getPresetDiff(name);
+      await answerCallbackQuery(msg.callbackQueryId);
+      const body = [
+        `⚠️ Load preset "${name}"?`,
+        diffs.length ? `${diffs.length} setting berubah vs config sekarang.` : "Config sudah sama — tidak ada yang berubah.",
+        "Config sekarang di-backup (rollback via _backup), lalu bot RESTART untuk apply penuh.",
+      ].join("\n");
+      await editMessageWithButtons(body, msg.messageId, [
+        [settingButton(`✅ Load "${name}" & restart`, `cfg:preset:go:${name}`)],
+        [settingButton("Batal", "cfg:page:presets")],
+      ]);
+      return;
+    }
+    if (sub === "go") {
+      const diffs = getPresetDiff(name);
+      const r = applyPreset(name);
+      await answerCallbackQuery(msg.callbackQueryId, `Loaded ${name}`);
+      await editMessage(`✅ Preset "${name}" di-load (${diffs.length} setting berubah). Rollback: /preset use ${r.backup}`, msg.messageId);
+      await finishPresetApply({ viaTelegram: true });
+      return;
+    }
+    await answerCallbackQuery(msg.callbackQueryId, "Aksi preset tidak dikenal");
     return;
   }
 
@@ -2108,6 +2159,7 @@ function formatHelpText() {
     "/config — show full runtime config (grouped)",
     "/settings — button menu for common config",
     "/setcfg <key> <value> — update persisted config",
+    "/preset [list|save|use|show <nama>] — simpan/ganti profil config",
     "/guide [no|katakunci|all] — panduan setting",
     "",
     "🔧 SISTEM",
@@ -2118,6 +2170,90 @@ function formatHelpText() {
     "/stop — shut down agent",
     "/help — show this list",
   ].join("\n");
+}
+
+// ─── Config presets (/preset) ───────────────────────────────────
+function presetUsageText() {
+  return [
+    "🗂️ /preset — config presets (snapshot user-config.json)",
+    "/preset list — daftar preset",
+    "/preset save <nama> — simpan config saat ini jadi preset",
+    "/preset use <nama> — load preset (auto-backup + restart)",
+    "/preset show <nama> — lihat apa yg berubah vs config sekarang",
+    "/preset rm <nama> — hapus preset",
+  ].join("\n");
+}
+
+// Returns { text, applied?, name? }. Pure (file ops only) — no restart here.
+function runPresetCommand(argStr) {
+  const parts = String(argStr || "").trim().split(/\s+/).filter(Boolean);
+  const sub = (parts[0] || "list").toLowerCase();
+  const name = parts[1];
+  try {
+    if (sub === "list" || sub === "ls") {
+      const presets = listPresets();
+      if (!presets.length) return { text: "Belum ada preset. Simpan dengan: /preset save <nama>" };
+      const lines = presets.map((p) => {
+        if (p.error) return `! ${p.name} — tidak terbaca`;
+        const mark = p.isCurrent ? "●" : "○";
+        const mode = p.dryRun ? "🧪 dry-run" : "live";
+        return `${mark} ${p.name} — ${mode} · ${p.keys} keys${p.isCurrent ? "  (current)" : ""}`;
+      });
+      return { text: `🗂️ Config Presets\n${lines.join("\n")}\n\n${presetUsageText()}` };
+    }
+    if (sub === "save") {
+      if (!name) return { text: "Format: /preset save <nama>" };
+      if (!validName(name)) return { text: `Nama tidak valid "${name}". Pakai huruf/angka/_/- (maks 40).` };
+      const r = savePreset(name);
+      return { text: `✅ Config saat ini disimpan → preset "${name}"${r.overwritten ? " (menimpa yang lama)" : ""}.` };
+    }
+    if (sub === "show" || sub === "diff") {
+      if (!name) return { text: "Format: /preset show <nama>" };
+      if (!presetExists(name)) return { text: `Preset "${name}" tidak ada. Coba /preset list.` };
+      const diffs = getPresetDiff(name);
+      if (!diffs.length) return { text: `Preset "${name}" identik dengan config saat ini — tidak ada yang berubah.` };
+      const shown = diffs.slice(0, 30).map((d) => `  ${d.key}: ${d.from} → ${d.to}`);
+      const more = diffs.length > 30 ? `\n  …+${diffs.length - 30} lagi` : "";
+      return { text: `🔍 Kalau load "${name}", ${diffs.length} setting berubah:\n${shown.join("\n")}${more}` };
+    }
+    if (sub === "use" || sub === "load") {
+      if (!name) return { text: "Format: /preset use <nama>" };
+      if (!presetExists(name)) return { text: `Preset "${name}" tidak ada. Coba /preset list.` };
+      const diffs = getPresetDiff(name);
+      const r = applyPreset(name);
+      const sample = diffs.slice(0, 4).map((d) => `${d.key} ${d.from}→${d.to}`).join(", ");
+      const cnt = diffs.length
+        ? `   ${diffs.length} setting berubah (a.l. ${sample}${diffs.length > 4 ? ", …" : ""})`
+        : "   (config sudah sama — tidak ada yang berubah)";
+      const back = r.backup ? `\n   Rollback: /preset use ${r.backup}` : "";
+      return { text: `✅ Preset "${name}" di-load → user-config.json\n${cnt}${back}`, applied: true, name };
+    }
+    if (sub === "rm" || sub === "delete" || sub === "del") {
+      if (!name) return { text: "Format: /preset rm <nama>" };
+      if (!presetExists(name)) return { text: `Preset "${name}" tidak ada.` };
+      deletePreset(name);
+      return { text: `🗑️ Preset "${name}" dihapus.` };
+    }
+    return { text: presetUsageText() };
+  } catch (e) {
+    return { text: `Preset error: ${e.message}` };
+  }
+}
+
+function underPm2() {
+  return process.env.pm_id !== undefined || !!process.env.PM2_HOME || !!process.env.PM2_USAGE;
+}
+
+// Called after a successful `/preset use`. A full restart is what truly applies a
+// preset (DRY_RUN/wallet/RPC/model are read once at startup) — auto-restart only
+// when running under pm2 (which brings the process back); otherwise instruct.
+async function finishPresetApply({ viaTelegram }) {
+  const note = underPm2()
+    ? "♻️ Auto-restart via pm2 dalam 2 detik untuk apply penuh (DRY_RUN/wallet/model dibaca saat start)…"
+    : "♻️ Restart proses untuk apply penuh (mis. `pm2 restart meridian`). Restart cron saja tidak cukup — DRY_RUN/wallet/RPC/model dibaca saat start.";
+  if (viaTelegram) await sendMessage(note).catch(() => {});
+  else console.log(note);
+  if (underPm2()) setTimeout(() => process.exit(0), 2000);
 }
 
 async function runDeterministicScreen(limit = 5) {
@@ -2361,6 +2497,13 @@ async function telegramHandler(msg) {
 
   if (text === "/config") {
     await sendMessage(formatFullConfig()).catch(() => {});
+    return;
+  }
+
+  if (text === "/preset" || text.startsWith("/preset ")) {
+    const res = runPresetCommand(text.slice("/preset".length));
+    await sendMessage(res.text).catch(() => {});
+    if (res.applied) await finishPresetApply({ viaTelegram: true });
     return;
   }
 
@@ -2894,6 +3037,15 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
           }
           console.log("\nSaved to user-config.json. Applied immediately.\n");
         }
+      });
+      return;
+    }
+
+    if (input === "/preset" || input.startsWith("/preset ")) {
+      await runBusy(async () => {
+        const res = runPresetCommand(input.slice("/preset".length));
+        console.log(`\n${res.text}\n`);
+        if (res.applied) await finishPresetApply({ viaTelegram: false });
       });
       return;
     }

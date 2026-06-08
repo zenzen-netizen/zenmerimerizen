@@ -1972,20 +1972,26 @@ function renderSettingsMenu(page = "main") {
       inputButton("gasReserveFloorSol", "Gas reserve floor SOL", { digits: 2 }),
     ];
   } else if (page === "presets") {
-    // 🗂️ Config presets — tap a preset to load it (full user-config.json swap).
+    // 🗂️ Config presets — per row: ▶ load · 🔍 diff · 🗑️ delete. Plus 💾 save current.
     const presets = listPresets();
     const lines = presets.length
       ? presets.map((p) => p.error
           ? `⚠ ${p.name}`
           : `${p.isCurrent ? "●" : "○"} ${p.name} — ${p.dryRun ? "🧪 dry-run" : "live"} · ${p.keys} keys${p.isCurrent ? " (current)" : ""}`)
       : ["(belum ada preset)"];
-    bodyText = ["🗂️ Config Presets", "", ...lines, "", "Tap preset untuk load (auto-backup + restart).", "Simpan baru: /preset save <nama>"].join("\n");
-    rows = presets.length
-      ? presets.map((p) => [settingButton(
-          `${p.isCurrent ? "●" : "▶"} ${p.name}${p.error ? " ⚠" : p.dryRun ? " 🧪" : ""}`,
-          p.error ? "cfg:noop" : `cfg:preset:ask:${p.name}`,
-        )])
-      : [[settingButton("/preset save <nama> dulu", "cfg:noop")]];
+    bodyText = ["🗂️ Config Presets", "", ...lines, "",
+      "● = sama dgn config live · 🧪 = isi file dryRun (bukan berarti jalan)",
+      "Per baris: ▶ load · 🔍 lihat beda · 🗑️ hapus.",
+      "💾 = simpan config sekarang jadi preset baru.",
+    ].join("\n");
+    rows = presets.map((p) => p.error
+      ? [settingButton(`⚠ ${p.name}`, "cfg:noop")]
+      : [
+          settingButton(`${p.isCurrent ? "●" : "▶"} ${p.name}${p.dryRun ? " 🧪" : ""}`, `cfg:preset:ask:${p.name}`),
+          settingButton("🔍", `cfg:preset:diff:${p.name}`),
+          settingButton("🗑️", `cfg:preset:rmask:${p.name}`),
+        ]);
+    rows.push([settingButton("💾 Simpan config sekarang", "cfg:preset:save")]);
   } else {
     rows = [
       [
@@ -2066,8 +2072,45 @@ async function applySettingsMenuCallback(msg) {
   if (action === "preset") {
     const sub = parts[2];
     const name = parts.slice(3).join(":");
+    if (sub === "save") {
+      // Needs a typed name — buttons can't, so prompt for text input.
+      _pendingInput = { action: "presetSave", menuMsgId: msg.messageId };
+      await answerCallbackQuery(msg.callbackQueryId);
+      await sendMessage("💾 Ketik nama preset untuk menyimpan config sekarang (huruf/angka/_/-, maks 40):");
+      return;
+    }
+    // The rest operate on an existing preset.
     if (!presetExists(name)) {
       await answerCallbackQuery(msg.callbackQueryId, "Preset tidak ada");
+      await showSettingsMenu({ messageId: msg.messageId, page: "presets" });
+      return;
+    }
+    if (sub === "diff") {
+      const diffs = getPresetDiff(name);
+      await answerCallbackQuery(msg.callbackQueryId);
+      const shown = diffs.length
+        ? diffs.slice(0, 30).map((d) => `${d.key}: ${d.from} → ${d.to}`)
+        : ["(identik dengan config sekarang)"];
+      const more = diffs.length > 30 ? `\n…+${diffs.length - 30} lagi` : "";
+      await editMessageWithButtons(
+        `🔍 "${name}" vs config sekarang (${diffs.length} beda):\n${shown.join("\n")}${more}`,
+        msg.messageId,
+        [[settingButton(`✅ Load "${name}"`, `cfg:preset:ask:${name}`)], [settingButton("Back", "cfg:page:presets")]],
+      );
+      return;
+    }
+    if (sub === "rmask") {
+      await answerCallbackQuery(msg.callbackQueryId);
+      await editMessageWithButtons(
+        `🗑️ Hapus preset "${name}"? Permanen (file dihapus, config live tidak terpengaruh).`,
+        msg.messageId,
+        [[settingButton(`🗑️ Ya, hapus "${name}"`, `cfg:preset:rmgo:${name}`)], [settingButton("Batal", "cfg:page:presets")]],
+      );
+      return;
+    }
+    if (sub === "rmgo") {
+      deletePreset(name);
+      await answerCallbackQuery(msg.callbackQueryId, `Dihapus: ${name}`);
       await showSettingsMenu({ messageId: msg.messageId, page: "presets" });
       return;
     }
@@ -2375,8 +2418,24 @@ async function telegramHandler(msg) {
   }
 
   if (_pendingInput && !msg.isCallback && !text.startsWith("/")) {
-    const { key, page, menuMsgId } = _pendingInput;
+    const pending = _pendingInput;
     _pendingInput = null;
+    if (pending.action === "presetSave") {
+      const name = text.trim();
+      if (!validName(name)) {
+        await sendMessage(`Nama tidak valid "${name}". Pakai huruf/angka/_/- (maks 40).`);
+      } else {
+        try {
+          const r = savePreset(name);
+          await sendMessage(`💾 Disimpan → preset "${name}"${r.overwritten ? " (nimpa yang lama)" : " (baru)"}.`);
+        } catch (e) {
+          await sendMessage(`Gagal simpan: ${e.message}`);
+        }
+      }
+      await showSettingsMenu({ messageId: pending.menuMsgId, page: "presets" });
+      return;
+    }
+    const { key, page, menuMsgId } = pending;
     let value;
     if (text.toLowerCase() === "off" || text.toLowerCase() === "null") {
       value = null;

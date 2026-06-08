@@ -327,6 +327,7 @@ const toolMap = {
       maxBinStep: ["screening", "maxBinStep"],
       timeframe: ["screening", "timeframe"],
       category: ["screening", "category"],
+      screeningCategories: ["screening", "categories"],
       minTokenFeesSol: ["screening", "minTokenFeesSol"],
       useDiscordSignals: ["screening", "useDiscordSignals"],
       discordSignalMode: ["screening", "discordSignalMode"],

@@ -1484,6 +1484,7 @@ export function formatFullConfig() {
       ["screeningSource", fmt(c.screening.source)],
       ["timeframe", fmt(c.screening.timeframe)],
       ["category", fmt(c.screening.category)],
+      ["screeningCategories", fmt(c.screening.categories)],
       ["minTvl", fmt(c.screening.minTvl)],
       ["maxTvl", fmt(c.screening.maxTvl)],
       ["minVolume", fmt(c.screening.minVolume)],

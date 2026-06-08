@@ -462,7 +462,18 @@ restart (pm2 menghidupkan lagi); kalau tidak, jalankan `pm2 restart meridian` ma
 | **Default** | `"trending"` |
 | **Format** | String |
 | **Opsi** | `"trending"` `"new"` `"all"` |
-| **Penjelasan** | Kategori pool yang dicari dari Meteora |
+| **Penjelasan** | Kategori pool yang dicari dari Meteora. Dipakai kalau `screeningCategories` kosong/null (perilaku factory satu-kategori). |
+
+---
+
+### `screeningCategories`
+| | |
+|---|---|
+| **Nilai sekarang** | `["trending", "top", "new"]` |
+| **Default** | `null` (= factory: pakai `category` saja) |
+| **Format** | Array string (atur lewat file/preset, bukan `/setcfg`) |
+| **Opsi valid** | `"trending"` `"top"` `"new"` |
+| **Penjelasan** | **Multi-category merge.** Ambil tiap kategori di daftar lalu gabung + dedupe by pool_address. Semua filter kualitas (mcap/organic/fee-tvl/dst) tetap sama, jadi ini **memperluas kolam kandidat tanpa menurunkan keketatan**. Diukur: `trending+top+new` ≈ 235 pool distinct vs 100 (trending saja) = ~2.35×. `null`/`[]` → balik ke perilaku satu-kategori (`category`). Fail-open: kategori yang gagal fetch hanya menyumbang 0 pool, tidak menggagalkan cycle. |
 
 ---
 

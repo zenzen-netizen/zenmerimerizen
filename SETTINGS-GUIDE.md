@@ -66,7 +66,7 @@ fee-farm pool besar). Folder `presets/` **local-only** (gitignore — berisi API
 | `/preset rm <nama>` | Hapus preset |
 
 **Lewat menu tombol:**
-`/settings` → tombol **🗂️ Presets** → tap nama preset → konfirmasi **✅ Load & restart** (otomatis backup dulu). Biar tidak perlu ngetik nama.
+`/settings` → tombol **🗂️ Presets**. Tiap preset punya 3 tombol: **▶** load (konfirmasi → backup → restart), **🔍** lihat beda vs config sekarang, **🗑️** hapus (ada konfirmasi). Tombol **💾 Simpan config sekarang** di bawah → bot tanya nama → kesimpan jadi preset baru. Jadi save + load + hapus semua bisa dari menu tanpa ngetik command (kecuali nama preset saat save).
 
 **Lewat terminal (bot boleh dalam keadaan mati):**
 ```

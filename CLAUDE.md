@@ -160,6 +160,23 @@ clamped to [minBinsBelow, maxBinsBelow]
 
 ---
 
+## Chart Indicators (tools/chart-indicators.js + config.indicators / json `chartIndicators`)
+
+Technical-timing layer. Indicator **math is server-side** — `fetchChartIndicatorsForMint()` calls `{config.api.url}/chart-indicators/{mint}` (RSI/Supertrend/Bollinger/Fibonacci computed by the API; the bot only reads `payload.latest`). Two **separate** systems, picked by `screeningSource`:
+
+- **Meteora path (standard presets):** `confirmIndicatorPreset()` → `evaluatePreset(side, preset, payload)`. 8 entry/exit presets (`supertrend_break`, `rsi_reversal`, `bollinger_reversion`, `rsi_plus_supertrend`, `supertrend_or_rsi`, `bb_plus_rsi`, `fibo_reclaim`, `fibo_reject`). Multi-interval combine via `requireAllIntervals` (`.every` vs `.some`). Fail-open: API down → `{confirmed:true, skipped:true}`.
+- **GMGN path (rule-based):** `checkBounceSetup()` (gmgn.js, Stage 4) using `config.gmgn.indicatorRules` (requireBullishSupertrend, rejectAlreadyAtBottom, …). Only active when `screeningSource=gmgn`.
+
+**ENTRY gate (always on when `enabled`):** `screening.js:780` runs `confirmIndicatorPreset({side:"entry"})` over all eligible pools (parallel) and **hard-drops** rejects before the LLM sees them.
+
+**EXIT gate (opt-in — `indicators.exitEnabled`, default OFF):** `getIndicatorExitSignal()` (index.js) runs `confirmIndicatorPreset({side:"exit"})` per open position in `runManagementCycle`, **after** `getDeterministicCloseRule` (so stopLoss/TP/OOR/yield always win) — a confirmed signal upgrades a STAY/CLAIM into `{action:"CLOSE", rule:"indicator"}`. Fail-safe: `skipped`/error → no close. When OFF, `exitPreset` is inert (this was previously dead config — `confirmIndicatorPreset` had only ever been called with `side:"entry"`).
+
+**`rejectAlreadyAtBottom` (opt-in, default OFF):** ports the GMGN bounce veto into the meteora ENTRY path — inside `confirmIndicatorPreset`, an otherwise-confirmed entry is vetoed if the token already dumped to the bottom (RSI < `rsiOversold` AND close < lower Bollinger). Fits single-side-below: no room left to dump into range.
+
+Full-sync surfaces for the two flags: config.js (`indicators`), CONFIG_MAP (executor.js: `indicatorExitEnabled`, `indicatorRejectAtBottom`), definitions.js (Indicators line), `formatFullConfig` GRUP 13, `/settings` indicators page + `settingValue` (`pageForKey` auto-covers `indicator*`), SETTINGS-GUIDE GRUP 13.
+
+---
+
 ## Telegram Commands
 
 Handled directly in `index.js` (bypass LLM):

@@ -458,6 +458,8 @@ const toolMap = {
       rsiOversold: ["indicators", "rsiOversold", ["chartIndicators", "rsiOversold"]],
       rsiOverbought: ["indicators", "rsiOverbought", ["chartIndicators", "rsiOverbought"]],
       requireAllIntervals: ["indicators", "requireAllIntervals", ["chartIndicators", "requireAllIntervals"]],
+      indicatorExitEnabled: ["indicators", "exitEnabled", ["chartIndicators", "exitEnabled"]],
+      indicatorRejectAtBottom: ["indicators", "rejectAlreadyAtBottom", ["chartIndicators", "rejectAlreadyAtBottom"]],
       // experiments (🧪 GRUP 16 — default OFF = factory behavior)
       exitLiquidityCheck: ["experiments", "exitLiquidityCheck"],
       exitLiquidityMaxSlippagePct: ["experiments", "exitLiquidityMaxSlippagePct"],

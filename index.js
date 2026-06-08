@@ -1654,6 +1654,7 @@ function settingValue(key) {
     useDiscordSignals: config.screening.useDiscordSignals,
     blockPvpSymbols: config.screening.blockPvpSymbols,
     screeningSource: config.screening.source,
+    screeningCategories: config.screening.categories,
     gmgnRequireKol: config.gmgn.requireKol,
     gmgnInterval: config.gmgn.interval,
     gmgnIndicatorFilter: config.gmgn.indicatorFilter,
@@ -1813,6 +1814,14 @@ function toggleButton(key, label) {
   return settingButton(`${label}: ${fmtSettingValue(settingValue(key))}`, `cfg:toggle:${key}`);
 }
 
+// Multi-category merge toggle. categories is an array (merge) or null (factory single
+// `category`). A category is ON only when explicitly listed; null/[] = all OFF (factory).
+function categoryButton(cat) {
+  const cats = config.screening.categories;
+  const on = Array.isArray(cats) && cats.includes(cat);
+  return settingButton(`${cat} ${on ? "✅" : "⬜"}`, `cfg:cat:${cat}`);
+}
+
 function stepButtons(key, label, step, { digits = 2 } = {}) {
   const value = Number(settingValue(key));
   const shown = Number.isFinite(value) ? value.toFixed(digits).replace(/\.?0+$/, "") : "?";
@@ -1837,7 +1846,7 @@ function pageForKey(key) {
   if (key.startsWith("gmgn") && key !== "gmgnRequireKol") return "gmgn";
   if (key.startsWith("indicator") || key === "chartIndicatorsEnabled" || key === "rsiLength" || key === "requireAllIntervals") return "indicators";
   if (["minBinsBelow", "maxBinsBelow"].includes(key)) return "strategy";
-  if (["useDiscordSignals", "blockPvpSymbols", "managementIntervalMin", "screeningIntervalMin", "maxScreeningIntervalMin", "adaptiveScreening", "screeningSource", "gmgnRequireKol"].includes(key)) return "screen";
+  if (["useDiscordSignals", "blockPvpSymbols", "managementIntervalMin", "screeningIntervalMin", "maxScreeningIntervalMin", "adaptiveScreening", "screeningSource", "screeningCategories", "gmgnRequireKol"].includes(key)) return "screen";
   if (["candidateMomentum", "smartWalletMomentum", "expectedYieldSignal", "narrativeProfileSignal", "counterfactualReview", "counterfactualMinMcapGainPct", "exitLiquidityCheck", "exitLiquidityMaxSlippagePct", "marketRegimeGate", "marketRegimeMaxDrop24hPct", "convictionSizing", "convictionSizingMaxAdjustPct"].includes(key)) return "experiments";
   if (["learningReportEvery", "learningReportTrendN", "gasReserveAutoTune", "gasReserveBufferDays", "gasReserveFloorSol"].includes(key)) return "reports";
   return "risk";
@@ -1849,7 +1858,7 @@ function renderSettingsMenu(page = "main") {
     title,
     "",
     `Mode: ${config.management.solMode ? "SOL" : "USD"} | Relay: ${config.api.lpAgentRelayEnabled ? "on" : "off"}`,
-    `Screening: ${config.screening.source} | GMGN KOL ${config.gmgn.requireKol ? "required" : "preferred"}`,
+    `Screening: ${config.screening.source} | cats ${Array.isArray(config.screening.categories) && config.screening.categories.length ? config.screening.categories.join(",") : `single (${config.screening.category})`} | GMGN KOL ${config.gmgn.requireKol ? "required" : "preferred"}`,
     `Strategy: ${config.strategy.strategy} | deploy ${config.management.deployAmountSol} SOL | max pos ${config.risk.maxPositions}`,
     `TP/SL: ${config.management.takeProfitPct}% / ${config.management.stopLossPct}% | trailing ${config.management.trailingTakeProfit ? "on" : "off"}`,
     `Indicators: ${config.indicators.enabled ? "on" : "off"} | entry ${config.indicators.entryPreset} | ${fmtSettingValue(config.indicators.intervals)}`,
@@ -1905,6 +1914,11 @@ function renderSettingsMenu(page = "main") {
       [
         settingButton("Source: Meteora", "cfg:set:screeningSource:meteora"),
         settingButton("Source: GMGN", "cfg:set:screeningSource:gmgn"),
+      ],
+      [
+        categoryButton("trending"),
+        categoryButton("top"),
+        categoryButton("new"),
       ],
       [toggleButton("gmgnRequireKol", "GMGN require KOL")],
       [toggleButton("useDiscordSignals", "Discord signals"), toggleButton("blockPvpSymbols", "PVP hard block")],
@@ -2170,6 +2184,28 @@ async function applySettingsMenuCallback(msg) {
       return;
     }
     await answerCallbackQuery(msg.callbackQueryId, "Aksi preset tidak dikenal");
+    return;
+  }
+
+  if (action === "cat") {
+    // Toggle one screening category in the merge list. Removing the last one clears the
+    // list to null → factory single-category behavior (uses config.screening.category).
+    const cat = parts[2];
+    const cur = Array.isArray(config.screening.categories) ? config.screening.categories.slice() : [];
+    const idx = cur.indexOf(cat);
+    if (idx >= 0) cur.splice(idx, 1);
+    else cur.push(cat);
+    const value = cur.length ? cur : null;
+    const result = await executeTool("update_config", {
+      changes: { screeningCategories: value },
+      reason: "Telegram settings menu",
+    });
+    if (!result?.success) {
+      await answerCallbackQuery(msg.callbackQueryId, "Config update failed");
+      return;
+    }
+    await answerCallbackQuery(msg.callbackQueryId, `categories: ${value ? value.join(",") : "off (factory)"}`);
+    await showSettingsMenu({ messageId: msg.messageId, page: "screen" });
     return;
   }
 

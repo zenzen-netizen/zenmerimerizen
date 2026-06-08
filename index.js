@@ -8,6 +8,7 @@ import { log } from "./logger.js";
 import { getMyPositions, closePosition, getActiveBin } from "./tools/dlmm.js";
 import { getWalletBalances, getSolMarketRegime } from "./tools/wallet.js";
 import { getTopCandidates, formatYieldToMe } from "./tools/screening.js";
+import { confirmIndicatorPreset } from "./tools/chart-indicators.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
 import { config, reloadScreeningThresholds, computeDeployAmount, persistConfigChange } from "./config.js";
 import { getGasStats } from "./gas-tracker.js";
@@ -393,6 +394,13 @@ export async function runManagementCycle({ silent = false } = {}) {
       const closeRule = getDeterministicCloseRule(p, config.management);
       if (closeRule) {
         actionMap.set(p.position, closeRule);
+        continue;
+      }
+      // Indicator-driven exit (opt-in, default OFF) — checked after the hard
+      // deterministic rules so safety exits always win; only upgrades a STAY/CLAIM.
+      const indicatorExit = await getIndicatorExitSignal(p);
+      if (indicatorExit) {
+        actionMap.set(p.position, indicatorExit);
         continue;
       }
       // Claim rule
@@ -1250,6 +1258,25 @@ function getDeterministicCloseRule(position, managementConfig) {
   return null;
 }
 
+// Indicator-driven exit (opt-in). Default OFF — when indicators.exitEnabled is
+// false this returns null and exits are governed only by the deterministic rules
+// above (factory behavior). When on, a CONFIRMED exitPreset signal upgrades a
+// would-be STAY/CLAIM into a CLOSE. Fail-safe: API error or "skipped" → no close.
+async function getIndicatorExitSignal(position) {
+  if (!config.indicators.enabled || !config.indicators.exitEnabled) return null;
+  const mint = position.base_mint;
+  if (!mint) return null;
+  try {
+    const confirmation = await confirmIndicatorPreset({ mint, side: "exit" });
+    if (confirmation?.enabled && confirmation.confirmed && !confirmation.skipped) {
+      return { action: "CLOSE", rule: "indicator", reason: confirmation.reason || "exit preset confirmed" };
+    }
+  } catch (error) {
+    log("indicators_warn", `Exit indicator check failed for ${position.pair}: ${error.message}`);
+  }
+  return null;
+}
+
 function buildGmgnFunnelReport(stageCounts, allFiltered = [], { fromStage = 1 } = {}) {
   if (!stageCounts) return null;
   const sc = stageCounts;
@@ -1523,6 +1550,8 @@ export function formatFullConfig() {
       ["enabled", fmt(c.indicators.enabled)],
       ["entryPreset", fmt(c.indicators.entryPreset)],
       ["exitPreset", fmt(c.indicators.exitPreset)],
+      ["exitEnabled", fmt(c.indicators.exitEnabled)],
+      ["rejectAlreadyAtBottom", fmt(c.indicators.rejectAlreadyAtBottom)],
       ["rsiLength", fmt(c.indicators.rsiLength)],
       ["intervals", fmt(c.indicators.intervals)],
       ["candles", fmt(c.indicators.candles)],
@@ -1665,6 +1694,8 @@ function settingValue(key) {
     maxScreeningIntervalMin: config.schedule.maxScreeningIntervalMin,
     indicatorEntryPreset: config.indicators.entryPreset,
     indicatorExitPreset: config.indicators.exitPreset,
+    indicatorExitEnabled: config.indicators.exitEnabled,
+    indicatorRejectAtBottom: config.indicators.rejectAlreadyAtBottom,
     rsiLength: config.indicators.rsiLength,
     indicatorIntervals: config.indicators.intervals,
     requireAllIntervals: config.indicators.requireAllIntervals,
@@ -1936,6 +1967,7 @@ function renderSettingsMenu(page = "main") {
         settingButton("TF: 15m", "cfg:set:indicatorIntervals:15_MINUTE"),
         settingButton("TF: both", "cfg:set:indicatorIntervals:both"),
       ],
+      [toggleButton("indicatorExitEnabled", "Exit triggers close"), toggleButton("indicatorRejectAtBottom", "Reject @ bottom")],
       [
         settingButton("Entry: ST", "cfg:set:indicatorEntryPreset:supertrend_break"),
         settingButton("Entry: RSI", "cfg:set:indicatorEntryPreset:rsi_reversal"),

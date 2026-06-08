@@ -265,11 +265,28 @@ export async function confirmIndicatorPreset({
     try {
       const payload = await fetchChartIndicatorsForMint(mint, { interval, refresh });
       const evaluation = evaluatePreset(side, preset, payload);
+      let confirmed = !!evaluation.confirmed;
+      let reason = evaluation.reason;
+      // Ported from GMGN checkBounceSetup (opt-in, default OFF). Single-side-below
+      // strategy needs the token to still have room to dump INTO our range. If it
+      // already dumped to the bottom (RSI < oversold AND price below lower BB),
+      // there's no room left → veto the entry regardless of which preset confirmed.
+      if (side === "entry" && confirmed && config.indicators.rejectAlreadyAtBottom) {
+        const s = evaluation.signal || {};
+        const oversold = Number(config.indicators.rsiOversold ?? 30);
+        const atBottom =
+          s.rsi != null && s.rsi < oversold &&
+          s.close != null && s.lowerBand != null && s.close < s.lowerBand;
+        if (atBottom) {
+          confirmed = false;
+          reason = `already at bottom (RSI ${s.rsi} < ${oversold} & price below lower BB) — no room to dump into range`;
+        }
+      }
       results.push({
         interval,
         ok: true,
-        confirmed: !!evaluation.confirmed,
-        reason: evaluation.reason,
+        confirmed,
+        reason,
         signal: evaluation.signal,
         latest: payload?.latest || null,
       });

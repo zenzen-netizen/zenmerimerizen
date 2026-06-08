@@ -932,11 +932,21 @@ restart (pm2 menghidupkan lagi); kalau tidak, jalankan `pm2 restart meridian` ma
 ### `chartIndicators.entryPreset` dan `exitPreset`
 | | |
 |---|---|
-| **Nilai sekarang** | `"supertrend_break"` / `"supertrend_break"` |
+| **Nilai sekarang** | `"supertrend_break"` / `"rsi_reversal"` |
 | **Default** | `"supertrend_break"` / `"supertrend_break"` |
 | **Format** | String |
-| **Opsi** | `"supertrend_break"` `"rsi_oversold"` |
-| **Penjelasan** | Preset kondisi teknikal. `supertrend_break` = harga baru saja breakout di atas supertrend |
+| **Opsi** | `"supertrend_break"` `"rsi_reversal"` `"bollinger_reversion"` `"rsi_plus_supertrend"` `"supertrend_or_rsi"` `"bb_plus_rsi"` `"fibo_reclaim"` `"fibo_reject"` |
+| **Penjelasan** | Preset kondisi teknikal. `entryPreset` = gerbang timing saat MASUK (selalu aktif kalau `enabled=on`). `exitPreset` = sinyal saat KELUAR, tapi **baru berpengaruh kalau `exitEnabled=on`** (lihat di bawah). `supertrend_break` = harga baru breakout di atas supertrend |
+
+---
+
+### `chartIndicators.exitEnabled`
+| | |
+|---|---|
+| **Nilai sekarang** | `false` |
+| **Default** | `false` |
+| **Format** | `true` atau `false` |
+| **Penjelasan** | `false` (pabrik) = `exitPreset` tidak melakukan apa-apa; exit posisi murni diatur stop-loss / take-profit / trailing / yield-floor / OOR. `true` = sinyal `exitPreset` yang terkonfirmasi bisa **memicu penutupan posisi** (dicek setelah semua rule deterministik, jadi rule keselamatan selalu menang; hanya meng-upgrade posisi yang tadinya STAY/CLAIM). Gagal-aman: kalau API indikator error → tidak menutup |
 
 ---
 
@@ -976,10 +986,20 @@ restart (pm2 menghidupkan lagi); kalau tidak, jalankan `pm2 restart meridian` ma
 ### `chartIndicators.requireAllIntervals`
 | | |
 |---|---|
-| **Nilai sekarang** | `false` |
+| **Nilai sekarang** | `true` |
 | **Default** | `false` |
 | **Format** | `true` atau `false` |
 | **Penjelasan** | `false` = cukup 1 interval yang cocok. `true` = semua interval dalam daftar harus cocok (lebih ketat) |
+
+---
+
+### `chartIndicators.rejectAlreadyAtBottom`
+| | |
+|---|---|
+| **Nilai sekarang** | `false` |
+| **Default** | `false` |
+| **Format** | `true` atau `false` |
+| **Penjelasan** | Di-port dari logika GMGN `checkBounceSetup`. `false` (pabrik) = tidak ada efek. `true` = gerbang ENTRY (mode Meteora) **menolak** kandidat yang sudah terlanjur dump ke dasar — yaitu RSI < `rsiOversold` **dan** harga di bawah lower Bollinger Band. Alasannya: strategi single-side SOL di bin bawah harga butuh token masih punya ruang untuk turun MASUK ke range kita; kalau sudah di dasar, tidak ada ruang dump lagi → langsung mantul naik = OOR di atas range. Veto ini berlaku apa pun preset-nya |
 
 ---
 

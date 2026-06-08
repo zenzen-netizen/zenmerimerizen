@@ -281,6 +281,10 @@ export const config = {
     enabled: indicatorUserConfig.enabled ?? false,
     entryPreset: indicatorUserConfig.entryPreset ?? "supertrend_break",
     exitPreset: indicatorUserConfig.exitPreset ?? "supertrend_break",
+    // exitEnabled (default OFF): when false the exitPreset is inert (factory
+    // behavior — exits governed only by stopLoss/TP/trailing/yield-floor/OOR).
+    // When true, a confirmed exitPreset signal can trigger a position close.
+    exitEnabled: indicatorUserConfig.exitEnabled ?? false,
     rsiLength: indicatorUserConfig.rsiLength ?? 2,
     intervals: Array.isArray(indicatorUserConfig.intervals)
       ? indicatorUserConfig.intervals
@@ -289,6 +293,11 @@ export const config = {
     rsiOversold: indicatorUserConfig.rsiOversold ?? 30,
     rsiOverbought: indicatorUserConfig.rsiOverbought ?? 80,
     requireAllIntervals: indicatorUserConfig.requireAllIntervals ?? false,
+    // rejectAlreadyAtBottom (default OFF): ported from GMGN checkBounceSetup.
+    // When true, the meteora ENTRY gate additionally vetoes a candidate that has
+    // already dumped to the bottom (RSI < oversold AND price below lower
+    // Bollinger) — no room left to dump into a single-side-below range.
+    rejectAlreadyAtBottom: indicatorUserConfig.rejectAlreadyAtBottom ?? false,
   },
 
   // ─── Experimental Features (🧪 GRUP 16) ─────────────────────

@@ -419,7 +419,7 @@ async function refreshDiscordOnlyPools(pools, timeframe) {
 }
 
 export async function discoverPools({
-  page_size = 50,
+  page_size = 150,
 } = {}) {
   const s = config.screening;
   const filters = [
@@ -446,14 +446,38 @@ export async function discoverPools({
       : null,
   ].filter(Boolean).join("&&");
 
-  const data = await fetchPoolDiscoveryPage({
-    page_size,
-    filters,
-    timeframe: s.timeframe,
-    category: s.category,
-  });
+  // Multi-category discovery: fetch each configured category and merge + dedupe by
+  // pool_address. Same `filters` + `timeframe` apply to every category, so this widens
+  // the candidate pool (breadth) without loosening any quality gate. null/[] → single
+  // category (factory behavior). Fail-open: a failing category just contributes nothing.
+  const categories = Array.isArray(s.categories) && s.categories.length
+    ? [...new Set(s.categories.map((c) => String(c).trim()).filter(Boolean))]
+    : [s.category];
 
-  let rawPools = Array.isArray(data.data) ? data.data : [];
+  const pages = await Promise.all(
+    categories.map((category) =>
+      fetchPoolDiscoveryPage({ page_size, filters, timeframe: s.timeframe, category })
+        .then((d) => (Array.isArray(d?.data) ? d.data : []))
+        .catch((error) => {
+          log("screening", `Category "${category}" fetch failed: ${error.message}`);
+          return [];
+        })
+    )
+  );
+
+  const seenPoolAddresses = new Set();
+  let rawPools = [];
+  for (const page of pages) {
+    for (const pool of page) {
+      const addr = pool?.pool_address;
+      if (!addr || seenPoolAddresses.has(addr)) continue;
+      seenPoolAddresses.add(addr);
+      rawPools.push(pool);
+    }
+  }
+  if (categories.length > 1) {
+    log("screening", `Multi-category merge [${categories.join(", ")}]: ${rawPools.length} distinct pools`);
+  }
 
   if (config.screening.useDiscordSignals) {
     const signalCandidates = await fetchDiscordSignalCandidates().catch((error) => {
@@ -570,7 +594,7 @@ export async function discoverPools({
   }
 
   return {
-    total: data.total,
+    total: rawPools.length,
     pools,
     filtered_examples: filteredExamples,
   };
@@ -588,7 +612,7 @@ export async function getTopCandidates({ limit = 10 } = {}) {
   }
   const discovery = source === "gmgn"
     ? await discoverGmgnPools({ limit: Math.max(limit, config.gmgn.enrichLimit || 20) })
-    : await discoverPools({ page_size: 50 });
+    : await discoverPools({ page_size: 150 });
   let { pools } = discovery;
   const filteredOut = Array.isArray(discovery.filtered_examples) ? [...discovery.filtered_examples] : [];
 

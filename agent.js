@@ -117,6 +117,46 @@ function shouldRequireRealToolUse(goal, agentType, interactive = false) {
   return interactive && LIVE_DATA_TOOL_INTENTS.test(goal);
 }
 
+// Some models (esp. weaker / non-native function-callers like minimax-m2) emit their
+// intended tool calls as plain-text JSON in `content` instead of using the function-
+// calling channel — e.g. `[{"name":"get_top_candidates","parameters":{"limit":3}}]`.
+// Left unhandled, an allowNoToolFinal caller (the screening cron) posts this raw JSON
+// straight to Telegram as if it were a report. parseContentToolCalls recognizes such
+// dumps so the loop can either salvage them (read-only) or reject-and-retry.
+const VALID_TOOL_NAMES = new Set(tools.map((t) => t.function.name));
+// Never auto-execute these from a text dump: a dump is an un-vetted "plan", not a
+// deliberate call — acting on it could move real capital or mutate persistent state.
+const ONCHAIN_WRITE_TOOLS = new Set(["deploy_position", "claim_fees", "close_position", "swap_token"]);
+const NO_SALVAGE_TOOLS = new Set([...ONCHAIN_WRITE_TOOLS, ...GENERAL_INTENT_ONLY_TOOLS]);
+
+function parseContentToolCalls(content) {
+  if (!content || typeof content !== "string") return null;
+  let text = content.trim();
+  if (!text) return null;
+  // Strip a single surrounding markdown code fence if present
+  const fence = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  if (fence) text = fence[1].trim();
+  if (!/^[[{]/.test(text)) return null; // a real report never starts with [ or {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    try { parsed = JSON.parse(jsonrepair(text)); } catch { return null; }
+  }
+  const arr = Array.isArray(parsed) ? parsed : [parsed];
+  if (arr.length === 0) return null;
+  const calls = [];
+  for (const item of arr) {
+    if (!item || typeof item !== "object") return null;
+    const name = item.name || item.tool || item.function;
+    if (typeof name !== "string" || !VALID_TOOL_NAMES.has(name)) return null; // all entries must be real tools
+    const raw = item.parameters ?? item.arguments ?? item.args ?? {};
+    if (raw != null && typeof raw !== "object") return null;
+    calls.push({ name, arguments: raw && typeof raw === "object" ? raw : {} });
+  }
+  return calls.length ? calls : null;
+}
+
 function buildMessages(systemPrompt, sessionHistory, goal, providerMode = "system") {
   if (providerMode === "user_embedded") {
     return [
@@ -187,6 +227,11 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
   const mustUseRealTool = shouldRequireRealToolUse(goal, agentType, interactive);
   let sawToolCall = false;
   let noToolRetryCount = 0;
+  // Recovery budgets for models that dump tool calls as plain text (see parseContentToolCalls)
+  let contentSalvageCount = 0;
+  let toolDumpRetryCount = 0;
+  const MAX_CONTENT_SALVAGE = 4;
+  const MAX_TOOL_DUMP_RETRY = 2;
   // Stays true for the whole run once a thinking-mode provider rejects tool_choice
   let omitToolChoice = false;
 
@@ -286,12 +331,55 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
       }
       messages.push(msg);
 
+      // Salvage: some models emit their intended tool calls as plain-text JSON in
+      // `content` instead of using the function-calling channel. Convert read-only
+      // dumps into real tool calls so the loop can proceed. Writes / state mutators
+      // are deliberately NOT salvaged — they fall through to the reject-and-retry
+      // path below (never act on an un-vetted plan that could move real capital).
+      if ((!msg.tool_calls || msg.tool_calls.length === 0) && msg.content) {
+        const dumped = parseContentToolCalls(msg.content);
+        if (dumped && contentSalvageCount < MAX_CONTENT_SALVAGE
+            && !dumped.some((c) => NO_SALVAGE_TOOLS.has(c.name))) {
+          contentSalvageCount += 1;
+          msg.tool_calls = dumped.map((c, i) => ({
+            id: `salvage_${step}_${i}`,
+            type: "function",
+            function: { name: c.name, arguments: JSON.stringify(c.arguments) },
+          }));
+          msg.content = ""; // drop the raw dump so the model doesn't echo it next turn
+          log("agent", `Salvaged ${dumped.length} text-dumped tool call(s): ${dumped.map((c) => c.name).join(", ")}`);
+        }
+      }
+
       // If the model didn't call any tools, it's done
       if (!msg.tool_calls || msg.tool_calls.length === 0) {
         // Hermes sometimes returns null content — pop the empty message and retry once
         if (!msg.content) {
           messages.pop(); // remove the empty assistant message
           log("agent", "Empty response, retrying...");
+          continue;
+        }
+        // A content that is actually a tool-call/schema dump (contains a write tool, or
+        // read-only but past the salvage budget) is NEVER a valid final answer — never let
+        // it reach the user/Telegram. Nudge the model to call the tool properly or report
+        // in prose; if it keeps dumping, return a clean skip / failure instead of the JSON.
+        if (parseContentToolCalls(msg.content)) {
+          toolDumpRetryCount += 1;
+          messages.pop();
+          log("agent", `Rejected tool-dump-as-text final answer (${toolDumpRetryCount}/${MAX_TOOL_DUMP_RETRY})`);
+          if (toolDumpRetryCount >= MAX_TOOL_DUMP_RETRY) {
+            return {
+              content: allowNoToolFinal
+                ? "⛔ NO DEPLOY\n\nCycle finished with no valid entry.\n(Model emitted tool calls as text instead of executing them — treated as a skip.)"
+                : "I couldn't complete that reliably — the model emitted tool definitions as text instead of calling them. Please retry.",
+              userMessage: goal,
+            };
+          }
+          const reminder = "Your previous reply pasted tool definitions/calls as plain JSON text instead of using them. Do NOT output tool schemas or example arguments as text. Either (a) actually CALL the tool through the function-calling interface, or (b) if you are finished, write your final answer as plain prose in the required format. Never paste the tool list.";
+          messages.push({
+            role: providerMode === "system" ? "system" : "user",
+            content: providerMode === "system" ? reminder : `[SYSTEM REMINDER]\n${reminder}`,
+          });
           continue;
         }
         // allowNoToolFinal: caller (e.g. the screening cron) treats "no action / skip"

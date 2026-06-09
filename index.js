@@ -957,6 +957,13 @@ IMPORTANT:
       log("cron", "Screener drafted DEPLOYED but no deploy executed — overriding report to NO DEPLOY");
       reportContent = "⛔ NO DEPLOY\n\nCycle finished with no valid entry.\n(Model drafted a deploy report but no position was actually opened.)";
     }
+    // Defense-in-depth (pairs with agent.js tool-dump guard): if the model still returned
+    // non-report content (e.g. raw JSON / a tool-call dump) rather than a 🚀 DEPLOYED or
+    // ⛔ NO DEPLOY report, never post it to Telegram — convert to an honest skip.
+    if (!deploySucceeded && !/⛔\s*NO DEPLOY/i.test(reportContent) && /^\s*[[{]/.test(stripThink(reportContent || ""))) {
+      log("cron", "Screener returned non-report content (likely tool-dump) — overriding to NO DEPLOY");
+      reportContent = "⛔ NO DEPLOY\n\nCycle finished with no valid entry.\n(Screening model returned malformed output instead of a report.)";
+    }
     const funnelAppend = buildGmgnFunnelReport(gmgnStageCounts, gmgnAllFiltered, { fromStage: 2 });
     screenReport = funnelAppend ? `${reportContent}\n\n─────────────\n${funnelAppend}` : reportContent;
     if (/⛔\s*NO DEPLOY/i.test(reportContent)) {

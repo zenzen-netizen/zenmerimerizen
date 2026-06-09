@@ -158,7 +158,7 @@ function isThinkingModeToolChoiceError(error) {
  * @returns {string} - The agent's final text response
  */
 export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHistory = [], agentType = "GENERAL", model = null, maxOutputTokens = null, options = {}) {
-  const { interactive = false, onToolStart = null, onToolFinish = null, onConfirmRequired = null } = options;
+  const { interactive = false, onToolStart = null, onToolFinish = null, onConfirmRequired = null, allowNoToolFinal = false } = options;
   // Build dynamic system prompt with current portfolio state
   const [portfolio, positions] = await Promise.all([getWalletBalances(), getMyPositions()]);
   const stateSummary = getStateSummary();
@@ -294,7 +294,11 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
           log("agent", "Empty response, retrying...");
           continue;
         }
-        if (mustUseRealTool && !sawToolCall) {
+        // allowNoToolFinal: caller (e.g. the screening cron) treats "no action / skip"
+        // as a valid terminal answer. A no-tool final response is the legitimate ⛔ NO
+        // DEPLOY path, so accept it instead of looping to the canned retry message. The
+        // caller is responsible for guarding against a claimed-success-without-tool report.
+        if (mustUseRealTool && !sawToolCall && !allowNoToolFinal) {
           noToolRetryCount += 1;
           messages.pop();
           log("agent", `Rejected no-tool final answer (${noToolRetryCount}/2) for tool-required request`);

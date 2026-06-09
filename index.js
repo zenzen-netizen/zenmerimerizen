@@ -955,6 +955,10 @@ IMPORTANT:
 - Never write "unknown" for OKX. Use real values, omit missing fields, or write exactly "OKX: unavailable".
 - Keep the whole report compact and highly scannable for Telegram.
       `, config.llm.maxSteps, [], "SCREENER", config.llm.screeningModel, 2048, {
+        // Skipping ("⛔ NO DEPLOY") is a valid outcome with no tool call — don't let the
+        // tool-required guard turn a legit skip into the canned "no tool call" message.
+        // A claimed-but-fake deploy is caught by the deploySucceeded guard below.
+        allowNoToolFinal: true,
         onToolStart: async ({ name }) => {
           if (name === "deploy_position") deployAttempted = true;
           await liveMessage?.toolStart(name);
@@ -967,21 +971,29 @@ IMPORTANT:
           await liveMessage?.toolFinish(name, result, success);
         },
       });
+    // Anti-hallucination guard (pairs with allowNoToolFinal above): if the model drafted
+    // a 🚀 DEPLOYED report but no deploy_position actually succeeded, replace it with an
+    // honest skip before it reaches Telegram — never post a fake deploy.
+    let reportContent = content;
+    if (!deploySucceeded && /🚀\s*DEPLOYED/i.test(content)) {
+      log("cron", "Screener drafted DEPLOYED but no deploy executed — overriding report to NO DEPLOY");
+      reportContent = "⛔ NO DEPLOY\n\nCycle finished with no valid entry.\n(Model drafted a deploy report but no position was actually opened.)";
+    }
     const funnelAppend = buildGmgnFunnelReport(gmgnStageCounts, gmgnAllFiltered, { fromStage: 2 });
-    screenReport = funnelAppend ? `${content}\n\n─────────────\n${funnelAppend}` : content;
-    if (/⛔\s*NO DEPLOY/i.test(content)) {
+    screenReport = funnelAppend ? `${reportContent}\n\n─────────────\n${funnelAppend}` : reportContent;
+    if (/⛔\s*NO DEPLOY/i.test(reportContent)) {
       appendDecision({
         type: "no_deploy",
         actor: "SCREENER",
         summary: "LLM chose no deploy",
-        reason: stripThink(content).slice(0, 500),
+        reason: stripThink(reportContent).slice(0, 500),
       });
     } else if (!deploySucceeded) {
       appendDecision({
         type: "no_deploy",
         actor: "SCREENER",
         summary: deployAttempted ? "Deploy attempt did not succeed" : "No successful deploy in screening cycle",
-        reason: stripThink(content).slice(0, 500),
+        reason: stripThink(reportContent).slice(0, 500),
       });
     }
   } catch (error) {

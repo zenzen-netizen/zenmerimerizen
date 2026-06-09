@@ -10,8 +10,9 @@
 
 import fs from "fs";
 import { log } from "./logger.js";
+import { repoPath } from "./repo-root.js";
 
-const STATE_FILE = "./state.json";
+const STATE_FILE = repoPath("state.json");
 
 const MAX_RECENT_EVENTS = 20;
 const MAX_INSTRUCTION_LENGTH = 280;
@@ -73,6 +74,10 @@ function makePositionRecord({
   narrative_category = null,
   shadow_signals = null,
   deployed_at,
+  entry_mcap = null,
+  entry_tvl = null,
+  entry_volume = null,
+  entry_holders = null,
 }) {
   return {
     position,
@@ -91,6 +96,10 @@ function makePositionRecord({
     initial_value_usd,
     narrative_category: narrative_category || null,
     shadow_signals: shadow_signals || null,
+    entry_mcap,
+    entry_tvl,
+    entry_volume,
+    entry_holders,
     signal_snapshot: signal_snapshot || null,
     deployed_at: deployed_at || new Date().toISOString(),
     out_of_range_since: null,

@@ -654,6 +654,11 @@ export async function deployPosition({
   organic_score,
   initial_value_usd,
   narrative_category, // 🧪 #7: optional narrative bucket for performance learning
+  // entry market conditions (injected by executor safety checks)
+  entry_mcap,
+  entry_tvl,
+  entry_volume,
+  entry_holders,
 }) {
   pool_address = normalizeMint(pool_address);
   const activeStrategy = strategy || config.strategy.strategy;
@@ -893,6 +898,10 @@ export async function deployPosition({
           narrative_category,
           shadow_signals: captureShadowSignals(pool_address),
           signal_snapshot: signalSnapshot,
+          entry_mcap,
+          entry_tvl,
+          entry_volume,
+          entry_holders,
         });
       }
 
@@ -1033,6 +1042,10 @@ export async function deployPosition({
       narrative_category,
       shadow_signals: captureShadowSignals(pool_address),
       signal_snapshot: signalSnapshot,
+      entry_mcap,
+      entry_tvl,
+      entry_volume,
+      entry_holders,
     });
 
     appendDecision({
@@ -1859,6 +1872,19 @@ export async function closePosition({ position_address, reason }) {
             tracked,
           });
 
+          let exitMarket = {};
+          try {
+            const exitDetail = await fetch(`https://pool-discovery-api.datapi.meteora.ag/pools?page_size=1&filter_by=${encodeURIComponent(`pool_address=${poolAddress}`)}&timeframe=${encodeURIComponent(config.screening?.timeframe || "5m")}`).then(r => r.json()).catch(() => null);
+            const ep = exitDetail?.data?.[0];
+            if (ep) {
+              exitMarket = {
+                exit_mcap: parseFloat(ep?.token_x?.market_cap) || null,
+                exit_tvl: parseFloat(ep?.tvl ?? ep?.active_tvl) || null,
+                exit_volume: parseFloat(ep?.volume) || null,
+              };
+            }
+          } catch { /* non-blocking */ }
+
           const derivedLesson1 = await recordPerformance({
             position: position_address,
             pool: poolAddress,
@@ -1883,6 +1909,11 @@ export async function closePosition({ position_address, reason }) {
             minutes_held: minutesHeld,
             close_reason: reason || "agent decision",
             signal_snapshot: signalSnapshot,
+            entry_mcap: tracked.entry_mcap ?? null,
+            entry_tvl: tracked.entry_tvl ?? null,
+            entry_volume: tracked.entry_volume ?? null,
+            entry_holders: tracked.entry_holders ?? null,
+            ...exitMarket,
           });
 
           appendDecision({
@@ -1922,30 +1953,6 @@ export async function closePosition({ position_address, reason }) {
             derived_lesson: derivedLesson1?.rule ?? null,
           };
         }
-
-        appendDecision({
-          type: "close",
-          actor: "MANAGER",
-          pool: poolAddress,
-          pool_name: poolMeta.name || poolAddress.slice(0, 8),
-          position: position_address,
-          summary: "Relay closed position",
-          reason: reason || "agent decision",
-          metrics: {},
-        });
-
-        return {
-          success: true,
-          relay: true,
-          request_id: order.requestId,
-          position: position_address,
-          pool: poolAddress,
-          pool_name: poolMeta.name || null,
-          claim_txs: claimTxHashes,
-          close_txs: closeTxHashes,
-          txs: txHashes,
-          base_mint: livePosition?.base_mint || null,
-        };
       } catch (relayError) {
         if (relaySubmitted) throw relayError;
         relayCallFailed(relayError);
@@ -2154,6 +2161,19 @@ export async function closePosition({ position_address, reason }) {
         tracked,
       });
 
+      let exitMarket = {};
+      try {
+        const exitDetail = await fetch(`https://pool-discovery-api.datapi.meteora.ag/pools?page_size=1&filter_by=${encodeURIComponent(`pool_address=${poolAddress}`)}&timeframe=${encodeURIComponent(config.screening?.timeframe || "5m")}`).then(r => r.json()).catch(() => null);
+        const ep = exitDetail?.data?.[0];
+        if (ep) {
+          exitMarket = {
+            exit_mcap: parseFloat(ep?.token_x?.market_cap) || null,
+            exit_tvl: parseFloat(ep?.tvl ?? ep?.active_tvl) || null,
+            exit_volume: parseFloat(ep?.volume) || null,
+          };
+        }
+      } catch { /* non-blocking */ }
+
       const derivedLesson2 = await recordPerformance({
         position: position_address,
         pool: poolAddress,
@@ -2178,6 +2198,11 @@ export async function closePosition({ position_address, reason }) {
         minutes_held: minutesHeld,
         close_reason: reason || "agent decision",
         signal_snapshot: signalSnapshot,
+        entry_mcap: tracked.entry_mcap ?? null,
+        entry_tvl: tracked.entry_tvl ?? null,
+        entry_volume: tracked.entry_volume ?? null,
+        entry_holders: tracked.entry_holders ?? null,
+        ...exitMarket,
       });
 
       appendDecision({

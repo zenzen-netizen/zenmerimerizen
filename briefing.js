@@ -1,5 +1,6 @@
 import fs from "fs";
 import { log } from "./logger.js";
+import { repoPath } from "./repo-root.js";
 import { getHourlyProfile } from "./lessons.js";
 import { config } from "./config.js";
 import { getOpenRouterBalance, getOpenRouter24hCost, getOpenRouterCredits } from "./openrouter-usage.js";
@@ -101,8 +102,8 @@ function buildLearningSection(lessonsData, since) {
 // profitability-aware engine shared by the briefing, the milestone learning
 // report, and the weekly/monthly digests.
 
-const STATE_FILE = "./state.json";
-const LESSONS_FILE = "./lessons.json";
+const STATE_FILE = repoPath("state.json");
+const LESSONS_FILE = repoPath("lessons.json");
 
 // At-a-glance ON/OFF + auto/manual status so the user can tell what's active from
 // the briefing alone (e.g. gas reserve auto vs manual, which experiments are on).

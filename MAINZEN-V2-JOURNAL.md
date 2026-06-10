@@ -91,9 +91,11 @@ PRE-v2 menang lebih sering (80%) tapi **payoff cuma 0.36** → menang receh, kal
 
 ---
 
-## 5. Masalah atribusi (kenapa preset="custom")
+## 5. Atribusi — SOLVED 2026-06-10 (fitur Profil + Racikan)
 
-`/preset use mainzen_v2` swap seluruh file, TAPI begitu ada edit manual (`/setcfg`, `update_config`, menu `/settings`) field `preset` flip ke **"custom"**. Jadi "v2 live" sekarang = custom yang **kebetulan = nilai v2**. Selain itu, **NGGAK ADA** field preset tersimpan di record posisi (`lessons.json`/`state.json`) — atribusi historis cuma bisa lewat **timestamp** (lihat §1). Roadmap: simpan `active_preset` per-deploy + tampilkan di laporan/briefing → atribusi otomatis ke depan (lihat NEXT-SESSION).
+**Koreksi pemahaman lama:** field `preset="custom"` BUKAN karena auto-flip saat edit (klaim awal salah). Faktanya = di-pilih "Custom" sekali di wizard `setup.js`, lalu jadi **field yatim** (statis, tak pernah ditampilkan/dipakai runtime). `listPresets` malah konfirmasi config live **persis = snapshot mainzen_v2** (diff `●`).
+
+**Fix yang dibangun (commit 2a450d7/d96f260/7dc1635):** dipisah dua konsep — **🧬 Profil** (`config.preset`, arketipe wizard) vs **🗂️ Racikan** (`config.activeSetup`, snapshot tersimpan). `applyPreset` stamp `activeSetup=name` saat load; tiap deploy stamp `active_setup`+`profile` ke record (`state.js`→`lessons.json`); `reports.js` punya breakdown **🗂️ By racikan**. Live config sudah di-stamp `activeSetup="mainzen_v2"` manual (exact-match). Jadi atribusi **otomatis ke depan**; data lama (`active_setup=null`) tetap di-window via timestamp (§1) & di-skip di breakdown. Detail konsep: [[project-profil-vs-racikan]] + SETTINGS-GUIDE "Profil vs Racikan".
 
 ---
 
@@ -106,3 +108,4 @@ Target: ~15–20 close di config stabil → konfirmasi PF tahan. **Sudah 43 trad
 ## 7. Changelog jurnal
 
 - **2026-06-10** — jurnal dibuat. Boundary v2 dipin di 06-08 02:35Z (bid_ask lock). Review interim n=43: PF 5.08, net +$4.61, payoff 2.82. Insight payoff-flip vs era spot. meme = narasi drag.
+- **2026-06-10 (lanjut)** — atribusi SOLVED: fitur Profil+Racikan landed (§5), live di-stamp `activeSetup="mainzen_v2"`. Jurnal §5 dikoreksi (preset="custom" = pilihan wizard, bukan auto-flip).

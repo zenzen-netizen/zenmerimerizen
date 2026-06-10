@@ -9,6 +9,7 @@ import bs58 from "bs58";
 import { log } from "../logger.js";
 import { config } from "../config.js";
 import { trackTxGas } from "../gas-tracker.js";
+import { recordSolBalance } from "../sol-tracker.js";
 
 let _connection = null;
 let _wallet = null;
@@ -90,6 +91,10 @@ export async function getWalletBalances() {
     const solPrice = solEntry?.pricePerToken || 0;
     const solUsd = solEntry?.usdValue || 0;
     const usdcBalance = usdcEntry?.balance || 0;
+
+    // Calendar-day SOL growth tracker (/wallet): set today's WIB opening
+    // baseline on the first successful read of the day. Fail-open.
+    recordSolBalance(Math.round(solBalance * 1e6) / 1e6);
 
     // ─── Map all tokens ───────────────────────────────────────
     const enrichedTokens = balances.map(b => ({

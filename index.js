@@ -43,6 +43,7 @@ import { stageSignals } from "./signal-tracker.js";
 import { getWeightsSummary } from "./signal-weights.js";
 import { bootstrapHiveMind, ensureAgentId, getHiveMindPullMode, isHiveMindEnabled, pullHiveMindLessons, pullHiveMindPresets, registerHiveMindAgent, startHiveMindBackgroundSync } from "./hivemind.js";
 import { appendDecision } from "./decision-log.js";
+import { formatSolTracker } from "./sol-tracker.js";
 import { getOpenRouterBalance, getOpenRouterCredits } from "./openrouter-usage.js";
 
 import { REPO_ROOT, repoPath } from "./repo-root.js";
@@ -2260,7 +2261,7 @@ function formatHelpText() {
     "",
     "📊 LAPORAN & STATUS",
     "/status — wallet + positions snapshot",
-    "/wallet — wallet, deploy amount, HiveMind status",
+    "/wallet — wallet, deploy amount, HiveMind + SOL growth tracker (1d/7d/30d)",
     "/positions — list open positions",
     "/pool <n> — detailed info for one position",
     "/briefing — morning briefing (auto-pinned)",
@@ -2606,6 +2607,10 @@ async function telegramHandler(msg) {
         } else if (orBalance.usage != null) {
           msg += `\n💳 OpenRouter: $${orBalance.usage.toFixed(4)} total spent`;
         }
+      }
+      if (text === "/wallet") {
+        // SOL balance growth tracker (calendar 1d/7d/30d) — /wallet only.
+        msg += `\n\n${formatSolTracker(wallet.sol)}`;
       }
       if (text === "/status") {
         if (positions.total_positions) msg += `\n\nUse /positions for the numbered list.`;

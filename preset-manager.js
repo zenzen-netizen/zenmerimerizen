@@ -159,6 +159,26 @@ export function getActiveSetupStatus() {
   return { name, edited, exists: true };
 }
 
+const PROFILE_LABELS = { degen: "🔥 Degen", moderate: "⚖️ Moderate", safe: "🛡️ Safe", custom: "✏️ Custom" };
+
+/**
+ * Canonical 🧬 Profil + 🗂️ Racikan identity block — single source of truth used
+ * by /config, /settings, /report and briefings. Reads user-config.json directly
+ * (no config.js import). Emoji-only, safe to drop into Telegram HTML as-is.
+ * compact=true → one line; else two lines.
+ */
+export function formatIdentity({ compact = false } = {}) {
+  const profile = readCurrent().preset || "moderate";
+  const profLabel = PROFILE_LABELS[profile] || profile;
+  const s = getActiveSetupStatus();
+  const racikan = s.name
+    ? `${s.name}${s.exists ? (s.edited ? " ✎ (ada edit manual)" : "") : " (file hilang)"}`
+    : "— (belum load racikan)";
+  return compact
+    ? `🧬 Profil: ${profLabel} · 🗂️ Racikan: ${racikan}`
+    : `🧬 Profil: ${profLabel}\n🗂️ Racikan: ${racikan}`;
+}
+
 export function deletePreset(name) {
   if (!presetExists(name)) throw new Error(`preset "${name}" not found`);
   fs.unlinkSync(presetPath(name));

@@ -13,6 +13,7 @@ import {
   computeTradeStats, formatStatsBlock, formatBreakdown, formatMovement, buildVerdict,
   buildRecommendations, buildRoleCostLines, estimateGasSol, buildTradeReport,
 } from "./reports.js";
+import { formatIdentity } from "./preset-manager.js";
 
 const money = (n) => `${n >= 0 ? "+" : "-"}$${Math.abs(n).toFixed(2)}`;
 
@@ -275,6 +276,7 @@ export async function generateBriefing() {
   // 6. Format Message
   const lines = [
     "☀️ <b>Morning Briefing</b> (Last 24h)",
+    (() => { try { return formatIdentity({ compact: true }); } catch { return null; } })(),
     "────────────────",
     `<b>Activity:</b>`,
     `📥 Positions Opened: ${openedLast24h.length}`,
@@ -364,6 +366,7 @@ export async function generatePeriodicBriefing(period = "week") {
     title: `${emoji} ${label} Briefing — last ${days}d`,
     statsLabel: `Last ${days}d`,
     trendN: period === "month" ? 10 : 7,
+    identity: (() => { try { return formatIdentity({ compact: true }); } catch { return null; } })(),
   });
 
   const costLines = [`<b>💵 Costs (${days}d):</b>`];

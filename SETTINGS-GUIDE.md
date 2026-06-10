@@ -45,16 +45,41 @@ config.js            ← Bot membaca semua file di atas (JANGAN EDIT)
 
 ---
 
-## Config Presets (Simpan & Ganti Profil Config)
+## 🧬 Profil vs 🗂️ Racikan (dua konsep "preset" yang beda!)
 
-Sebuah **config preset** = snapshot LENGKAP `user-config.json` yang disimpan di folder
-`presets/<nama>.json`. Gunanya: simpan beberapa "profil" bot lalu tukar cepat tanpa ngisi
-ulang puluhan setting (mis. profil `mainzen` untuk small/mid degen vs `bigcapagresif` untuk
+Dulu kata "preset" dipakai untuk dua hal berbeda → bikin bingung. Sekarang dipisah jelas:
+
+| | 🧬 **Profil** | 🗂️ **Racikan** |
+|---|---|---|
+| Apa | Arketipe/karakter dasar dari **wizard setup** | **Snapshot config penuh** yang kamu simpan sendiri |
+| Nilai | `degen` / `moderate` / `safe` / `custom` | nama bebas: `mainzen`, `mainzen_v2`, `bigcapagresif`, … |
+| Kapan di-set | Sekali, saat instalasi (`setup.js`) | Tiap kali `/preset save` atau `/preset use` |
+| Sifat | **Statis** (cuma ganti kalau setup ulang) | **Dinamis** (ganti racikan kapan aja) |
+| Field | `preset` di `user-config.json` | `activeSetup` (otomatis di-stamp) |
+
+Keduanya **hidup bareng**: kamu bisa "Profil ⚖️ Moderate + lagi pakai Racikan `mainzen_v2`".
+Beda lagi dari **indicator preset** (`entryPreset`/`exitPreset`) yang itu sinyal teknikal, bukan config utuh.
+
+Cek dua-duanya: baris paling atas `/config` dan menu `/settings` nampilin:
+```
+🧬 Profil: ⚖️ Moderate
+🗂️ Racikan: mainzen_v2 ✎ (ada edit manual)
+```
+Tanda **`✎ (ada edit manual)`** muncul kalau config live udah kamu obok-obok setelah load racikan —
+jadi tahu "ini mainzen_v2 tapi udah nggak murni lagi". Tiap deploy/close juga di-stamp racikan-nya,
+jadi `/report` punya breakdown **🗂️ By racikan** (atribusi performa per racikan) + notif deploy nampilin barisnya.
+
+> Loading racikan via `/preset use mainzen_v2` otomatis nge-set `activeSetup="mainzen_v2"`.
+> `/preset save mainzen_v4` = "namai config sekarang jadi mainzen_v4" (live `activeSetup` ikut ke-set).
+
+---
+
+## Config Presets / Racikan (Simpan & Ganti Config)
+
+Sebuah **racikan (config preset)** = snapshot LENGKAP `user-config.json` yang disimpan di folder
+`presets/<nama>.json`. Gunanya: simpan beberapa racikan bot lalu tukar cepat tanpa ngisi
+ulang puluhan setting (mis. `mainzen` untuk small/mid degen vs `bigcapagresif` untuk
 fee-farm pool besar). Folder `presets/` **local-only** (gitignore — berisi API key/identitas).
-
-> Beda dari "preset" lain: ini **bukan** preset wizard `setup.js` (degen/moderate/safe, cuma
-> saat instalasi) dan **bukan** indicator preset (`entryPreset`/`exitPreset`, sinyal teknikal).
-> Ini snapshot config utuh.
 
 **Lewat Telegram / REPL — command `/preset`:**
 | Command | Aksi |
@@ -66,7 +91,7 @@ fee-farm pool besar). Folder `presets/` **local-only** (gitignore — berisi API
 | `/preset rm <nama>` | Hapus preset |
 
 **Lewat menu tombol:**
-`/settings` → tombol **🗂️ Presets**. Tiap preset punya 3 tombol: **▶** load (konfirmasi → backup → restart), **🔍** lihat beda vs config sekarang, **🗑️** hapus (ada konfirmasi). Tombol **💾 Simpan config sekarang** di bawah → bot tanya nama → kesimpan jadi preset baru. Jadi save + load + hapus semua bisa dari menu tanpa ngetik command (kecuali nama preset saat save).
+`/settings` → tombol **🗂️ Racikan**. Tiap racikan punya 3 tombol: **▶** load (konfirmasi → backup → restart), **🔍** lihat beda vs config sekarang, **🗑️** hapus (ada konfirmasi). Tombol **💾 Simpan config sekarang** di bawah → bot tanya nama → kesimpan jadi racikan baru. Jadi save + load + hapus semua bisa dari menu tanpa ngetik command (kecuali nama racikan saat save).
 
 **Lewat terminal (bot boleh dalam keadaan mati):**
 ```

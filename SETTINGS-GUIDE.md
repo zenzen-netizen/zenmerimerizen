@@ -946,8 +946,8 @@ restart (pm2 menghidupkan lagi); kalau tidak, jalankan `pm2 restart meridian` ma
 | **Nilai sekarang** | `"supertrend_break"` / `"rsi_reversal"` |
 | **Default** | `"supertrend_break"` / `"supertrend_break"` |
 | **Format** | String |
-| **Opsi** | `"supertrend_break"` `"rsi_reversal"` `"bollinger_reversion"` `"rsi_plus_supertrend"` `"supertrend_or_rsi"` `"bb_plus_rsi"` `"fibo_reclaim"` `"fibo_reject"` |
-| **Penjelasan** | Preset kondisi teknikal. `entryPreset` = gerbang timing saat MASUK (selalu aktif kalau `enabled=on`). `exitPreset` = sinyal saat KELUAR, tapi **baru berpengaruh kalau `exitEnabled=on`** (lihat di bawah). `supertrend_break` = harga baru breakout di atas supertrend |
+| **Opsi** | `"supertrend_break"` `"rsi_reversal"` `"bollinger_reversion"` `"rsi_plus_supertrend"` `"supertrend_or_rsi"` `"bb_plus_rsi"` `"fibo_reclaim"` `"fibo_reject"` `"supertrend_plus_smi"` |
+| **Penjelasan** | Preset kondisi teknikal. `entryPreset` = gerbang timing saat MASUK (selalu aktif kalau `enabled=on`). `exitPreset` = sinyal saat KELUAR, tapi **baru berpengaruh kalau `exitEnabled=on`** (lihat di bawah). `supertrend_break` = harga baru breakout di atas supertrend. `supertrend_plus_smi` = supertrend bullish **DAN** sinyal SMI (Stochastic Momentum Index, dihitung client-side dari `candles[]`) — lihat 3 setelan `smiPdLookback` / `smiPaLookback` / `smiCrossWindow` di bawah |
 
 ---
 
@@ -1011,6 +1011,17 @@ restart (pm2 menghidupkan lagi); kalau tidak, jalankan `pm2 restart meridian` ma
 | **Default** | `false` |
 | **Format** | `true` atau `false` |
 | **Penjelasan** | Di-port dari logika GMGN `checkBounceSetup`. `false` (pabrik) = tidak ada efek. `true` = gerbang ENTRY (mode Meteora) **menolak** kandidat yang sudah terlanjur dump ke dasar — yaitu RSI < `rsiOversold` **dan** harga di bawah lower Bollinger Band. Alasannya: strategi single-side SOL di bin bawah harga butuh token masih punya ruang untuk turun MASUK ke range kita; kalau sudah di dasar, tidak ada ruang dump lagi → langsung mantul naik = OOR di atas range. Veto ini berlaku apa pun preset-nya |
+
+---
+
+### `chartIndicators.smiPdLookback`, `smiPaLookback`, `smiCrossWindow`
+| | |
+|---|---|
+| **Nilai sekarang** | `5` / `3` / `3` |
+| **Default** | `5` / `3` / `3` |
+| **Format** | Angka bulat (jumlah candle) |
+| **Berlaku saat** | **Hanya** kalau `entryPreset = "supertrend_plus_smi"`. Preset lain → ketiganya tidak terpakai (inert) |
+| **Penjelasan** | Tiga jendela kebaruan (recency) untuk sinyal SMI. Matematika SMI-nya (lenK/lenD/lenE, midline, hitungan trigger fase PD/PA) **dikunci di `tools/smi.js`** — yang bisa di-tune cuma 3 jendela ini. Sinyal SMI terkonfirmasi kalau **PathA ATAU PathB**: <br>• **PathA** ("topping → roll over"): ada *cross-down* (SMI memotong ke bawah garis sinyal SMI-EMA, dengan SMI masih > 0) dalam **`smiCrossWindow`** candle terakhir, yang **didahului** oleh trigger fase **PD** (pre-distribution) dalam **`smiPdLookback`** candle SEBELUM cross-down itu. <br>• **PathB** ("sudah mulai akumulasi"): ada trigger fase **PA** (pre-accumulation) dalam **`smiPaLookback`** candle terakhir. <br>Angka lebih besar = jendela lebih longgar (lebih banyak setup lolos); lebih kecil = lebih ketat / lebih segar |
 
 ---
 

@@ -1749,22 +1749,39 @@ function getConfigValue(key) {
 }
 
 async function requestConfirmation(toolName, args) {
-  // Accept both shapes: { changes: {...} } and the flat { key, value } pair that
-  // weak models use (they cannot fill a free-form object param). Coerce value type
-  // the same way the executor does so the prompt shows the real target value.
-  let changes = (args.changes && typeof args.changes === "object") ? { ...args.changes } : {};
-  if (Object.keys(changes).length === 0 && typeof args.key === "string" && args.key.trim()) {
-    const v = args.value;
-    let coerced = v;
-    if (typeof v === "string") {
-      const lc = v.trim().toLowerCase();
-      if (lc === "true") coerced = true;
-      else if (lc === "false") coerced = false;
-      else if (lc === "off" || lc === "null") coerced = null;
-      else if (v.trim() !== "" && Number.isFinite(Number(v))) coerced = Number(v);
+  // Recover EVERY arg shape the executor's update_config accepts, so the
+  // confirmation gate never lets one slip through unprompted. Weak models invent:
+  //   { changes: {...} } | { key, value } | { path: "a.b", value }
+  //   { management: { solMode: true } } (section-nested) | { solMode: true } (bare)
+  // BUG this fixes: requestConfirmation only parsed changes/key+value, so the
+  // section-nested + bare shapes (which the executor DOES apply) skipped the
+  // prompt entirely — observed on boolean toggles like "sol mode on". Mirrors
+  // tools/executor.js update_config recovery; keep the two in sync.
+  const coerce = (v) => {
+    if (typeof v !== "string") return v;
+    const lc = v.trim().toLowerCase();
+    if (lc === "true") return true;
+    if (lc === "false") return false;
+    if (lc === "off" || lc === "null") return null;
+    if (v.trim() !== "" && Number.isFinite(Number(v))) return Number(v);
+    return v;
+  };
+  const RESERVED = new Set(["changes", "key", "value", "path", "reason"]);
+  const KNOWN_SECTIONS = new Set(["screening", "management", "risk", "schedule", "llm", "strategy", "hiveMind", "api", "gmgn", "indicators", "chartIndicators", "experiments", "reports", "tokens", "darwin"]);
+  const raw = {};
+  if (args.changes && typeof args.changes === "object") Object.assign(raw, args.changes);
+  if (typeof args.key === "string" && args.key.trim()) raw[args.key.trim()] = args.value;
+  if (typeof args.path === "string" && args.path.trim()) raw[args.path.trim().split(".").pop()] = args.value;
+  for (const [k, v] of Object.entries(args)) {
+    if (RESERVED.has(k)) continue;
+    if (v && typeof v === "object" && !Array.isArray(v) && KNOWN_SECTIONS.has(k)) {
+      for (const [sk, sv] of Object.entries(v)) raw[sk] = sv;               // section-nested
+    } else if (!(k in raw) && getConfigValue(k) !== undefined) {
+      raw[k] = v;                                                          // bare flat (real key only)
     }
-    changes = { [args.key.trim()]: coerced };
   }
+  const changes = {};
+  for (const [k, v] of Object.entries(raw)) changes[k] = coerce(v);
 
   // Drop no-op entries (requested value already matches live config) so we never
   // prompt for a change that does nothing. If nothing actually changes, skip the

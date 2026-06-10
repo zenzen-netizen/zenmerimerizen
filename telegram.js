@@ -502,7 +502,7 @@ async function poll(onMessage) {
 const BOT_COMMANDS = [
   { command: "help",       description: "Show commands (grouped)" },
   { command: "status",     description: "Wallet + positions snapshot" },
-  { command: "wallet",     description: "Wallet, deploy amount, HiveMind status" },
+  { command: "wallet",     description: "Wallet + SOL growth tracker (1d/7d/30d)" },
   { command: "positions",  description: "List open positions" },
   { command: "pool",       description: "Detailed info for one open position" },
   { command: "briefing",   description: "Morning briefing" },

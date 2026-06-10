@@ -117,6 +117,7 @@ export function computeTradeStats(records = []) {
     by_strategy: groupStats(perf, "strategy"),
     by_session: groupStats(perf, "open_session"),
     by_narrative: groupStats(perf, "narrative_category"),
+    by_setup: groupStats(perf, "active_setup"),
   };
 }
 
@@ -189,6 +190,7 @@ export function formatBreakdown(st, opts = {}) {
     }
   };
   block("📦 By strategy:", st.by_strategy);
+  if (st.by_setup && st.by_setup.length) block("🗂️ By racikan:", st.by_setup);
   if (opts.sessions !== false) block("🕒 By session (WIB):", st.by_session);
   if (st.by_narrative.length) block("🏷️ By narrative:", st.by_narrative);
   return out.length ? out.join("\n") : null;

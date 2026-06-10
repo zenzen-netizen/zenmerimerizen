@@ -11,6 +11,7 @@
 import fs from "fs";
 import { log } from "./logger.js";
 import { repoPath } from "./repo-root.js";
+import { config } from "./config.js";
 
 const STATE_FILE = repoPath("state.json");
 
@@ -78,6 +79,8 @@ function makePositionRecord({
   entry_tvl = null,
   entry_volume = null,
   entry_holders = null,
+  active_setup = null, // Racikan (saved snapshot) live at deploy; null = none/unknown
+  profile = null,      // wizard archetype (degen/moderate/safe/custom) at deploy
 }) {
   return {
     position,
@@ -95,6 +98,8 @@ function makePositionRecord({
     organic_score,
     initial_value_usd,
     narrative_category: narrative_category || null,
+    active_setup: active_setup || null,
+    profile: profile || null,
     shadow_signals: shadow_signals || null,
     entry_mcap,
     entry_tvl,
@@ -132,7 +137,14 @@ export function trackPosition(fields) {
   // Protect deployed_at: re-tracking a position we already know must never reset
   // its clock — that would corrupt minutes-held / age in PnL and performance.
   const deployed_at = existing?.deployed_at ?? new Date().toISOString();
-  state.positions[fields.position] = makePositionRecord({ ...fields, deployed_at });
+  // Stamp the identity live at deploy so each trade is attributable to its
+  // Racikan/Profil (real deploys only; ensureDeployedAt backfills stay null).
+  state.positions[fields.position] = makePositionRecord({
+    ...fields,
+    deployed_at,
+    active_setup: fields.active_setup ?? config.activeSetup ?? null,
+    profile: fields.profile ?? config.profile ?? null,
+  });
   pushEvent(state, { action: "deploy", position: fields.position, pool_name: fields.pool_name || fields.pool });
   save(state);
   log("state", `Tracked new position: ${fields.position} in pool ${fields.pool}`);

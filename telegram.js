@@ -555,9 +555,18 @@ export function stopPolling() {
 }
 
 // ─── Notification helpers ────────────────────────────────────────
+// Current "Racikan" (saved-snapshot name) read straight from user-config.json —
+// keeps telegram.js free of the heavy config.js import. null = none.
+function activeRacikan() {
+  try { return JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")).activeSetup || null; }
+  catch { return null; }
+}
+
 export async function notifyDeploy({ pair, amountSol, position, tx, priceRange, rangeCoverage, binStep, baseFee }) {
   if (hasActiveLiveMessage()) return;
   const safePair = escapeHtml(pair || "?");
+  const racikan = activeRacikan();
+  const racikanStr = racikan ? `Racikan: ${escapeHtml(racikan)}\n` : "";
   const priceStr = priceRange
     ? `Price range: ${priceRange.min < 0.0001 ? priceRange.min.toExponential(3) : priceRange.min.toFixed(6)} – ${priceRange.max < 0.0001 ? priceRange.max.toExponential(3) : priceRange.max.toFixed(6)}\n`
     : "";
@@ -570,6 +579,7 @@ export async function notifyDeploy({ pair, amountSol, position, tx, priceRange, 
   await sendHTML(
     `✅ <b>Deployed</b> ${safePair}\n` +
     `Amount: ${amountSol} SOL\n` +
+    racikanStr +
     priceStr +
     coverageStr +
     poolStr +

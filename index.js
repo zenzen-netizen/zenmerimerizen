@@ -34,7 +34,7 @@ import { generateBriefing, generatePeriodicBriefing } from "./briefing.js";
 import { renderGuide } from "./guide.js";
 import { getLastBriefingDate, setLastBriefingDate, getLastBriefingPinId, setLastBriefingPinId, getLastReportedMilestone, setLastReportedMilestone, getLastPeriodicBriefing, setLastPeriodicBriefing, getTrackedPosition, getTrackedPositions, setPositionInstruction, updatePnlAndCheckExits, queuePeakConfirmation, resolvePendingPeak, queueTrailingDropConfirmation, resolvePendingTrailingDrop } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
-import { listPresets, savePreset, applyPreset, getPresetDiff, deletePreset, validName, presetExists } from "./preset-manager.js";
+import { listPresets, savePreset, applyPreset, getPresetDiff, deletePreset, validName, presetExists, getActiveSetupStatus } from "./preset-manager.js";
 import { recordPositionSnapshot, recallForPool, addPoolNote } from "./pool-memory.js";
 import { recordCandidateSnapshots, getCandidateMomentum, formatCandidateMomentum, recordSmartWalletCounts, getSmartWalletMomentum, formatSmartWalletMomentum } from "./candidate-memory.js";
 import { checkSmartWalletsOnPool } from "./smart-wallets.js";
@@ -1424,6 +1424,26 @@ function formatConfigSnapshot() {
 
 // Full runtime config, grouped to match SETTINGS-GUIDE.md (GRUP 1–15) + GMGN.
 // /config shows the complete surface; long output is auto-split by sendMessage.
+// Two identity layers, kept distinct (see preset-manager + SETTINGS-GUIDE):
+//   🧬 Profil  = wizard archetype (degen/moderate/safe/custom), set at setup.
+//   🗂️ Racikan = named saved snapshot loaded via /preset (e.g. mainzen_v2);
+//                "✎ ada edit manual" when the live config has since diverged.
+const PROFILE_LABELS = { degen: "🔥 Degen", moderate: "⚖️ Moderate", safe: "🛡️ Safe", custom: "✏️ Custom" };
+export function formatIdentityLines() {
+  const profile = config.profile || "moderate";
+  const profLabel = PROFILE_LABELS[profile] || profile;
+  let racikan;
+  try {
+    const s = getActiveSetupStatus();
+    racikan = s.name
+      ? `${s.name}${s.exists ? (s.edited ? " ✎ (ada edit manual)" : "") : " (file hilang)"}`
+      : "— (belum load racikan)";
+  } catch {
+    racikan = "—";
+  }
+  return `🧬 Profil: ${profLabel}\n🗂️ Racikan: ${racikan}`;
+}
+
 export function formatFullConfig() {
   const c = config;
   const fmt = (v) => {
@@ -1631,7 +1651,7 @@ export function formatFullConfig() {
     ]),
   ];
 
-  return `⚙️ Config lengkap (semua grup)\n\n${blocks.join("\n\n")}\n\nUbah lewat /settings (menu tombol) atau chat biasa. Detail tiap setting: SETTINGS-GUIDE.md`;
+  return `⚙️ Config lengkap (semua grup)\n\n${formatIdentityLines()}\n\n${blocks.join("\n\n")}\n\nUbah lewat /settings (menu tombol) atau chat biasa. Detail tiap setting: SETTINGS-GUIDE.md`;
 }
 
 function parseConfigValue(raw) {
@@ -1858,9 +1878,13 @@ function pageForKey(key) {
 
 function renderSettingsMenu(page = "main") {
   const title = page === "main" ? "Settings menu" : `Settings: ${page}`;
+  const racikanShort = (() => {
+    try { const s = getActiveSetupStatus(); return s.name ? `${s.name}${s.edited ? " ✎" : ""}` : "—"; } catch { return "—"; }
+  })();
   const summary = [
     title,
     "",
+    `🧬 Profil: ${PROFILE_LABELS[config.profile] || config.profile || "moderate"} · 🗂️ Racikan: ${racikanShort}`,
     `Mode: ${config.management.solMode ? "SOL" : "USD"} | Relay: ${config.api.lpAgentRelayEnabled ? "on" : "off"}`,
     `Screening: ${config.screening.source} | cats ${Array.isArray(config.screening.categories) && config.screening.categories.length ? config.screening.categories.join(",") : `single (${config.screening.category})`} | GMGN KOL ${config.gmgn.requireKol ? "required" : "preferred"}`,
     `Strategy: ${config.strategy.strategy} | deploy ${config.management.deployAmountSol} SOL | max pos ${config.risk.maxPositions}`,
@@ -1885,7 +1909,7 @@ function renderSettingsMenu(page = "main") {
     [
       settingButton("🧪 Experiments", "cfg:page:experiments"),
       settingButton("📊 Reports", "cfg:page:reports"),
-      settingButton("🗂️ Presets", "cfg:page:presets"),
+      settingButton("🗂️ Racikan", "cfg:page:presets"),
     ],
   ];
 
@@ -2034,10 +2058,16 @@ function renderSettingsMenu(page = "main") {
           ? `⚠ ${p.name}`
           : `${p.isCurrent ? "●" : "○"} ${p.name} — ${p.dryRun ? "🧪 dry-run" : "live"} · ${p.keys} keys${p.isCurrent ? " (current)" : ""}`)
       : ["(belum ada preset)"];
-    bodyText = ["🗂️ Config Presets", "", ...lines, "",
+    const setupStatus = (() => {
+      try { const s = getActiveSetupStatus(); return s.name ? `${s.name}${s.edited ? " ✎ (ada edit manual)" : ""}` : "— (belum load)"; } catch { return "—"; }
+    })();
+    bodyText = ["🗂️ Racikan (setup tersimpan)", "",
+      `Aktif: ${setupStatus}`,
+      "(Racikan = snapshot config penuh. Beda dari 🧬 Profil = arketipe wizard.)", "",
+      ...lines, "",
       "● = sama dgn config live · 🧪 = isi file dryRun (bukan berarti jalan)",
       "Per baris: ▶ load · 🔍 lihat beda · 🗑️ hapus.",
-      "💾 = simpan config sekarang jadi preset baru.",
+      "💾 = simpan config sekarang jadi racikan baru.",
     ].join("\n");
     rows = presets.map((p) => p.error
       ? [settingButton(`⚠ ${p.name}`, "cfg:noop")]
@@ -2312,14 +2342,16 @@ function runPresetCommand(argStr) {
   try {
     if (sub === "list" || sub === "ls") {
       const presets = listPresets();
-      if (!presets.length) return { text: "Belum ada preset. Simpan dengan: /preset save <nama>" };
+      if (!presets.length) return { text: "Belum ada racikan. Simpan dengan: /preset save <nama>" };
       const lines = presets.map((p) => {
         if (p.error) return `! ${p.name} — tidak terbaca`;
         const mark = p.isCurrent ? "●" : "○";
         const mode = p.dryRun ? "🧪 dry-run" : "live";
         return `${mark} ${p.name} — ${mode} · ${p.keys} keys${p.isCurrent ? "  (current)" : ""}`;
       });
-      return { text: `🗂️ Config Presets\n${lines.join("\n")}\n\n${presetUsageText()}` };
+      const st = getActiveSetupStatus();
+      const active = st.name ? `${st.name}${st.edited ? " ✎ (ada edit manual)" : ""}` : "— (belum load)";
+      return { text: `🗂️ Racikan (setup tersimpan)\nAktif: ${active}\n\n${lines.join("\n")}\n\n${presetUsageText()}` };
     }
     if (sub === "save") {
       if (!name) return { text: "Format: /preset save <nama>" };

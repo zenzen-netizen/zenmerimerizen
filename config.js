@@ -74,6 +74,16 @@ function gmgnArray(key, legacyKey, fallback) {
 }
 
 export const config = {
+  // ─── Identity / Setup ────────────────────
+  // Two SEPARATE concepts (historically conflated under one "preset" word):
+  //   profile     = wizard archetype chosen at setup (degen|moderate|safe|custom).
+  //                 Static — only changes if you re-run setup. Character baseline.
+  //   activeSetup = the named saved snapshot ("Racikan") currently loaded via
+  //                 /preset use (e.g. "mainzen_v2"); null = none. Set by applyPreset.
+  // See preset-manager.js + SETTINGS-GUIDE "Profil vs Racikan".
+  profile:     u.preset       ?? "moderate",
+  activeSetup: u.activeSetup  ?? null,
+
   // ─── Risk Limits ─────────────────────────
   risk: {
     maxPositions:    u.maxPositions    ?? 3,

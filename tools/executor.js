@@ -465,6 +465,9 @@ const toolMap = {
       requireAllIntervals: ["indicators", "requireAllIntervals", ["chartIndicators", "requireAllIntervals"]],
       indicatorExitEnabled: ["indicators", "exitEnabled", ["chartIndicators", "exitEnabled"]],
       indicatorRejectAtBottom: ["indicators", "rejectAlreadyAtBottom", ["chartIndicators", "rejectAlreadyAtBottom"]],
+      smiPdLookback: ["indicators", "smiPdLookback", ["chartIndicators", "smiPdLookback"]],
+      smiPaLookback: ["indicators", "smiPaLookback", ["chartIndicators", "smiPaLookback"]],
+      smiCrossWindow: ["indicators", "smiCrossWindow", ["chartIndicators", "smiCrossWindow"]],
       // experiments (🧪 GRUP 16 — default OFF = factory behavior)
       exitLiquidityCheck: ["experiments", "exitLiquidityCheck"],
       exitLiquidityMaxSlippagePct: ["experiments", "exitLiquidityMaxSlippagePct"],

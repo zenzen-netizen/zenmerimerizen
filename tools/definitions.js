@@ -405,7 +405,7 @@ Schedule: managementIntervalMin, screeningIntervalMin, healthCheckIntervalMin
 Models: managementModel, screeningModel, generalModel, temperature, maxTokens, generalMaxTokens, maxSteps
 Strategy: strategy, binsBelow, minBinsBelow, maxBinsBelow, defaultBinsBelow
 Hive/API: hiveMindUrl, hiveMindApiKey, agentId, hiveMindPullMode, publicApiKey, agentMeridianApiUrl, lpAgentRelayEnabled
-Indicators: chartIndicatorsEnabled, indicatorEntryPreset, indicatorExitPreset, indicatorExitEnabled, indicatorRejectAtBottom, rsiLength, indicatorIntervals, indicatorCandles, rsiOversold, rsiOverbought, requireAllIntervals
+Indicators: chartIndicatorsEnabled, indicatorEntryPreset, indicatorExitPreset, indicatorExitEnabled, indicatorRejectAtBottom, rsiLength, indicatorIntervals, indicatorCandles, rsiOversold, rsiOverbought, requireAllIntervals, smiPdLookback, smiPaLookback, smiCrossWindow (last 3 only apply when indicatorEntryPreset=supertrend_plus_smi)
 Reports: learningReportEvery, learningReportTrendN
 Experiments (default off): exitLiquidityCheck, exitLiquidityMaxSlippagePct, marketRegimeGate, marketRegimeMaxDrop24hPct, candidateMomentum, narrativeProfileSignal, expectedYieldSignal, convictionSizing, convictionSizingMaxAdjustPct, counterfactualReview, counterfactualMinMcapGainPct, smartWalletMomentum
 

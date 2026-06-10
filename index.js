@@ -1556,6 +1556,9 @@ export function formatFullConfig() {
       ["rsiOversold", fmt(c.indicators.rsiOversold)],
       ["rsiOverbought", fmt(c.indicators.rsiOverbought)],
       ["requireAllIntervals", fmt(c.indicators.requireAllIntervals)],
+      ["smiPdLookback", fmt(c.indicators.smiPdLookback)],
+      ["smiPaLookback", fmt(c.indicators.smiPaLookback)],
+      ["smiCrossWindow", fmt(c.indicators.smiCrossWindow)],
     ]),
     group("━ GRUP 14 — Koneksi & Relay", [
       ["lpAgentRelayEnabled", fmt(c.api.lpAgentRelayEnabled)],
@@ -1698,6 +1701,9 @@ function settingValue(key) {
     rsiLength: config.indicators.rsiLength,
     indicatorIntervals: config.indicators.intervals,
     requireAllIntervals: config.indicators.requireAllIntervals,
+    smiPdLookback: config.indicators.smiPdLookback,
+    smiPaLookback: config.indicators.smiPaLookback,
+    smiCrossWindow: config.indicators.smiCrossWindow,
     // 🧪 GRUP 16 — Experiments
     candidateMomentum: config.experiments.candidateMomentum,
     smartWalletMomentum: config.experiments.smartWalletMomentum,
@@ -1841,7 +1847,7 @@ function pageForKey(key) {
   if (["gmgnPreferredKolNames", "gmgnPreferredKolMinHoldPct", "gmgnDumpKolNames", "gmgnDumpKolMinHoldPct"].includes(key)) return "kol";
   if (["gmgnMinVolume", "gmgnMaxBundlerRate", "gmgnMinTokenAgeHours", "gmgnMaxTokenAgeHours"].includes(key)) return "screen";
   if (key.startsWith("gmgn") && key !== "gmgnRequireKol") return "gmgn";
-  if (key.startsWith("indicator") || key === "chartIndicatorsEnabled" || key === "rsiLength" || key === "requireAllIntervals") return "indicators";
+  if (key.startsWith("indicator") || key.startsWith("smi") || key === "chartIndicatorsEnabled" || key === "rsiLength" || key === "requireAllIntervals") return "indicators";
   if (["minBinsBelow", "maxBinsBelow"].includes(key)) return "strategy";
   if (["useDiscordSignals", "blockPvpSymbols", "managementIntervalMin", "screeningIntervalMin", "maxScreeningIntervalMin", "adaptiveScreening", "screeningSource", "screeningCategories", "gmgnRequireKol"].includes(key)) return "screen";
   if (["candidateMomentum", "smartWalletMomentum", "expectedYieldSignal", "narrativeProfileSignal", "counterfactualReview", "counterfactualMinMcapGainPct", "exitLiquidityCheck", "exitLiquidityMaxSlippagePct", "marketRegimeGate", "marketRegimeMaxDrop24hPct", "convictionSizing", "convictionSizingMaxAdjustPct"].includes(key)) return "experiments";
@@ -1985,12 +1991,16 @@ function renderSettingsMenu(page = "main") {
         settingButton("Entry: RSI", "cfg:set:indicatorEntryPreset:rsi_reversal"),
         settingButton("Entry: ST/RSI", "cfg:set:indicatorEntryPreset:supertrend_or_rsi"),
       ],
+      [settingButton("Entry: ST+SMI", "cfg:set:indicatorEntryPreset:supertrend_plus_smi")],
       [
         settingButton("Exit: ST", "cfg:set:indicatorExitPreset:supertrend_break"),
         settingButton("Exit: RSI", "cfg:set:indicatorExitPreset:rsi_reversal"),
         settingButton("Exit: BB+RSI", "cfg:set:indicatorExitPreset:bb_plus_rsi"),
       ],
       inputButton("rsiLength", "RSI length"),
+      inputButton("smiPdLookback", "SMI PD lookback"),
+      inputButton("smiPaLookback", "SMI PA lookback"),
+      inputButton("smiCrossWindow", "SMI cross window"),
     ];
   } else if (page === "experiments") {
     // 🧪 GRUP 16 — semua default OFF = perilaku pabrik. Soft signals dulu, lalu gate, lalu sizing.

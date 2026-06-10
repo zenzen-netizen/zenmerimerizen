@@ -301,6 +301,14 @@ export const config = {
     // already dumped to the bottom (RSI < oversold AND price below lower
     // Bollinger) — no room left to dump into a single-side-below range.
     rejectAlreadyAtBottom: indicatorUserConfig.rejectAlreadyAtBottom ?? false,
+    // SMI (supertrend_plus_smi preset) — client-side TA from candles[], see
+    // tools/smi.js. Only the three recency windows are tunable here; the SMI
+    // math (lenK/lenD/lenE, MID, PD/PA trigger counts) is fixed in the module.
+    // PathA: cross-down within smiCrossWindow candles, preceded by a PD trigger
+    // within smiPdLookback candles before it. PathB: PA trigger within smiPaLookback.
+    smiPdLookback: indicatorUserConfig.smiPdLookback ?? 5,
+    smiPaLookback: indicatorUserConfig.smiPaLookback ?? 3,
+    smiCrossWindow: indicatorUserConfig.smiCrossWindow ?? 3,
   },
 
   // ─── Experimental Features (🧪 GRUP 16) ─────────────────────

@@ -1,5 +1,6 @@
 import { config } from "../config.js";
 import { log } from "../logger.js";
+import { evaluateSmi } from "./smi.js";
 
 const DEFAULT_INTERVALS = ["5_MINUTE"];
 const DEFAULT_CANDLES = 298;
@@ -202,6 +203,35 @@ function evaluatePreset(side, preset, payload) {
             reason: "Price rejected below a key Fibonacci level",
             signal: summary,
           };
+    case "supertrend_plus_smi": {
+      // Entry: supertrend_break AND (SMI PathA OR PathB). The SMI series is
+      // computed client-side from the full payload.candles[] (server returns no
+      // SMI). Exit: SMI logic is entry-only by design — mirror supertrend_break's
+      // exit so the preset stays a complete pair (exit only acts when exitEnabled).
+      if (side === "entry") {
+        const stEntry =
+          summary.supertrendBreakUp ||
+          (isBullish && close != null && summary.supertrendValue != null && close >= summary.supertrendValue);
+        if (!stEntry) {
+          return { confirmed: false, reason: "Supertrend not bullish (supertrend_plus_smi)", signal: summary };
+        }
+        const smiRes = evaluateSmi(payload?.candles, {
+          pdLookback: Number(config.indicators.smiPdLookback ?? 5),
+          paLookback: Number(config.indicators.smiPaLookback ?? 3),
+          crossWindow: Number(config.indicators.smiCrossWindow ?? 3),
+        });
+        return {
+          confirmed: smiRes.ok && smiRes.confirmed,
+          reason: `Supertrend ✓ + ${smiRes.reason}`,
+          signal: summary,
+        };
+      }
+      return {
+        confirmed: summary.supertrendBreakDown || (isBearish && close != null && summary.supertrendValue != null && close <= summary.supertrendValue),
+        reason: summary.supertrendBreakDown ? "Supertrend flipped bearish" : "Price is below bearish Supertrend",
+        signal: summary,
+      };
+    }
     default:
       return {
         confirmed: false,

@@ -44,6 +44,7 @@ import { getWeightsSummary } from "./signal-weights.js";
 import { bootstrapHiveMind, ensureAgentId, getHiveMindPullMode, isHiveMindEnabled, pullHiveMindLessons, pullHiveMindPresets, registerHiveMindAgent, startHiveMindBackgroundSync } from "./hivemind.js";
 import { appendDecision } from "./decision-log.js";
 import { formatSolTracker } from "./sol-tracker.js";
+import { formatPnlTracker } from "./pnl-tracker.js";
 import { getOpenRouterBalance, getOpenRouterCredits } from "./openrouter-usage.js";
 
 import { REPO_ROOT, repoPath } from "./repo-root.js";
@@ -234,7 +235,10 @@ async function buildReportForArg(arg = "") {
   if (["week", "weekly", "7d", "minggu", "mingguan"].includes(a)) return generatePeriodicBriefing("week");
   if (["month", "monthly", "30d", "bulan", "bulanan"].includes(a)) return generatePeriodicBriefing("month");
   if (["day", "today", "24h", "hari", "harian"].includes(a)) return generatePeriodicBriefing("day");
-  return buildTradeReport(getAllPerformance(), { title: "🎓 Trade Report (all-time)", statsLabel: "All-time", trendN: config.reports?.learningReportTrendN ?? 10, identity: formatIdentity() });
+  const allPerf = getAllPerformance();
+  const rep = buildTradeReport(allPerf, { title: "🎓 Trade Report (all-time)", statsLabel: "All-time", trendN: config.reports?.learningReportTrendN ?? 10, identity: formatIdentity() });
+  const tracker = formatPnlTracker(allPerf);
+  return tracker ? `${rep}\n\n${tracker}` : rep;
 }
 
 /**
@@ -2645,6 +2649,9 @@ async function telegramHandler(msg) {
         if (lastBad) msg += `\n⚠️ ${condenseRule(lastBad.rule)}`;
         if (lastGood) msg += `\n✅ ${condenseRule(lastGood.rule)}`;
       }
+      // Realized-PnL & net-of-cost tracker (1d/7d/30d) — both /wallet and /status.
+      const pnlBlock = formatPnlTracker(getAllPerformance(), { solPriceUsd: wallet?.sol_price ?? null });
+      if (pnlBlock) msg += `\n\n${pnlBlock}`;
       await sendMessage(msg).catch(() => {});
     } catch (e) {
       await sendMessage(`Error: ${e.message}`).catch(() => {});
@@ -3062,6 +3069,8 @@ Commands:
           console.log(`  ${p.pair.padEnd(16)} ${status}  fees: ${config.management.solMode ? "◎" : "$"}${p.unclaimed_fees_usd}`);
         }
         console.log();
+        const pnlBlock = formatPnlTracker(getAllPerformance(), { solPriceUsd: wallet?.sol_price ?? null });
+        if (pnlBlock) console.log(`${pnlBlock}\n`);
       });
       return;
     }

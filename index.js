@@ -34,7 +34,7 @@ import { generateBriefing, generatePeriodicBriefing } from "./briefing.js";
 import { renderGuide } from "./guide.js";
 import { getLastBriefingDate, setLastBriefingDate, getLastBriefingPinId, setLastBriefingPinId, getLastReportedMilestone, setLastReportedMilestone, getLastPeriodicBriefing, setLastPeriodicBriefing, getTrackedPosition, getTrackedPositions, setPositionInstruction, updatePnlAndCheckExits, queuePeakConfirmation, resolvePendingPeak, queueTrailingDropConfirmation, resolvePendingTrailingDrop } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
-import { listPresets, savePreset, applyPreset, getPresetDiff, deletePreset, validName, presetExists, getActiveSetupStatus } from "./preset-manager.js";
+import { listPresets, savePreset, applyPreset, getPresetDiff, deletePreset, validName, presetExists, getActiveSetupStatus, formatIdentity } from "./preset-manager.js";
 import { recordPositionSnapshot, recallForPool, addPoolNote } from "./pool-memory.js";
 import { recordCandidateSnapshots, getCandidateMomentum, formatCandidateMomentum, recordSmartWalletCounts, getSmartWalletMomentum, formatSmartWalletMomentum } from "./candidate-memory.js";
 import { checkSmartWalletsOnPool } from "./smart-wallets.js";
@@ -214,6 +214,7 @@ async function maybeFireLearningReport() {
       title: `🎓 Learning Report — ${milestone} closed positions`,
       statsLabel: "All-time",
       trendN: config.reports?.learningReportTrendN ?? 10,
+      identity: formatIdentity(),
     });
     if (telegramEnabled() && report) await sendHTML(report);
     setLastReportedMilestone(milestone);
@@ -233,7 +234,7 @@ async function buildReportForArg(arg = "") {
   if (["week", "weekly", "7d", "minggu", "mingguan"].includes(a)) return generatePeriodicBriefing("week");
   if (["month", "monthly", "30d", "bulan", "bulanan"].includes(a)) return generatePeriodicBriefing("month");
   if (["day", "today", "24h", "hari", "harian"].includes(a)) return generatePeriodicBriefing("day");
-  return buildTradeReport(getAllPerformance(), { title: "🎓 Trade Report (all-time)", statsLabel: "All-time", trendN: config.reports?.learningReportTrendN ?? 10 });
+  return buildTradeReport(getAllPerformance(), { title: "🎓 Trade Report (all-time)", statsLabel: "All-time", trendN: config.reports?.learningReportTrendN ?? 10, identity: formatIdentity() });
 }
 
 /**
@@ -1424,24 +1425,10 @@ function formatConfigSnapshot() {
 
 // Full runtime config, grouped to match SETTINGS-GUIDE.md (GRUP 1–15) + GMGN.
 // /config shows the complete surface; long output is auto-split by sendMessage.
-// Two identity layers, kept distinct (see preset-manager + SETTINGS-GUIDE):
-//   🧬 Profil  = wizard archetype (degen/moderate/safe/custom), set at setup.
-//   🗂️ Racikan = named saved snapshot loaded via /preset (e.g. mainzen_v2);
-//                "✎ ada edit manual" when the live config has since diverged.
-const PROFILE_LABELS = { degen: "🔥 Degen", moderate: "⚖️ Moderate", safe: "🛡️ Safe", custom: "✏️ Custom" };
-export function formatIdentityLines() {
-  const profile = config.profile || "moderate";
-  const profLabel = PROFILE_LABELS[profile] || profile;
-  let racikan;
-  try {
-    const s = getActiveSetupStatus();
-    racikan = s.name
-      ? `${s.name}${s.exists ? (s.edited ? " ✎ (ada edit manual)" : "") : " (file hilang)"}`
-      : "— (belum load racikan)";
-  } catch {
-    racikan = "—";
-  }
-  return `🧬 Profil: ${profLabel}\n🗂️ Racikan: ${racikan}`;
+// 🧬 Profil + 🗂️ Racikan identity — canonical formatter lives in preset-manager
+// (formatIdentity); thin wrapper here keeps the existing call sites fail-safe.
+function formatIdentityLines() {
+  try { return formatIdentity(); } catch { return "🧬 Profil: —\n🗂️ Racikan: —"; }
 }
 
 export function formatFullConfig() {
@@ -1878,13 +1865,11 @@ function pageForKey(key) {
 
 function renderSettingsMenu(page = "main") {
   const title = page === "main" ? "Settings menu" : `Settings: ${page}`;
-  const racikanShort = (() => {
-    try { const s = getActiveSetupStatus(); return s.name ? `${s.name}${s.edited ? " ✎" : ""}` : "—"; } catch { return "—"; }
-  })();
+  const identityLine = (() => { try { return formatIdentity({ compact: true }); } catch { return "🧬 Profil: — · 🗂️ Racikan: —"; } })();
   const summary = [
     title,
     "",
-    `🧬 Profil: ${PROFILE_LABELS[config.profile] || config.profile || "moderate"} · 🗂️ Racikan: ${racikanShort}`,
+    identityLine,
     `Mode: ${config.management.solMode ? "SOL" : "USD"} | Relay: ${config.api.lpAgentRelayEnabled ? "on" : "off"}`,
     `Screening: ${config.screening.source} | cats ${Array.isArray(config.screening.categories) && config.screening.categories.length ? config.screening.categories.join(",") : `single (${config.screening.category})`} | GMGN KOL ${config.gmgn.requireKol ? "required" : "preferred"}`,
     `Strategy: ${config.strategy.strategy} | deploy ${config.management.deployAmountSol} SOL | max pos ${config.risk.maxPositions}`,

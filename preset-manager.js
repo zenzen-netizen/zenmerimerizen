@@ -36,11 +36,16 @@ function readCurrent() {
   try { return readJson(USER_CONFIG_PATH); } catch { return {}; }
 }
 
-/** Flatten a config object to dotted keys, skipping internal/meta keys (`_*`). */
+// Top-level identity/meta keys that describe WHICH setup, not config values.
+// Excluded from diffs so they never affect isCurrent / edited detection.
+const META_KEYS = new Set(["preset", "activeSetup"]);
+
+/** Flatten a config object to dotted keys, skipping internal/meta keys (`_*`, identity). */
 function flatten(obj, prefix = "") {
   const out = {};
   for (const [k, v] of Object.entries(obj || {})) {
     if (k.startsWith("_")) continue;
+    if (!prefix && META_KEYS.has(k)) continue;
     const key = prefix ? `${prefix}.${k}` : k;
     if (v && typeof v === "object" && !Array.isArray(v)) Object.assign(out, flatten(v, key));
     else out[key] = Array.isArray(v) ? JSON.stringify(v) : v;
@@ -94,13 +99,21 @@ export function listPresets() {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Snapshot the current user-config.json into presets/<name>.json. */
+/**
+ * Snapshot the current user-config.json into presets/<name>.json. Saving NAMES
+ * the current config: stamps activeSetup=name on both the live config and the
+ * snapshot, so "save mainzen_v4" means "I'm now running the racikan mainzen_v4".
+ */
 export function savePreset(name) {
   if (!validName(name)) throw new Error(`invalid preset name "${name}"`);
   if (!fs.existsSync(USER_CONFIG_PATH)) throw new Error("user-config.json not found");
   ensureDir();
   const overwritten = fs.existsSync(presetPath(name));
-  fs.copyFileSync(USER_CONFIG_PATH, presetPath(name));
+  const current = readCurrent();
+  current.activeSetup = name;
+  const serialized = JSON.stringify(current, null, 2);
+  fs.writeFileSync(USER_CONFIG_PATH, serialized);
+  fs.writeFileSync(presetPath(name), serialized);
   return { name, overwritten };
 }
 
@@ -119,15 +132,31 @@ export function getPresetDiff(name) {
  */
 export function applyPreset(name, { backup = true } = {}) {
   if (!presetExists(name)) throw new Error(`preset "${name}" not found`);
-  const content = fs.readFileSync(presetPath(name), "utf8");
-  JSON.parse(content); // validate before touching anything
+  const parsed = JSON.parse(fs.readFileSync(presetPath(name), "utf8")); // validate before touching anything
+  // Stamp the loaded Racikan name so the live config self-identifies (the
+  // snapshot's own activeSetup is irrelevant). _backup = internal rollback,
+  // restore as-is so it keeps the prior identity.
+  if (name !== BACKUP_NAME) parsed.activeSetup = name;
   let backupName = null;
   if (backup && fs.existsSync(USER_CONFIG_PATH)) {
     backupName = BACKUP_NAME;
     fs.copyFileSync(USER_CONFIG_PATH, presetPath(BACKUP_NAME));
   }
-  fs.writeFileSync(USER_CONFIG_PATH, content);
+  fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(parsed, null, 2));
   return { applied: true, name, backup: backupName };
+}
+
+/**
+ * Current "Racikan" status for display/attribution: which saved snapshot the
+ * live config was loaded from, and whether it's since been hand-edited (live
+ * config diverges from that snapshot). name=null → no Racikan (pure custom/wizard).
+ */
+export function getActiveSetupStatus() {
+  const current = readCurrent();
+  const name = current.activeSetup ?? null;
+  if (!name || !presetExists(name)) return { name: name || null, edited: false, exists: false };
+  const edited = diffConfigs(current, readJson(presetPath(name))).length > 0;
+  return { name, edited, exists: true };
 }
 
 export function deletePreset(name) {

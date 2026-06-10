@@ -14,6 +14,7 @@ import {
   buildRecommendations, buildRoleCostLines, estimateGasSol, buildTradeReport,
 } from "./reports.js";
 import { formatIdentity } from "./preset-manager.js";
+import { formatPnlTracker } from "./pnl-tracker.js";
 
 const money = (n) => `${n >= 0 ? "+" : "-"}$${Math.abs(n).toFixed(2)}`;
 
@@ -289,6 +290,8 @@ export async function generateBriefing() {
       ? `📈 Win Rate (24h): ${Math.round((perfLast24h.filter(p => p.pnl_usd > 0).length / perfLast24h.length) * 100)}% (${perfLast24h.length} closed)`
       : "📈 Win Rate (24h): N/A",
     "",
+    formatPnlTracker(lessonsData.performance, { solPriceUsd: solPrice || null }),
+    "",
     formatStatsBlock(statsAll, "All-time"),
     buildVerdict(statsAll) || "",
     formatMovement(statsAll) ? "\n" + formatMovement(statsAll) : "",
@@ -397,6 +400,7 @@ export async function generatePeriodicBriefing(period = "week") {
 
   const parts = [
     report,
+    formatPnlTracker(lessonsData.performance, { solPriceUsd: solPrice || null }) || null,
     `<b>Activity (${days}d):</b> 📥 ${opened} opened | 📤 ${windowPerf.length} closed`,
     buildFeatureStatus(),
     costLines.length > 1 ? costLines.join("\n") : null,

@@ -120,25 +120,33 @@ export function getSolTracker(currentSol) {
 function fmtSol(n) { return n.toFixed(3); }
 function signedSol(n) { return `${n >= 0 ? "+" : ""}${n.toFixed(3)}`; }
 function signedPct(n) { return n == null ? "n/a" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`; }
+function dot(n) { return n > 0 ? "🟢" : n < 0 ? "🔴" : "⚪"; }
 
-/** Telegram (plain-text) SOL balance tracker block. */
+/**
+ * Telegram (plain-text) SOL balance tracker block. Compact one-line-per-window
+ * layout: the shared "Now" balance sits in the header, then each window is a
+ * single row "<label> <dot> <Δsol> (<Δ%>) ← <start bal> @ <start day>".
+ */
 export function formatSolTracker(currentSol) {
   const rows = getSolTracker(currentSol);
-  const lines = ["📊 SOL Balance Tracker", "━━━━━━━━━━━━━━━━━━━━"];
+  const now = Number.isFinite(currentSol) ? fmtSol(currentSol) : "?";
+  const lines = [`📊 SOL Tracker · Now ${now} SOL`, "━━━━━━━━━━━━━━━━━"];
   for (const r of rows) {
-    const star = r.partial ? " *" : "";
-    lines.push(`${r.label.padEnd(3)} | Start: ${labelFromKey(r.startKey)}, 00:00:01 WIB${star}`);
+    const label = r.label.padEnd(3);
     if (r.startBal == null) {
-      lines.push(`| (belum ada baseline)`);
+      lines.push(`${label} ⚪ (blm ada baseline)`);
       continue;
     }
-    lines.push(`| Start bal : ${fmtSol(r.startBal)} SOL`);
-    lines.push(`| Now       : ${fmtSol(r.now)} SOL`);
-    lines.push(`| Growth    : ${signedSol(r.deltaSol)} SOL (${signedPct(r.deltaPct)})`);
+    const star = r.partial ? " *" : "";
+    lines.push(
+      `${label} ${dot(r.deltaSol)} ${signedSol(r.deltaSol)} SOL (${signedPct(r.deltaPct)}) ← ${fmtSol(r.startBal)} @ ${labelFromKey(r.startKey)}${star}`,
+    );
   }
   if (rows.some((r) => r.partial)) {
-    lines.push("");
-    lines.push("* window belum penuh — tracking baru dimulai, baseline = hari terlama yang tercatat");
+    lines.push("* window blm penuh — baseline = hari terlama tercatat");
   }
+  // Honesty note: this tracks raw liquid SOL, not PnL — deposits/withdrawals
+  // and capital parked in positions all move it. Use /report for true PnL.
+  lines.push("ℹ️ saldo SOL mentah (termasuk deposit/tarik & modal di posisi) — buat PnL murni pakai /report");
   return lines.join("\n");
 }

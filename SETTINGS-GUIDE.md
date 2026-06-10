@@ -178,6 +178,29 @@ restart (pm2 menghidupkan lagi); kalau tidak, jalankan `pm2 restart meridian` ma
 
 ---
 
+## 🔻 Urutan Rule Close (cara bot mutusin tutup posisi)
+
+Setiap siklus, kode (`getDeterministicCloseRule()`, bukan LLM) ngecek posisi **urut dari atas ke bawah — yang PERTAMA cocok langsung menang**, sisanya nggak dicek. Ada **5 rule bernomor** + 2 jalur tambahan. Tiap baris: **mekanisme teknis** (syarat persis + nilai live) lalu **arti awam**.
+
+| # | Nama | Mekanisme teknis — syarat (nilai live) | Arti awam |
+|---|------|----------------------------------------|-----------|
+| **1** | stop loss | `pnl_pct ≤ stopLossPct` (**−12%**) | Rugi nyentuh −12% → potong, jangan makin dalam |
+| **2** | take profit | `pnl_pct ≥ takeProfitPct` (**+4%**) | Untung nyentuh +4% → kunci hasilnya |
+| **3** | pumped far above range | `active_bin > upper_bin + outOfRangeBinsToClose` (**+10 bin**) | Harga pump jauh **ke atas** atap range (>10 bin di atas). Token kabur ke atas, kita udah nggak narik fee → tutup & redeploy |
+| **4** | OOR (out of range) | `active_bin > upper_bin` **DAN** keluar ≥ `outOfRangeWaitMinutes` (**30 mnt**) | Harga keluar range ke atas **dan nyangkut** di luar >30 menit → tutup |
+| **5** | low yield | `fee_per_tvl_24h < minFeePerTvl24h` (**6%**) **DAN** umur ≥ **60 menit** | Posisi udah >1 jam tapi fee yang dihasilkan di bawah lantai 6% → recycle modal ke pool yang lebih produktif |
+
+**Plus 2 jalur tambahan (BUKAN nomor):**
+
+| Jalur | Mekanisme teknis | Arti awam |
+|-------|------------------|-----------|
+| **Trailing TP** | Mekanisme terpisah (`trailingTakeProfit`). Track **puncak** PnL; tutup kalau turun dari puncak. Live: arm di `trailingTriggerPct` (**+1.5%**), tutup kalau drop `trailingDropPct` (**1%**) dari puncak | "Biarin untung lari, tapi amanin kalau mulai balik" — kunci sebagian profit yang udah ngambang |
+| **indicator** | Exit via `exitPreset`. **Hanya jalan kalau `indicators.exitEnabled` = ON** (sekarang **OFF**). Dicek **setelah** rule 1–5 → rule keselamatan selalu menang | Sinyal teknikal (mis. RSI balik arah) ikut mutusin keluar — opsional, default mati |
+
+> ⚠️ **Catatan baca log.** Pesan close kadang nampilin konteks ekstra, contoh: `Rule 5: low yield | fee_per_tvl_24h=1.97% < minFeePerTvl24h=6%, pnl=-0.05%, oor_minutes=18`. Angka `pnl` & `oor_minutes` di situ cuma **info tambahan**, BUKAN syarat. Pemicu Rule 5 cuma dua: fee di bawah lantai **dan** umur ≥ 60 menit.
+
+---
+
 ### `stopLossPct`
 | | |
 |---|---|

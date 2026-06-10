@@ -407,7 +407,7 @@ Strategy: strategy, binsBelow, minBinsBelow, maxBinsBelow, defaultBinsBelow
 Hive/API: hiveMindUrl, hiveMindApiKey, agentId, hiveMindPullMode, publicApiKey, agentMeridianApiUrl, lpAgentRelayEnabled
 Indicators: chartIndicatorsEnabled, indicatorEntryPreset, indicatorExitPreset, indicatorExitEnabled, indicatorRejectAtBottom, rsiLength, indicatorIntervals, indicatorCandles, rsiOversold, rsiOverbought, requireAllIntervals, smiPdLookback, smiPaLookback, smiCrossWindow (last 3 only apply when indicatorEntryPreset=supertrend_plus_smi)
 Reports: learningReportEvery, learningReportTrendN
-Experiments (default off): exitLiquidityCheck, exitLiquidityMaxSlippagePct, marketRegimeGate, marketRegimeMaxDrop24hPct, candidateMomentum, narrativeProfileSignal, expectedYieldSignal, convictionSizing, convictionSizingMaxAdjustPct, counterfactualReview, counterfactualMinMcapGainPct, smartWalletMomentum
+Experiments (default off): exitLiquidityCheck, exitLiquidityMaxSlippagePct, marketRegimeGate, marketRegimeMaxDrop24hPct, candidateMomentum, narrativeProfileSignal, expectedYieldSignal, convictionSizing, convictionSizingMaxAdjustPct, counterfactualReview, counterfactualMinMcapGainPct, smartWalletMomentum, idleScreeningCooldown, idleScreeningCooldownMin
 
 Reason is optional but helpful — logged as a lesson when provided.
 

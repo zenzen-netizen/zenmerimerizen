@@ -1292,6 +1292,40 @@ Matikan (balik pabrik): `set smartWalletMomentum to false`
 
 ---
 
+### idleScreeningCooldown
+
+| | |
+|---|---|
+| **Nilai sekarang** | `false` |
+| **Default** | `false` |
+| **Format** | `true` atau `false` |
+| **Status** | 🧪 EKSPERIMEN |
+| **Penjelasan** | Ngerem screening saat **0 posisi**. Normalnya, pas lagi kosong (nggak ada posisi), tiap siklus management (default 10 menit) langsung memicu satu siklus screening penuh — termasuk panggilan LLM — walau hasilnya sering NO DEPLOY. Kalau dinyalain, pemicu screening saat-kosong itu dibatasi paling cepat tiap `idleScreeningCooldownMin` menit, jadi hemat biaya LLM pas pasar lagi sepi setup. Cron screening terjadwal tetap jalan di bawahnya (pakai stempel waktu yang sama). OFF = screening saat-kosong jalan tiap tick management (pabrik) |
+| **Catatan** | Cuma ngerem pemicu saat **0 posisi**; manajemen posisi terbuka & deteksi slot kosong (freed-slot) NGGAK kena rem. Fail-open: kalau error, screening tetap dipicu (pabrik). Berbagi `_screeningLastTriggered` dengan screening terjadwal + freed-slot |
+
+**Contoh nyalakan:**
+
+```
+set idleScreeningCooldown to true
+```
+
+Atur jeda (mis. tiap 30 menit): `set idleScreeningCooldownMin to 30`
+
+Matikan (balik pabrik): `set idleScreeningCooldown to false`
+
+---
+
+### idleScreeningCooldownMin
+
+| | |
+|---|---|
+| **Nilai sekarang** | `20` |
+| **Default** | `20` |
+| **Format** | angka (menit) |
+| **Status** | 🧪 EKSPERIMEN (pendamping `idleScreeningCooldown`) |
+| **Penjelasan** | Jeda minimum (menit) antar pemicu screening saat-kosong, **hanya kepakai kalau `idleScreeningCooldown = true`**. Mis. `20` = saat 0 posisi, screening dipicu paling cepat tiap 20 menit (bukan tiap 10 menit). `0` = praktis OFF (nggak ada jeda) |
+| **Tips** | Jangan setel lebih lama dari masa berlaku sinyal entry-mu. Untuk SMI di candle 15m dengan `smiCrossWindow=5`, sinyal valid ~75 menit — jadi `20–45` aman; di atas ~60 mulai berisiko kelewat entry transien |
+
 ---
 
 # GRUP 17 — LAPORAN, GAS & ANALITIK (Reports)

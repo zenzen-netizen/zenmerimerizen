@@ -363,6 +363,15 @@ export const config = {
     // bearish. Trusted (our own count), soft — never gates. Snapshots accrue only
     // when on; piggybacks on the candidate-memory store.
     smartWalletMomentum:         u.smartWalletMomentum         ?? false,
+    // Idle-screening cooldown — when ON, throttle the 0-position screening trigger
+    // (management cycle, index.js): during a dry spell the management tick fires a
+    // full screening cycle (incl. LLM call) every tick. This caps that to at most
+    // once per idleScreeningCooldownMin minutes. OFF (default) = factory: idle
+    // screening fires every management tick. Shares _screeningLastTriggered with the
+    // scheduled + freed-slot screening, so the scheduled cron still runs underneath.
+    // Fail-open: any error → trigger screening (factory). Never blocks management.
+    idleScreeningCooldown:       u.idleScreeningCooldown       ?? false,
+    idleScreeningCooldownMin:    u.idleScreeningCooldownMin    ?? 20,
   },
 
   // Trade reports — milestone learning report (auto every N closes) + on-demand

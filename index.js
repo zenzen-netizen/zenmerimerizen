@@ -347,6 +347,23 @@ export async function runManagementCycle({ silent = false } = {}) {
     positions = livePositions?.positions || [];
 
     if (positions.length === 0) {
+      // 🧪 Idle-screening cooldown (experiment, default OFF = factory: always trigger).
+      // When ON, throttle the idle (0-position) screening trigger so we don't fire a
+      // screening LLM call on EVERY management tick during a long dry spell. Shares
+      // _screeningLastTriggered with scheduled/freed-slot screening, so the scheduled
+      // cron still runs underneath. Fail-open: any error → fall through to triggering.
+      let idleOnCooldown = false;
+      try {
+        if (config.experiments?.idleScreeningCooldown) {
+          const cooldownMs = Math.max(0, Number(config.experiments.idleScreeningCooldownMin ?? 20)) * 60 * 1000;
+          if (cooldownMs > 0 && Date.now() - _screeningLastTriggered < cooldownMs) idleOnCooldown = true;
+        }
+      } catch { idleOnCooldown = false; }
+      if (idleOnCooldown) {
+        const waitedMin = Math.round((Date.now() - _screeningLastTriggered) / 60000);
+        log("cron", `No open positions — idle screening on cooldown (${waitedMin}m < ${config.experiments.idleScreeningCooldownMin}m), skipping`);
+        return "No open positions. Idle screening on cooldown.";
+      }
       log("cron", "No open positions — triggering screening cycle");
       mgmtReport = "No open positions. Triggering screening cycle.";
       runScreeningCycle().catch((e) => log("cron_error", `Triggered screening failed: ${e.message}`));
@@ -1584,6 +1601,8 @@ export function formatFullConfig() {
       ["counterfactualReview", fmt(c.experiments?.counterfactualReview)],
       ["counterfactualMinMcapGainPct", fmt(c.experiments?.counterfactualMinMcapGainPct)],
       ["smartWalletMomentum", fmt(c.experiments?.smartWalletMomentum)],
+      ["idleScreeningCooldown", fmt(c.experiments?.idleScreeningCooldown)],
+      ["idleScreeningCooldownMin", fmt(c.experiments?.idleScreeningCooldownMin)],
     ]),
     group("━ GRUP 17 — Laporan", [
       ["learningReportEvery", `${fmt(c.reports?.learningReportEvery)}${c.reports?.learningReportEvery > 0 ? " (ON)" : " (OFF)"}`],
@@ -1717,6 +1736,8 @@ function settingValue(key) {
     marketRegimeMaxDrop24hPct: config.experiments.marketRegimeMaxDrop24hPct,
     convictionSizing: config.experiments.convictionSizing,
     convictionSizingMaxAdjustPct: config.experiments.convictionSizingMaxAdjustPct,
+    idleScreeningCooldown: config.experiments.idleScreeningCooldown,
+    idleScreeningCooldownMin: config.experiments.idleScreeningCooldownMin,
     // 📊 GRUP 17 — Reports & Gas
     learningReportEvery: config.reports.learningReportEvery,
     learningReportTrendN: config.reports.learningReportTrendN,
@@ -1850,7 +1871,7 @@ function pageForKey(key) {
   if (key.startsWith("indicator") || key.startsWith("smi") || key === "chartIndicatorsEnabled" || key === "rsiLength" || key === "requireAllIntervals") return "indicators";
   if (["minBinsBelow", "maxBinsBelow"].includes(key)) return "strategy";
   if (["useDiscordSignals", "blockPvpSymbols", "managementIntervalMin", "screeningIntervalMin", "maxScreeningIntervalMin", "adaptiveScreening", "screeningSource", "screeningCategories", "gmgnRequireKol"].includes(key)) return "screen";
-  if (["candidateMomentum", "smartWalletMomentum", "expectedYieldSignal", "narrativeProfileSignal", "counterfactualReview", "counterfactualMinMcapGainPct", "exitLiquidityCheck", "exitLiquidityMaxSlippagePct", "marketRegimeGate", "marketRegimeMaxDrop24hPct", "convictionSizing", "convictionSizingMaxAdjustPct"].includes(key)) return "experiments";
+  if (["candidateMomentum", "smartWalletMomentum", "expectedYieldSignal", "narrativeProfileSignal", "counterfactualReview", "counterfactualMinMcapGainPct", "exitLiquidityCheck", "exitLiquidityMaxSlippagePct", "marketRegimeGate", "marketRegimeMaxDrop24hPct", "convictionSizing", "convictionSizingMaxAdjustPct", "idleScreeningCooldown", "idleScreeningCooldownMin"].includes(key)) return "experiments";
   if (["learningReportEvery", "learningReportTrendN", "gasReserveAutoTune", "gasReserveBufferDays", "gasReserveFloorSol"].includes(key)) return "reports";
   return "risk";
 }
@@ -2015,6 +2036,8 @@ function renderSettingsMenu(page = "main") {
       inputButton("marketRegimeMaxDrop24hPct", "Regime max SOL drop 24h %", { digits: 1 }),
       [toggleButton("convictionSizing", "Conviction sizing (moves capital)")],
       inputButton("convictionSizingMaxAdjustPct", "Conviction max adjust %"),
+      [toggleButton("idleScreeningCooldown", "Idle screening cooldown")],
+      inputButton("idleScreeningCooldownMin", "Idle cooldown minutes"),
     ];
   } else if (page === "reports") {
     // 📊 GRUP 17 — laporan & gas reserve auto-tune

@@ -481,6 +481,8 @@ const toolMap = {
       counterfactualReview: ["experiments", "counterfactualReview"],
       counterfactualMinMcapGainPct: ["experiments", "counterfactualMinMcapGainPct"],
       smartWalletMomentum: ["experiments", "smartWalletMomentum"],
+      idleScreeningCooldown: ["experiments", "idleScreeningCooldown"],
+      idleScreeningCooldownMin: ["experiments", "idleScreeningCooldownMin"],
       // reports
       learningReportEvery: ["reports", "learningReportEvery"],
       learningReportTrendN: ["reports", "learningReportTrendN"],

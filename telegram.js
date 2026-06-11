@@ -424,10 +424,13 @@ export async function createLiveMessage(title, intro = "Starting...") {
         state.flushTimer = null;
       }
       if (state.flushPromise) await state.flushPromise;
-      state.footer = finalText;
-      await flushFinal();
-      _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
-      typing.stop();
+      try {
+        state.footer = finalText;
+        await flushFinal();
+      } finally {
+        _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
+        typing.stop();
+      }
     },
     async fail(errorText) {
       if (state.flushTimer) {
@@ -435,10 +438,13 @@ export async function createLiveMessage(title, intro = "Starting...") {
         state.flushTimer = null;
       }
       if (state.flushPromise) await state.flushPromise;
-      state.footer = `❌ ${errorText}`;
-      await flushNow();
-      _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
-      typing.stop();
+      try {
+        state.footer = `❌ ${errorText}`;
+        await flushNow();
+      } finally {
+        _liveMessageDepth = Math.max(0, _liveMessageDepth - 1);
+        typing.stop();
+      }
     },
   };
 }

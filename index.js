@@ -369,7 +369,8 @@ export async function runManagementCycle({ silent = false } = {}) {
       if (idleOnCooldown) {
         const waitedMin = Math.round((Date.now() - _screeningLastTriggered) / 60000);
         log("cron", `No open positions — idle screening on cooldown (${waitedMin}m < ${config.experiments.idleScreeningCooldownMin}m), skipping`);
-        return "No open positions. Idle screening on cooldown.";
+        mgmtReport = "No open positions. Idle screening on cooldown.";
+        return mgmtReport;
       }
       log("cron", "No open positions — triggering screening cycle");
       mgmtReport = "No open positions. Triggering screening cycle.";
@@ -531,6 +532,11 @@ After executing, write a brief one-line result per position.
       if (mgmtReport) {
         if (liveMessage) await liveMessage.finalize(stripThink(mgmtReport)).catch(() => {});
         else sendMessage(`🔄 Management Cycle\n\n${stripThink(mgmtReport)}`).catch(() => { });
+      } else if (liveMessage) {
+        // Any return path that skipped setting a report must still close the live
+        // message, or its typing-indicator timer leaks forever (4s sendChatAction
+        // loop → Telegram 429 storm once a few leak).
+        await liveMessage.finalize("(cycle ended without report)").catch(() => {});
       }
       for (const p of positions) {
         if (!p.in_range && p.minutes_out_of_range >= config.management.outOfRangeWaitMinutes) {
@@ -1016,6 +1022,9 @@ IMPORTANT:
       if (screenReport) {
         if (liveMessage) await liveMessage.finalize(stripThink(screenReport)).catch(() => {});
         else sendMessage(`🔍 Screening Cycle\n\n${stripThink(screenReport)}`).catch(() => { });
+      } else if (liveMessage) {
+        // Same typing-indicator leak guard as the management cycle.
+        await liveMessage.finalize("(cycle ended without report)").catch(() => {});
       }
     }
     drainTelegramQueue().catch(() => {});

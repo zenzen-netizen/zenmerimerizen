@@ -2699,7 +2699,7 @@ async function telegramHandler(msg) {
         if (lastGood) msg += `\n✅ ${condenseRule(lastGood.rule)}`;
       }
       // Realized-PnL & net-of-cost tracker (1d/7d/30d) — both /wallet and /status.
-      const pnlBlock = formatPnlTracker(getAllPerformance(), { solPriceUsd: wallet?.sol_price ?? null });
+      const pnlBlock = formatPnlTracker(getModePerformance(), { solPriceUsd: wallet?.sol_price ?? null });
       if (pnlBlock) msg += `\n\n${pnlBlock}`;
       await sendMessage(msg).catch(() => {});
     } catch (e) {
@@ -3118,7 +3118,7 @@ Commands:
           console.log(`  ${p.pair.padEnd(16)} ${status}  fees: ${config.management.solMode ? "◎" : "$"}${p.unclaimed_fees_usd}`);
         }
         console.log();
-        const pnlBlock = formatPnlTracker(getAllPerformance(), { solPriceUsd: wallet?.sol_price ?? null });
+        const pnlBlock = formatPnlTracker(getModePerformance(), { solPriceUsd: wallet?.sol_price ?? null });
         if (pnlBlock) console.log(`${pnlBlock}\n`);
       });
       return;

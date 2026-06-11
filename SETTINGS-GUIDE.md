@@ -1376,6 +1376,48 @@ Matikan (balik pabrik): `set idleScreeningCooldown to false`
 
 ---
 
+### paperTrading
+
+| | |
+|---|---|
+| **Nilai sekarang** | `false` |
+| **Default** | `false` |
+| **Format** | on/off |
+| **Status** | 🧪 EKSPERIMEN (khusus DRY-RUN) |
+| **Penjelasan** | **Hanya berlaku saat `DRY_RUN=true`.** Normalnya di dry-run, begitu bot mau deploy dia cuma mengembalikan `would_deploy` lalu posisinya lenyap — nggak masuk `/positions`, nggak ada PnL, briefing kosong. Kalau dinyalain, would-deploy itu **dilacak sebagai posisi VIRTUAL** di `state.json` sehingga seluruh siklus jalan dalam simulasi: `/positions` keisi, notif Telegram deploy/close keluar dengan label 🧪, `getPositionPnl` mengembalikan PnL **SIMULASI**, aturan close (stopLoss/TP/OOR/yield) jalan, dan `recordPerformance` mengisi `lessons.json` + briefing. Gunanya: menilai perilaku ENTRY sebuah preset selama dry-run. **Akurasi:** timing entry + in-range/OOR = TEPAT (dibaca dari active bin on-chain); fee + IL = **perkiraan kasar**, BUKAN forecast profit. OFF = would-deploy lenyap seperti biasa (pabrik). Nggak ada efek saat live |
+| **Cara pakai** | Nyalakan (di box dry-run): |
+
+```
+set paperTrading to true
+```
+
+Matikan (balik pabrik): `set paperTrading to false`
+
+| **Catatan** | Mengabaikan konsentrasi likuiditas per-bin (versi akurat butuh bin-reserves SDK). Single-side SOL: kalau harga naik di atas entry, posisi tetap ~flat (SOL nggak pernah terisi jadi token) — itu memang benar secara mekanika DLMM, bukan bug. **Isolasi:** tiap catatan paper diberi tanda `paper`, dan semua jalur yang mempengaruhi live (evolusi threshold, bobot sinyal, lessons-ke-prompt, hive, pool-memory, statistik report/briefing) sekarang MENGABAIKAN catatan paper saat live — jadi kalau box ini di-flip ke live, data paper nggak mencemari keputusan maupun laporan. Saat dry-run, briefing/report justru menampilkan data paper (memang itu datanya), dengan label 🧪 simulasi |
+
+---
+
+### usePaperHistoryWhenLive
+
+| | |
+|---|---|
+| **Nilai sekarang** | `false` |
+| **Default** | `false` |
+| **Format** | on/off |
+| **Status** | 🧪 EKSPERIMEN (khusus LIVE — hanya dibaca saat `DRY_RUN` mati) |
+| **Penjelasan** | Mengatur APAKAH riwayat paper-trading boleh dipakai sebagai rujukan saat bot sudah **live**. **OFF (pabrik)** = riwayat paper diabaikan total saat live; bot live seakan mulai dari nol (catatan paper tetap tersimpan, cuma tak dipakai). **ON** = pelajaran (lessons) hasil paper boleh muncul di prompt bot live sebagai **referensi lunak ber-stempel 🧪 dengan kredibilitas rendah** — TETAP dikecualikan dari evolusi threshold, bobot sinyal, statistik report/briefing, dan push hive. Jadi bot live bisa "mengingat" pelajaran dari masa dry-run tanpa mencemari jalur mekanis/laporan apa pun. Nggak ada efek saat masih dry-run (paper memang datanya) |
+| **Cara pakai** | Nyalakan (nanti, setelah live, kalau mau): |
+
+```
+set usePaperHistoryWhenLive to true
+```
+
+Matikan (balik pabrik): `set usePaperHistoryWhenLive to false`
+
+| **Catatan** | Kredibilitas paper: tinggi untuk disiplin entry/timing/in-range-OOR (dibaca dari chain), rendah untuk besaran PnL absolut. Karena itu bahkan saat ON, paper cuma jadi teks pertimbangan ber-label, bukan angka yang menggerakkan aturan otomatis |
+
+---
+
 # GRUP 17 — LAPORAN, GAS & ANALITIK (Reports)
 
 > Sistem laporan performa & biaya. Semua laporan pakai satu mesin analitik (`reports.js`) jadi metriknya konsisten.

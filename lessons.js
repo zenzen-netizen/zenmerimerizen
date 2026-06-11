@@ -10,6 +10,8 @@ import fs from "fs";
 import { log } from "./logger.js";
 import { getSharedLessonsForPrompt, pushHiveLesson, pushHivePerformanceEvent } from "./hivemind.js";
 import { repoPath } from "./repo-root.js";
+import { isPaperMode } from "./paper-trading.js";
+import { config } from "./config.js";
 
 const USER_CONFIG_PATH = repoPath("user-config.json");
 
@@ -195,21 +197,25 @@ export async function recordPerformance(perf) {
 
   data.performance.push(entry);
 
-  // Derive and store a lesson
+  // Derive and store a lesson. Paper (sim) lessons are TAGGED so live consumers
+  // can exclude them (getLessonsForPrompt) — and a sim lesson is never pushed to
+  // the shared hive.
   const lesson = derivLesson(entry);
   if (lesson) {
+    if (entry.paper) lesson.paper = true;
     data.lessons.push(lesson);
-    log("lessons", `New lesson: ${lesson.rule}`);
+    log("lessons", `New lesson${entry.paper ? " [paper]" : ""}: ${lesson.rule}`);
   }
 
   save(data);
-  if (lesson) {
+  if (lesson && !entry.paper) {
     void pushHiveLesson(lesson);
   }
 
-  // Update pool-level memory
+  // Update pool-level memory — LIVE closes only. Paper outcomes never touch
+  // pool-memory.json so they can't bias live screening once you flip to live.
   // (return lesson so callers can include it in close notifications)
-  if (perf.pool) {
+  if (perf.pool && !entry.paper) {
     const { recordPoolDeploy } = await import("./pool-memory.js");
     recordPoolDeploy(perf.pool, {
       pool_name: perf.pool_name,
@@ -235,10 +241,13 @@ export async function recordPerformance(perf) {
     });
   }
 
-  // Evolve thresholds every 5 closed positions
-  if (data.performance.length % MIN_EVOLVE_POSITIONS === 0) {
-    const { config, reloadScreeningThresholds } = await import("./config.js");
-    const result = evolveThresholds(data.performance, config);
+  // Evolve thresholds every 5 closed positions — LIVE records only. Sim (paper)
+  // closes never move real screening thresholds or Darwinian signal weights, even
+  // if this box is later flipped to live with paper history still on file.
+  const livePerf = data.performance.filter((p) => !p.paper);
+  if (livePerf.length > 0 && livePerf.length % MIN_EVOLVE_POSITIONS === 0) {
+    const { reloadScreeningThresholds } = await import("./config.js");
+    const result = evolveThresholds(livePerf, config);
     if (result?.changes && Object.keys(result.changes).length > 0) {
       reloadScreeningThresholds();
       log("evolve", `Auto-evolved thresholds: ${JSON.stringify(result.changes)}`);
@@ -247,19 +256,22 @@ export async function recordPerformance(perf) {
     // Darwinian signal weight recalculation
     if (config.darwin?.enabled) {
       const { recalculateWeights } = await import("./signal-weights.js");
-      const wResult = recalculateWeights(data.performance, config);
+      const wResult = recalculateWeights(livePerf, config);
       if (wResult.changes.length > 0) {
         log("evolve", `Darwin: adjusted ${wResult.changes.length} signal weight(s)`);
       }
     }
   }
 
-  void pushHivePerformanceEvent({
-    ...entry,
-    base_mint: perf.base_mint || null,
-    fees_earned_sol: perf.fees_earned_sol || 0,
-    eventId: `close:${perf.position}:${entry.recorded_at}`,
-  });
+  // Sim closes are never broadcast to the shared hive (would contaminate other bots).
+  if (!entry.paper) {
+    void pushHivePerformanceEvent({
+      ...entry,
+      base_mint: perf.base_mint || null,
+      fees_earned_sol: perf.fees_earned_sol || 0,
+      eventId: `close:${perf.position}:${entry.recorded_at}`,
+    });
+  }
 
   return lesson || null;
 }
@@ -681,6 +693,13 @@ export function getLessonsForPrompt(opts = {}) {
   const { agentType = "GENERAL", maxLessons } = opts;
 
   const data = load();
+  // Sim (paper) lessons: shown while dry-running (it's the whole dataset), but
+  // EXCLUDED from the live prompt unless opted in via usePaperHistoryWhenLive.
+  // When the opt-in is on they're kept but flagged 🧪 in fmt() so the model treats
+  // them as low-credibility soft reference — never as live, mechanical truth.
+  if (!isPaperMode() && !config.experiments?.usePaperHistoryWhenLive) {
+    data.lessons = data.lessons.filter((l) => !l.paper);
+  }
   if (data.lessons.length === 0) return null;
 
   // Smaller caps for automated cycles — they don't need the full lesson history
@@ -746,7 +765,8 @@ function fmt(lessons) {
   return lessons.map((l) => {
     const date = l.created_at ? l.created_at.slice(0, 16).replace("T", " ") : "unknown";
     const pin  = l.pinned ? "📌 " : "";
-    return `${pin}[${l.outcome.toUpperCase()}] [${date}] ${l.rule}`;
+    const sim  = l.paper ? "🧪 " : "";  // sim/paper-derived → low-credibility soft reference
+    return `${pin}${sim}[${l.outcome.toUpperCase()}] [${date}] ${l.rule}`;
   }).join("\n");
 }
 
@@ -797,6 +817,20 @@ export function getPerformanceHistory({ hours = 24, limit = 50 } = {}) {
 /** Full closed-position performance array (for the reports engine). */
 export function getAllPerformance() {
   return load().performance || [];
+}
+
+/**
+ * Performance records scoped to the CURRENT run mode, so sim (paper) and live
+ * records never mix in anything user-facing. Paper mode → only paper records
+ * (that's the whole dataset while dry-running). Live → only real records, so a
+ * paper history left on file can never contaminate live stats/reports/recs.
+ * Use this everywhere a report/briefing/milestone reads closed-position perf.
+ */
+export function getModePerformance() {
+  const all = load().performance || [];
+  return isPaperMode()
+    ? all.filter((p) => p.paper)
+    : all.filter((p) => !p.paper);
 }
 
 /**

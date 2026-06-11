@@ -407,7 +407,7 @@ Strategy: strategy, binsBelow, minBinsBelow, maxBinsBelow, defaultBinsBelow
 Hive/API: hiveMindUrl, hiveMindApiKey, agentId, hiveMindPullMode, publicApiKey, agentMeridianApiUrl, lpAgentRelayEnabled
 Indicators: chartIndicatorsEnabled, indicatorEntryPreset, indicatorExitPreset, indicatorExitEnabled, indicatorRejectAtBottom, rsiLength, indicatorIntervals, indicatorCandles, rsiOversold, rsiOverbought, requireAllIntervals, smiPdLookback, smiPaLookback, smiCrossWindow (last 3 only apply when indicatorEntryPreset=supertrend_plus_smi)
 Reports: learningReportEvery, learningReportTrendN
-Experiments (default off): exitLiquidityCheck, exitLiquidityMaxSlippagePct, marketRegimeGate, marketRegimeMaxDrop24hPct, candidateMomentum, narrativeProfileSignal, expectedYieldSignal, convictionSizing, convictionSizingMaxAdjustPct, counterfactualReview, counterfactualMinMcapGainPct, smartWalletMomentum, idleScreeningCooldown, idleScreeningCooldownMin
+Experiments (default off): exitLiquidityCheck, exitLiquidityMaxSlippagePct, marketRegimeGate, marketRegimeMaxDrop24hPct, candidateMomentum, narrativeProfileSignal, expectedYieldSignal, convictionSizing, convictionSizingMaxAdjustPct, counterfactualReview, counterfactualMinMcapGainPct, smartWalletMomentum, idleScreeningCooldown, idleScreeningCooldownMin, paperTrading (DRY-RUN-only: simulate virtual positions instead of vanishing would-deploy), usePaperHistoryWhenLive (LIVE-only opt-in: let paper-derived lessons appear in the live prompt as low-credibility soft reference; never touches thresholds/reports/hive)
 
 Reason is optional but helpful — logged as a lesson when provided.
 

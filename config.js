@@ -382,6 +382,25 @@ export const config = {
     // Fail-open: any error → trigger screening (factory). Never blocks management.
     idleScreeningCooldown:       u.idleScreeningCooldown       ?? false,
     idleScreeningCooldownMin:    u.idleScreeningCooldownMin    ?? 20,
+    // Paper trading — DRY-RUN ONLY. When ON (and DRY_RUN=true), a would-deploy
+    // is tracked as a VIRTUAL position (state.json) instead of vanishing, so the
+    // full lifecycle runs in simulation: /positions populates, Telegram fires a
+    // 🧪-labelled deploy/close notice, getMyPositions/getPositionPnl return a
+    // SIMULATED PnL (timing + in-range/OOR read from on-chain active bin = exact;
+    // fees + IL = rough approximation, NOT a profit forecast), close rules run,
+    // and recordPerformance feeds lessons.json + briefings. Lets you evaluate a
+    // preset's ENTRY behavior in dry-run. No effect when live (DRY_RUN!=true) or
+    // off (factory: would-deploy returns and vanishes). See paper-trading.js.
+    paperTrading:                u.paperTrading                ?? false,
+    // Use paper history when live — only consulted once LIVE (DRY_RUN off). OFF
+    // (default/factory) = a paper history left on file is fully ignored when live:
+    // sim records never reach the prompt, thresholds, reports or hive (they're
+    // already isolated by the `paper` tag). ON = paper-derived LESSONS may be
+    // injected into the live prompt as a 🧪-flagged, LOW-CREDIBILITY soft reference
+    // ONLY — still excluded from threshold evolution, signal weights, reports and
+    // hive. Lets a live bot "remember" what dry-run taught it without contaminating
+    // any mechanical/reporting path. No effect while dry-running (paper is the data).
+    usePaperHistoryWhenLive:     u.usePaperHistoryWhenLive     ?? false,
   },
 
   // Trade reports — milestone learning report (auto every N closes) + on-demand

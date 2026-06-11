@@ -119,8 +119,8 @@ HARD RULE (no exceptions):
 RISK SIGNALS (guidelines — use judgment):
 - top10 > ${config.screening.maxTop10Pct}% → concentrated, risky
 - PVP symbol conflict (same exact symbol across multiple mints) → major negative. Avoid unless the setup is exceptional and clearly stronger than the competing symbol variants.
-- no narrative + no smart wallets → skip
-- If only one candidate is returned, do not deploy by default. Treat it as "maybe nothing is good enough"; deploy only if it still has a strong narrative, smart-wallet confirmation, and clean pool metrics.
+- no narrative AND no smart wallets → skip. Zero smart wallets ALONE is never a reason to skip — it is a soft signal, NOT a hard filter. A candidate with a strong, specific narrative + clean metrics (organic ok, fees ≥ threshold, top10 ok) QUALIFIES even with zero smart wallets. Smart wallets are a PLUS that adds conviction, not a requirement.
+- If only one candidate is returned, do not deploy by default. Treat it as "maybe nothing is good enough"; deploy only if it still has a strong narrative AND clean pool metrics. (Smart-wallet confirmation is a bonus here, not a requirement — a strong narrative + clean metrics is enough.)
 
 NARRATIVE QUALITY (your main judgment call):
 - GOOD: specific origin — real event, viral moment, named entity, active community

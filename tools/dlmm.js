@@ -20,13 +20,19 @@ import {
   recordClaim,
   recordClose,
   getTrackedPosition,
+  getTrackedPositions,
   minutesOutOfRange,
   syncOpenPositions,
   ensureDeployedAt,
 } from "../state.js";
 import { recordPerformance } from "../lessons.js";
 import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
-import { normalizeMint } from "./wallet.js";
+import { normalizeMint, getWalletBalances } from "./wallet.js";
+import {
+  isPaperMode,
+  makePaperPositionId,
+  simulatePaperMetrics,
+} from "../paper-trading.js";
 import { appendDecision } from "../decision-log.js";
 import { getAndClearStagedSignals } from "../signal-tracker.js";
 import { trackTxGas } from "../gas-tracker.js";
@@ -764,6 +770,66 @@ export async function deployPosition({
   }
 
   if (process.env.DRY_RUN === "true") {
+    // 🧪 Paper trading: track the would-deploy as a virtual position so the full
+    // lifecycle runs in simulation. Off → unchanged would_deploy (factory).
+    if (isPaperMode()) {
+      try {
+        const pMinBinId = activeBin.binId - activeBinsBelow;
+        const pMaxBinId = isSingleSidedSol ? activeBin.binId : activeBin.binId + activeBinsAbove;
+        const pMinPrice = Number(getPriceOfBinByBinId(pMinBinId, actualBinStep).toString());
+        const pMaxPrice = Number(getPriceOfBinByBinId(pMaxBinId, actualBinStep).toString());
+        const baseFactor = pool.lbPair.parameters?.baseFactor ?? 0;
+        const pBaseFee = base_fee ?? (baseFactor > 0
+          ? parseFloat((baseFactor * actualBinStep / 1e6 * 100).toFixed(4))
+          : null);
+        const coveragePct = activePrice > 0 ? ((activePrice - pMinPrice) / activePrice) * 100 : null;
+        const displayName = pool_name || `${baseMint.slice(0, 6)}/SOL`;
+        const paperId = makePaperPositionId(pool_address);
+
+        trackPosition({
+          position: paperId,
+          pool: pool_address,
+          pool_name: displayName,
+          strategy: activeStrategy,
+          bin_range: { min: pMinBinId, max: pMaxBinId, active: activeBin.binId },
+          amount_sol: finalAmountY,
+          amount_x: finalAmountX,
+          active_bin: activeBin.binId,
+          bin_step: actualBinStep,
+          volatility: normalizedVolatility,
+          fee_tvl_ratio: fee_tvl_ratio ?? null,
+          organic_score: organic_score ?? null,
+          narrative_category: narrative_category ?? null,
+          signal_snapshot: { base_mint: baseMint },
+          entry_mcap: entry_mcap ?? null,
+          entry_tvl: entry_tvl ?? null,
+          entry_volume: entry_volume ?? null,
+          entry_holders: entry_holders ?? null,
+        });
+
+        log("deploy", `[PAPER] tracked virtual position ${paperId} in ${displayName}`);
+        return {
+          success: true,
+          dry_run: true,
+          paper: true,
+          position: paperId,
+          pool: pool_address,
+          pool_name: `🧪 ${displayName}`,
+          base_mint: baseMint,
+          strategy: activeStrategy,
+          bin_step: actualBinStep,
+          base_fee: pBaseFee,
+          bins_below: activeBinsBelow,
+          bins_above: activeBinsAbove,
+          amount_y: finalAmountY,
+          price_range: `${pMinPrice.toPrecision(4)}–${pMaxPrice.toPrecision(4)}`,
+          range_coverage: coveragePct != null ? `-${coveragePct.toFixed(1)}%` : null,
+          message: "PAPER deploy — virtual position tracked",
+        };
+      } catch (e) {
+        log("deploy_warn", `paper deploy tracking failed, falling back to would_deploy: ${e.message}`);
+      }
+    }
     return {
       dry_run: true,
       would_deploy: {
@@ -1165,6 +1231,27 @@ async function fetchDlmmPnlForPool(poolAddress, walletAddress) {
 export async function getPositionPnl({ pool_address, position_address }) {
   pool_address = normalizeMint(pool_address);
   position_address = normalizeMint(position_address);
+  // 🧪 Paper trading: simulate PnL for a virtual position from the on-chain bin.
+  if (isPaperMode() && String(position_address).startsWith("paper_")) {
+    const tracked = getTrackedPosition(position_address);
+    if (!tracked) return { error: "Paper position not found" };
+    const m = await computePaperMetrics(tracked);
+    if (!m) return { error: "Paper PnL simulation unavailable" };
+    return {
+      pnl_usd: m.pnl_usd,
+      pnl_pct: m.pnl_pct,
+      current_value_usd: m.position_value_usd,
+      unclaimed_fee_usd: m.fees_usd,
+      all_time_fees_usd: m.fees_usd,
+      fee_per_tvl_24h: tracked.fee_tvl_ratio != null ? Math.round(Number(tracked.fee_tvl_ratio) * 100) / 100 : 0,
+      in_range: m.in_range,
+      lower_bin: m.lowerBin,
+      upper_bin: m.upperBin,
+      active_bin: m.currentBin,
+      age_minutes: m.minutes_held,
+      paper: true,
+    };
+  }
   const walletAddress = getWallet().publicKey.toString();
   if (shouldUseLpAgentRelay()) {
     try {
@@ -1357,8 +1444,191 @@ async function fetchRawOpenPositionsFromMeridian({ walletAddress, agentId }) {
   };
 }
 
+// ─── Paper trading (DRY-RUN-only simulation) ───────────────────
+// All of the below runs ONLY when isPaperMode() (paperTrading flag + DRY_RUN).
+// Fail-open everywhere: any error returns null/empty so the caller behaves as if
+// the position were untouched — a sim glitch never blocks the management loop.
+
+let _paperSolPrice = 0;
+let _paperSolPriceAt = 0;
+const PAPER_SOL_PRICE_TTL = 5 * 60 * 1000;
+
+/** Cached USD/SOL for the sim's USD fields. Works on an empty wallet (price-only). */
+async function getPaperSolPriceUsd() {
+  if (_paperSolPrice > 0 && Date.now() - _paperSolPriceAt < PAPER_SOL_PRICE_TTL) return _paperSolPrice;
+  try {
+    const bal = await getWalletBalances({});
+    const p = Number(bal?.sol_price);
+    if (Number.isFinite(p) && p > 0) { _paperSolPrice = p; _paperSolPriceAt = Date.now(); }
+  } catch { /* keep last good price */ }
+  return _paperSolPrice;
+}
+
+/** Read the on-chain active bin for a tracked virtual position and run the sim. */
+async function computePaperMetrics(tracked) {
+  try {
+    const { getPriceOfBinByBinId } = await getDLMM();
+    const pool = await getPool(tracked.pool);
+    const activeBin = await pool.getActiveBin();
+    const binStep = tracked.bin_step ?? pool.lbPair.binStep;
+    const currentBin = activeBin.binId;
+    const entryBin = tracked.active_bin_at_deploy ?? tracked.bin_range?.active ?? currentBin;
+    const lowerBin = tracked.bin_range?.min ?? null;
+    const upperBin = tracked.bin_range?.max ?? entryBin;
+    const priceAt = (bin) => Number(getPriceOfBinByBinId(bin, binStep).toString());
+    const currentPrice = priceAt(currentBin);
+    const entryPrice = priceAt(entryBin);
+    const lowerPrice = lowerBin != null ? priceAt(lowerBin) : entryPrice;
+
+    const minutesHeld = tracked.deployed_at
+      ? Math.floor((Date.now() - new Date(tracked.deployed_at).getTime()) / 60000)
+      : 0;
+    const minutesOOR = minutesOutOfRange(tracked.position) || 0;
+
+    const m = simulatePaperMetrics({
+      entryPrice, currentPrice, lowerPrice,
+      lowerBin, upperBin, currentBin,
+      amountSol: tracked.amount_sol,
+      solPrice: await getPaperSolPriceUsd(),
+      feeTvlRatio: tracked.fee_tvl_ratio,
+      minutesInRange: Math.max(0, minutesHeld - minutesOOR),
+      minutesHeld,
+      windowMinutes: 24 * 60, // fee_active_tvl_ratio behaves as a ~24h rate
+    });
+    return { ...m, currentBin, lowerBin, upperBin, entryPrice, currentPrice };
+  } catch (e) {
+    log("paper_warn", `paper metrics failed for ${String(tracked.position).slice(0, 14)}: ${e.message}`);
+    return null;
+  }
+}
+
+/** Shape a sim result into the same row getMyPositions returns for real positions. */
+function buildPaperPositionRow(tracked, m) {
+  const ftr = tracked.fee_tvl_ratio != null ? Math.round(Number(tracked.fee_tvl_ratio) * 100) / 100 : null;
+  return {
+    position: tracked.position,
+    pool: tracked.pool,
+    pair: tracked.pool_name || String(tracked.pool).slice(0, 8),
+    base_mint: tracked.signal_snapshot?.base_mint || null,
+    lower_bin: m.lowerBin,
+    upper_bin: m.upperBin,
+    active_bin: m.currentBin,
+    in_range: m.in_range,
+    unclaimed_fees_usd: m.fees_usd,
+    total_value_usd: m.position_value_usd,
+    total_value_true_usd: m.position_value_usd,
+    collected_fees_usd: 0,
+    collected_fees_true_usd: 0,
+    pnl_usd: m.pnl_usd,
+    pnl_true_usd: m.pnl_usd,
+    pnl_pct: m.pnl_pct,
+    pnl_pct_derived: m.pnl_pct,
+    pnl_pct_diff: 0,
+    pnl_pct_suspicious: false,
+    unclaimed_fees_true_usd: m.fees_usd,
+    fee_per_tvl_24h: ftr,
+    age_minutes: m.minutes_held,
+    minutes_out_of_range: minutesOutOfRange(tracked.position),
+    instruction: tracked.instruction ?? null,
+    paper: true,
+  };
+}
+
+/** Build the full getMyPositions payload from tracked virtual positions. */
+async function getPaperPositions({ silent = false } = {}) {
+  let walletAddress = null;
+  try { walletAddress = getWallet().publicKey.toString(); } catch { /* dry-run, may be unset */ }
+  const open = getTrackedPositions(true).filter((p) => String(p.position).startsWith("paper_"));
+  const positions = [];
+  for (const tracked of open) {
+    const m = await computePaperMetrics(tracked);
+    if (!m) continue;
+    if (m.in_range === false) markOutOfRange(tracked.position);
+    else if (m.in_range === true) markInRange(tracked.position);
+    positions.push(buildPaperPositionRow(tracked, m));
+  }
+  syncOpenPositions(positions.map((p) => p.position));
+  if (!silent) log("positions", `[PAPER] ${positions.length} virtual position(s) simulated`);
+  return { wallet: walletAddress, total_positions: positions.length, positions, request_id: null, paper: true };
+}
+
+/** Finalize a virtual close: record simulated performance + mark closed. */
+async function closePaperPosition(position_address, reason) {
+  const tracked = getTrackedPosition(position_address);
+  if (!tracked) {
+    return { dry_run: true, paper: true, would_close: position_address, message: "Paper position not found" };
+  }
+  const m = await computePaperMetrics(tracked);
+  const minutesHeld = m?.minutes_held ?? (tracked.deployed_at
+    ? Math.floor((Date.now() - new Date(tracked.deployed_at).getTime()) / 60000)
+    : 0);
+  const minutesOOR = minutesOutOfRange(position_address) || 0;
+  const poolAddress = tracked.pool;
+  const poolName = tracked.pool_name || String(poolAddress).slice(0, 8);
+  const baseMint = tracked.signal_snapshot?.base_mint || null;
+  const pnlUsd = m?.pnl_usd ?? 0;
+  const pnlPct = m?.pnl_pct ?? 0;
+
+  let derivedLesson = null;
+  try {
+    derivedLesson = await recordPerformance({
+      position: position_address,
+      pool: poolAddress,
+      pool_name: poolName,
+      base_mint: baseMint,
+      strategy: tracked.strategy,
+      bin_range: tracked.bin_range,
+      bin_step: tracked.bin_step || null,
+      volatility: tracked.volatility ?? null,
+      fee_tvl_ratio: tracked.fee_tvl_ratio || null,
+      organic_score: tracked.organic_score || null,
+      amount_sol: tracked.amount_sol,
+      deployed_at: tracked.deployed_at || null,
+      narrative_category: tracked.narrative_category || null,
+      shadow_signals: tracked.shadow_signals || null,
+      peak_pnl_pct: tracked.peak_pnl_pct ?? null,
+      trough_pnl_pct: tracked.trough_pnl_pct ?? null,
+      fees_earned_usd: m?.fees_usd ?? 0,
+      final_value_usd: m?.position_value_usd ?? 0,
+      initial_value_usd: m?.initial_value_usd ?? 0,
+      minutes_in_range: Math.max(0, minutesHeld - minutesOOR),
+      minutes_held: minutesHeld,
+      close_reason: reason || "paper close",
+      signal_snapshot: resolvePerformanceSignalSnapshot({ poolAddress, baseMint, tracked }),
+      entry_mcap: tracked.entry_mcap ?? null,
+      entry_tvl: tracked.entry_tvl ?? null,
+      entry_volume: tracked.entry_volume ?? null,
+      entry_holders: tracked.entry_holders ?? null,
+      paper: true,
+    });
+  } catch (e) {
+    log("paper_warn", `paper recordPerformance failed: ${e.message}`);
+  }
+  recordClose(position_address, reason || "paper close");
+  log("close", `[PAPER] closed ${String(position_address).slice(0, 14)} @ ${pnlPct.toFixed(2)}% (simulated)`);
+  return {
+    success: true,
+    dry_run: true,
+    paper: true,
+    position: position_address,
+    pool: poolAddress,
+    pool_name: `🧪 ${poolName}`,
+    base_mint: baseMint,
+    pnl_usd: pnlUsd,
+    pnl_pct: pnlPct,
+    close_reason: reason || "paper close",
+    derived_lesson: derivedLesson,
+    message: "PAPER close — simulated PnL recorded",
+  };
+}
+
 // ─── Get My Positions ──────────────────────────────────────────
 export async function getMyPositions({ force = false, silent = false, wallet_address = null } = {}) {
+  // 🧪 Paper trading: in dry-run, synthesize the list from tracked virtual
+  // positions (the on-chain portfolio API has nothing for an idle wallet).
+  if (isPaperMode() && !wallet_address) {
+    return await getPaperPositions({ silent });
+  }
   let walletOverride = null;
   try {
     walletOverride = wallet_address ? new PublicKey(wallet_address).toString() : null;
@@ -1716,6 +1986,10 @@ export async function claimFees({ position_address }) {
 export async function closePosition({ position_address, reason }) {
   position_address = normalizeMint(position_address);
   if (process.env.DRY_RUN === "true") {
+    // 🧪 Paper trading: finalize the virtual position (record sim PnL → lessons).
+    if (isPaperMode() && String(position_address).startsWith("paper_")) {
+      return await closePaperPosition(position_address, reason);
+    }
     return { dry_run: true, would_close: position_address, message: "DRY RUN — no transaction sent" };
   }
 

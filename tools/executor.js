@@ -483,6 +483,8 @@ const toolMap = {
       smartWalletMomentum: ["experiments", "smartWalletMomentum"],
       idleScreeningCooldown: ["experiments", "idleScreeningCooldown"],
       idleScreeningCooldownMin: ["experiments", "idleScreeningCooldownMin"],
+      paperTrading: ["experiments", "paperTrading"],
+      usePaperHistoryWhenLive: ["experiments", "usePaperHistoryWhenLive"],
       // reports
       learningReportEvery: ["reports", "learningReportEvery"],
       learningReportTrendN: ["reports", "learningReportTrendN"],

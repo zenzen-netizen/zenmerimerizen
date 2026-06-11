@@ -12,7 +12,7 @@ import { confirmIndicatorPreset } from "./tools/chart-indicators.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
 import { config, reloadScreeningThresholds, computeDeployAmount, persistConfigChange } from "./config.js";
 import { getGasStats } from "./gas-tracker.js";
-import { evolveThresholds, getPerformanceSummary, getAllPerformance, listLessons, classifySession, currentWibSession } from "./lessons.js";
+import { evolveThresholds, getPerformanceSummary, getModePerformance, listLessons, classifySession, currentWibSession } from "./lessons.js";
 import { buildTradeReport } from "./reports.js";
 import { executeTool, registerCronRestarter } from "./tools/executor.js";
 import {
@@ -36,6 +36,7 @@ import { getLastBriefingDate, setLastBriefingDate, getLastBriefingPinId, setLast
 import { getActiveStrategy } from "./strategy-library.js";
 import { listPresets, savePreset, applyPreset, getPresetDiff, deletePreset, validName, presetExists } from "./preset-manager.js";
 import { recordPositionSnapshot, recallForPool, addPoolNote } from "./pool-memory.js";
+import { isPaperMode } from "./paper-trading.js";
 import { recordCandidateSnapshots, getCandidateMomentum, formatCandidateMomentum, recordSmartWalletCounts, getSmartWalletMomentum, formatSmartWalletMomentum } from "./candidate-memory.js";
 import { checkSmartWalletsOnPool } from "./smart-wallets.js";
 import { getTokenNarrative, getTokenInfo } from "./tools/token.js";
@@ -205,7 +206,7 @@ async function maybeFireLearningReport() {
   try {
     const every = config.reports?.learningReportEvery ?? 0;
     if (!every || every < 1) return;
-    const perf = getAllPerformance();
+    const perf = getModePerformance();  // mode-scoped: paper closes milestone in dry-run, live in live
     const milestone = Math.floor(perf.length / every) * every;
     if (milestone < every) return;                       // first milestone not reached
     if (milestone <= getLastReportedMilestone()) return; // already reported this milestone
@@ -232,7 +233,7 @@ async function buildReportForArg(arg = "") {
   if (["week", "weekly", "7d", "minggu", "mingguan"].includes(a)) return generatePeriodicBriefing("week");
   if (["month", "monthly", "30d", "bulan", "bulanan"].includes(a)) return generatePeriodicBriefing("month");
   if (["day", "today", "24h", "hari", "harian"].includes(a)) return generatePeriodicBriefing("day");
-  return buildTradeReport(getAllPerformance(), { title: "🎓 Trade Report (all-time)", statsLabel: "All-time", trendN: config.reports?.learningReportTrendN ?? 10 });
+  return buildTradeReport(getModePerformance(), { title: "🎓 Trade Report (all-time)", statsLabel: "All-time", trendN: config.reports?.learningReportTrendN ?? 10 });
 }
 
 /**
@@ -370,9 +371,11 @@ export async function runManagementCycle({ silent = false } = {}) {
       return mgmtReport;
     }
 
-    // Snapshot + load pool memory
+    // Snapshot + load pool memory. Sim (paper) positions never WRITE to
+    // pool-memory.json (would bias live screening if this box is flipped live);
+    // reads (recallForPool) stay — they just return whatever live history exists.
     const positionData = positions.map((p) => {
-      recordPositionSnapshot(p.pool, p);
+      if (!isPaperMode()) recordPositionSnapshot(p.pool, p);
       return { ...p, recall: recallForPool(p.pool) };
     });
 
@@ -1603,6 +1606,8 @@ export function formatFullConfig() {
       ["smartWalletMomentum", fmt(c.experiments?.smartWalletMomentum)],
       ["idleScreeningCooldown", fmt(c.experiments?.idleScreeningCooldown)],
       ["idleScreeningCooldownMin", fmt(c.experiments?.idleScreeningCooldownMin)],
+      ["paperTrading", `${fmt(c.experiments?.paperTrading)}${c.experiments?.paperTrading ? " (DRY-RUN sim)" : ""}`],
+      ["usePaperHistoryWhenLive", `${fmt(c.experiments?.usePaperHistoryWhenLive)}${c.experiments?.usePaperHistoryWhenLive ? " (live: paper=soft ref)" : ""}`],
     ]),
     group("━ GRUP 17 — Laporan", [
       ["learningReportEvery", `${fmt(c.reports?.learningReportEvery)}${c.reports?.learningReportEvery > 0 ? " (ON)" : " (OFF)"}`],
@@ -1738,6 +1743,8 @@ function settingValue(key) {
     convictionSizingMaxAdjustPct: config.experiments.convictionSizingMaxAdjustPct,
     idleScreeningCooldown: config.experiments.idleScreeningCooldown,
     idleScreeningCooldownMin: config.experiments.idleScreeningCooldownMin,
+    paperTrading: config.experiments.paperTrading,
+    usePaperHistoryWhenLive: config.experiments.usePaperHistoryWhenLive,
     // 📊 GRUP 17 — Reports & Gas
     learningReportEvery: config.reports.learningReportEvery,
     learningReportTrendN: config.reports.learningReportTrendN,
@@ -1871,7 +1878,7 @@ function pageForKey(key) {
   if (key.startsWith("indicator") || key.startsWith("smi") || key === "chartIndicatorsEnabled" || key === "rsiLength" || key === "requireAllIntervals") return "indicators";
   if (["minBinsBelow", "maxBinsBelow"].includes(key)) return "strategy";
   if (["useDiscordSignals", "blockPvpSymbols", "managementIntervalMin", "screeningIntervalMin", "maxScreeningIntervalMin", "adaptiveScreening", "screeningSource", "screeningCategories", "gmgnRequireKol"].includes(key)) return "screen";
-  if (["candidateMomentum", "smartWalletMomentum", "expectedYieldSignal", "narrativeProfileSignal", "counterfactualReview", "counterfactualMinMcapGainPct", "exitLiquidityCheck", "exitLiquidityMaxSlippagePct", "marketRegimeGate", "marketRegimeMaxDrop24hPct", "convictionSizing", "convictionSizingMaxAdjustPct", "idleScreeningCooldown", "idleScreeningCooldownMin"].includes(key)) return "experiments";
+  if (["candidateMomentum", "smartWalletMomentum", "expectedYieldSignal", "narrativeProfileSignal", "counterfactualReview", "counterfactualMinMcapGainPct", "exitLiquidityCheck", "exitLiquidityMaxSlippagePct", "marketRegimeGate", "marketRegimeMaxDrop24hPct", "convictionSizing", "convictionSizingMaxAdjustPct", "idleScreeningCooldown", "idleScreeningCooldownMin", "paperTrading", "usePaperHistoryWhenLive"].includes(key)) return "experiments";
   if (["learningReportEvery", "learningReportTrendN", "gasReserveAutoTune", "gasReserveBufferDays", "gasReserveFloorSol"].includes(key)) return "reports";
   return "risk";
 }
@@ -2038,6 +2045,8 @@ function renderSettingsMenu(page = "main") {
       inputButton("convictionSizingMaxAdjustPct", "Conviction max adjust %"),
       [toggleButton("idleScreeningCooldown", "Idle screening cooldown")],
       inputButton("idleScreeningCooldownMin", "Idle cooldown minutes"),
+      [toggleButton("paperTrading", "Paper trading (DRY-RUN sim)")],
+      [toggleButton("usePaperHistoryWhenLive", "Use paper history when live (soft ref)")],
     ];
   } else if (page === "reports") {
     // 📊 GRUP 17 — laporan & gas reserve auto-tune

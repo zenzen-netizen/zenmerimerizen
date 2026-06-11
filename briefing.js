@@ -9,6 +9,7 @@ import { getDeployedPoolAddresses } from "./pool-memory.js";
 import { getWalletBalances } from "./tools/wallet.js";
 import { getGasStats } from "./gas-tracker.js";
 import { getLlmCostStats } from "./llm-cost-tracker.js";
+import { isPaperMode } from "./paper-trading.js";
 import {
   computeTradeStats, formatStatsBlock, formatBreakdown, formatMovement, buildVerdict,
   buildRecommendations, buildRoleCostLines, estimateGasSol, buildTradeReport,
@@ -52,8 +53,11 @@ const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 // older lessons (outside the 24h window), the last threshold adjustment,
 // and avg in-range efficiency (the one all-time stat not printed elsewhere).
 function buildLearningSection(lessonsData, since) {
-  const allLessons = lessonsData.lessons || [];
-  const allPerf = lessonsData.performance || [];
+  // Mode scope: while dry-running show ONLY sim (paper) rows; live shows ONLY real
+  // rows. Keeps sim history from ever leaking into the live learning section.
+  const keepMode = (x) => (isPaperMode() ? !!x.paper : !x.paper);
+  const allLessons = (lessonsData.lessons || []).filter(keepMode);
+  const allPerf = (lessonsData.performance || []).filter(keepMode);
 
   // Recent lessons are already listed under "Lessons Learned (24h)" — keep only older ones.
   const older = allLessons.filter(l => !l.created_at || new Date(l.created_at) <= since);
@@ -127,10 +131,18 @@ function buildFeatureStatus() {
 // bottom line "did trading cover ALL costs?". `windowLabel` describes the period.
 function buildCostSection({ costData, balance, credits, llmStats, gasSol, gasIsEst = true, solPrice, netPnlUsd, windowLabel = "24h", windowDays = 1 }) {
   if (!costData && !balance && !credits && !gasSol && !llmStats?.hasData) return null;
-  const lines = [`<b>💵 Costs (${esc(windowLabel)}):</b>`];
+  // Paper mode: no real on-chain spend exists, so gas is a SIMULATED would-be-if-live
+  // cost and the LLM number must come ONLY from local per-call tracking (the OpenRouter
+  // account feed is shared with the live bot → contaminated on this box).
+  const paper = isPaperMode();
+  const lines = [`<b>💵 Costs (${esc(windowLabel)})${paper ? " — 🧪 simulasi" : ""}:</b>`];
+  // Dry-run/paper only: spell out which number is real vs simulated so the line is
+  // never misread as live spend. Disappears automatically once live.
+  if (paper) lines.push(`<i>💡 LLM = biaya nyata (tracking lokal) · gas = estimasi bila live</i>`);
 
   // ── LLM, per role — prefer LOCAL per-call tracking (true per-role, no external
-  //    feed); fall back to OpenRouter activity (model→role), then the daily total. ──
+  //    feed); fall back to OpenRouter activity (model→role), then the daily total.
+  //    In paper mode the fallback is suppressed: only the real local cost is shown. ──
   let llmUsd = 0;
   if (llmStats?.hasData) {
     llmUsd = llmStats.totalCost;
@@ -138,6 +150,8 @@ function buildCostSection({ costData, balance, credits, llmStats, gasSol, gasIsE
     for (const [role, s] of Object.entries(llmStats.byRole).sort((a, b) => b[1].cost - a[1].cost)) {
       lines.push(`  • ${esc(role)}: $${s.cost.toFixed(4)} (${s.calls} calls)`);
     }
+  } else if (paper) {
+    lines.push(`🤖 LLM: $0.0000 (belum ada call tercatat lokal)`);
   } else {
     const llmCost = costData && costData.calls > 0 ? costData.totalCost : (balance?.usageDaily ?? null);
     llmUsd = llmCost ?? 0;
@@ -150,10 +164,13 @@ function buildCostSection({ costData, balance, credits, llmStats, gasSol, gasIsE
     }
   }
 
-  // ── Gas: real (from gas-tracker) when available, else estimate ──
+  // ── Gas: real (from gas-tracker) when available, else estimate. In paper mode no
+  //    real fee is ever paid → it's an explicit simulation of the live cost. ──
   const gasUsd = gasSol != null && solPrice ? gasSol * solPrice : null;
   if (gasSol > 0) {
-    lines.push(`⛽ Gas${gasIsEst ? " (est)" : ""}: ${gasIsEst ? "~" : ""}${gasSol.toFixed(4)} SOL${gasUsd != null ? ` (${gasIsEst ? "~" : ""}$${gasUsd.toFixed(2)})` : ""}`);
+    const gasTag = paper ? " (simulasi)" : gasIsEst ? " (est)" : "";
+    const approx = paper || gasIsEst ? "~" : "";
+    lines.push(`⛽ Gas${gasTag}: ${approx}${gasSol.toFixed(4)} SOL${gasUsd != null ? ` (${approx}$${gasUsd.toFixed(2)})` : ""}${paper ? " — estimasi biaya bila live" : ""}`);
     // gasReserve runway — how long the configured reserve lasts at this burn rate.
     const reserve = config.management?.gasReserve;
     if (reserve > 0 && windowDays > 0) {
@@ -172,7 +189,7 @@ function buildCostSection({ costData, balance, credits, llmStats, gasSol, gasIsE
   if (Number.isFinite(netPnlUsd) && totalCost > 0) {
     const real = netPnlUsd - totalCost;
     const verdict = real >= 0 ? "✅ profit bersih" : "🔴 rugi setelah biaya";
-    lines.push(`📊 Net − semua biaya: ${money(netPnlUsd)} − $${totalCost.toFixed(4)} (LLM $${llmUsd.toFixed(4)}${gasUsd != null ? ` + gas $${gasUsd.toFixed(2)}` : ""}) = ${money(real)} ${verdict}`);
+    lines.push(`📊 Net − semua biaya${paper ? " (simulasi)" : ""}: ${money(netPnlUsd)} − $${totalCost.toFixed(4)} (LLM $${llmUsd.toFixed(4)}${gasUsd != null ? ` + gas $${gasUsd.toFixed(2)}` : ""}) = ${money(real)} ${verdict}`);
   }
 
   if (credits?.balance != null) {
@@ -246,13 +263,16 @@ export async function generateBriefing() {
   const openedLast24h = allPositions.filter(p => new Date(p.deployed_at) > last24h);
   const closedLast24h = allPositions.filter(p => p.closed && new Date(p.closed_at) > last24h);
 
+  // Mode scope: dry-run → sim rows only, live → real rows only (no cross-mix).
+  const keepMode = (x) => (isPaperMode() ? !!x.paper : !x.paper);
+
   // 2. Performance Activity (from performance log)
-  const perfLast24h = (lessonsData.performance || []).filter(p => new Date(p.recorded_at) > last24h);
+  const perfLast24h = (lessonsData.performance || []).filter(p => keepMode(p) && new Date(p.recorded_at) > last24h);
   const totalPnLUsd = perfLast24h.reduce((sum, p) => sum + (p.pnl_usd || 0), 0);
   const totalFeesUsd = perfLast24h.reduce((sum, p) => sum + (p.fees_earned_usd || 0), 0);
 
   // 3. Lessons — separate genuine trading lessons from config-change audit noise.
-  const lessonsLast24h = (lessonsData.lessons || []).filter(l => new Date(l.created_at) > last24h);
+  const lessonsLast24h = (lessonsData.lessons || []).filter(l => keepMode(l) && new Date(l.created_at) > last24h);
   const tradingLessons = lessonsLast24h.filter(l => l.sourceType !== "config_change" && !(l.tags || []).includes("config_change"));
   const configChangeCount = lessonsLast24h.length - tradingLessons.length;
 
@@ -339,7 +359,9 @@ export async function generatePeriodicBriefing(period = "week") {
   const now = Date.now();
   const since = now - days * 86400000;
 
-  const windowPerf = (lessonsData.performance || []).filter((p) => new Date(p.closed_at || p.recorded_at || 0).getTime() >= since);
+  // Mode scope: dry-run → sim rows only, live → real rows only (no cross-mix).
+  const keepMode = (p) => (isPaperMode() ? !!p.paper : !p.paper);
+  const windowPerf = (lessonsData.performance || []).filter((p) => keepMode(p) && new Date(p.closed_at || p.recorded_at || 0).getTime() >= since);
   const allPositions = Object.values(state.positions || {});
   const opened = allPositions.filter((p) => new Date(p.deployed_at).getTime() >= since).length;
   const netPnl = windowPerf.reduce((s, p) => s + (p.pnl_usd || 0), 0);
@@ -357,8 +379,11 @@ export async function generatePeriodicBriefing(period = "week") {
   // Prefer local per-call LLM tracking (true per-role); fall back to the account
   // usage figure for the window when there's no local data yet.
   const llmStats = getLlmCostStats(since);
+  // Paper mode: gas is a simulated would-be-if-live cost, and LLM must come ONLY from
+  // local tracking (the account-wide OpenRouter window is shared with the live bot).
+  const paper = isPaperMode();
   const llmWindow = period === "month" ? balance?.usageMonthly : period === "week" ? balance?.usageWeekly : balance?.usageDaily;
-  const llmTotal = llmStats.hasData ? llmStats.totalCost : (llmWindow ?? 0);
+  const llmTotal = llmStats.hasData ? llmStats.totalCost : (paper ? 0 : (llmWindow ?? 0));
 
   const report = buildTradeReport(windowPerf, {
     title: `${emoji} ${label} Briefing — last ${days}d`,
@@ -366,17 +391,21 @@ export async function generatePeriodicBriefing(period = "week") {
     trendN: period === "month" ? 10 : 7,
   });
 
-  const costLines = [`<b>💵 Costs (${days}d):</b>`];
+  const costLines = [`<b>💵 Costs (${days}d)${paper ? " — 🧪 simulasi" : ""}:</b>`];
   if (llmStats.hasData) {
     costLines.push(`🤖 LLM: $${llmStats.totalCost.toFixed(4)} (${llmStats.calls} calls)`);
     for (const [role, s] of Object.entries(llmStats.byRole).sort((a, b) => b[1].cost - a[1].cost)) {
       costLines.push(`  • ${role}: $${s.cost.toFixed(4)} (${s.calls} calls)`);
     }
+  } else if (paper) {
+    costLines.push(`🤖 LLM: $0.0000 (belum ada call tercatat lokal)`);
   } else if (llmWindow != null) {
     costLines.push(`🤖 LLM (${period}): $${llmWindow.toFixed(4)}`);
   }
   if (gasSol > 0) {
-    costLines.push(`⛽ Gas${gasIsEst ? " (est)" : ""}: ${gasIsEst ? "~" : ""}${gasSol.toFixed(4)} SOL${gasUsd != null ? ` (${gasIsEst ? "~" : ""}$${gasUsd.toFixed(2)})` : ""}`);
+    const gasTag = paper ? " (simulasi)" : gasIsEst ? " (est)" : "";
+    const approx = paper || gasIsEst ? "~" : "";
+    costLines.push(`⛽ Gas${gasTag}: ${approx}${gasSol.toFixed(4)} SOL${gasUsd != null ? ` (${approx}$${gasUsd.toFixed(2)})` : ""}${paper ? " — estimasi biaya bila live" : ""}`);
     const reserve = config.management?.gasReserve;
     const dailyBurn = gasSol / days;
     if (reserve > 0 && dailyBurn > 0) {
@@ -388,7 +417,7 @@ export async function generatePeriodicBriefing(period = "week") {
   const totalCost = llmTotal + (gasUsd ?? 0);
   if (totalCost > 0) {
     const real = netPnl - totalCost;
-    costLines.push(`📊 Net − biaya: ${money(netPnl)} − $${totalCost.toFixed(4)} = ${money(real)} ${real >= 0 ? "✅" : "🔴"}`);
+    costLines.push(`📊 Net − biaya${paper ? " (simulasi)" : ""}: ${money(netPnl)} − $${totalCost.toFixed(4)} = ${money(real)} ${real >= 0 ? "✅" : "🔴"}`);
   }
   if (credits?.balance != null) costLines.push(`💳 Saldo OpenRouter: $${credits.balance.toFixed(2)}`);
 

@@ -213,12 +213,22 @@ function buildTimeProfileSection() {
   const lines = [header];
   const rated = prof.sessions.filter((s) => s.count > 0);
   if (rated.length === 0) return null;
-  for (const s of rated) {
+  // Fair rank (same idea as reports.js groupStats): shrink each session's avg
+  // PnL% toward the overall mean with K pseudo-trades, so a 2-sample 100% run
+  // can't outrank a well-sampled solid session. All sessions stay listed —
+  // ranking only reorders, never hides.
+  const K = 5;
+  const totalN = rated.reduce((s, x) => s + x.count, 0);
+  const globalAvg = totalN > 0 ? rated.reduce((s, x) => s + x.avg_pnl_pct * x.count, 0) / totalN : 0;
+  const ranked = rated
+    .map((s) => ({ ...s, _score: (s.avg_pnl_pct * s.count + K * globalAvg) / (s.count + K) }))
+    .sort((a, b) => b._score - a._score);
+  ranked.forEach((s, i) => {
     const enough = s.count >= prof.min_samples;
     const tag = !enough ? " <i>(few samples)</i>" : "";
     const hold = fmtHold(s.avg_hold_min);
-    lines.push(`  • ${esc(s.label)}: ${s.win_rate_pct}% win, avg ${s.avg_pnl_pct >= 0 ? "+" : ""}${s.avg_pnl_pct}% (${s.count})${hold ? `, hold ${hold}` : ""}${tag}`);
-  }
+    lines.push(`  ${i + 1}. ${esc(s.label)}: ${s.win_rate_pct}% win, avg ${s.avg_pnl_pct >= 0 ? "+" : ""}${s.avg_pnl_pct}% (${s.count})${hold ? `, hold ${hold}` : ""}${tag}`);
+  });
   return lines.join("\n");
 }
 

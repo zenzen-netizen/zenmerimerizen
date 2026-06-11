@@ -260,7 +260,11 @@ Closed-position performance is bucketed by the **open hour** (deploy time) in **
 `performance[]` array (from lessons.json via `getAllPerformance()`):
 - `computeTradeStats(records)` — net/ROI, win rate, **profit factor**, avg win vs avg loss,
   **payoff ratio**, expectancy, **max drawdown**, worst loss streak, biggest win/loss, and
-  per-strategy/session/narrative breakdowns.
+  per-strategy/session/narrative/**close-rule** breakdowns (`classifyCloseRule()` maps the
+  free-text close_reason to canonical rules; session rows show WIB hour ranges via
+  `sessionLabel()`), plus a `price_movement` block — raw price excursion vs entry
+  (peak/drawdown, winners' MAE) recorded per poll from active-bin movement
+  (`price_peak_pct`/`price_trough_pct` in state.js → performance records) for SL tuning.
 - `buildRecommendations(perf, stats)` — **profitability-aware**: refuses to suggest bigger
   size while net-negative or profit factor weak; flags the leak (lopsided payoff, tail loss,
   worst strategy, weak session/narrative). Replaced the old win-rate-only logic in the briefing.

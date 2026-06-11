@@ -84,6 +84,29 @@ export function computeTradeStats(records = []) {
     };
   }
 
+  // ── Raw PRICE excursion (token price vs entry, from bin movement) ──
+  // Separate from the PnL pair above: this is how far PRICE ran up / drew down
+  // while open, regardless of fees/IL. Winners' deepest dip (MAE — maximum
+  // adverse excursion) is the key input for stop-loss tuning: an SL tighter
+  // than what winners typically survive cuts winners; one far looser than any
+  // winner ever needed just rides losers down.
+  const withPrice = perf.filter((p) => Number.isFinite(p.price_peak_pct) && Number.isFinite(p.price_trough_pct));
+  let priceMovement = null;
+  if (withPrice.length >= 4) {
+    const winnersP = withPrice.filter((p) => p.pnl_usd > 0);
+    const losersP = withPrice.filter((p) => p.pnl_usd <= 0);
+    priceMovement = {
+      samples: withPrice.length,
+      avg_peak_pct: r2(mean(withPrice.map((p) => p.price_peak_pct))),
+      avg_trough_pct: r2(mean(withPrice.map((p) => p.price_trough_pct))),
+      worst_trough_pct: r2(Math.min(...withPrice.map((p) => p.price_trough_pct))),
+      best_peak_pct: r2(Math.max(...withPrice.map((p) => p.price_peak_pct))),
+      win_avg_trough_pct: winnersP.length ? r2(mean(winnersP.map((p) => p.price_trough_pct))) : null,
+      win_worst_trough_pct: winnersP.length ? r2(Math.min(...winnersP.map((p) => p.price_trough_pct))) : null,
+      loss_avg_trough_pct: losersP.length ? r2(mean(losersP.map((p) => p.price_trough_pct))) : null,
+    };
+  }
+
   const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : (grossProfit > 0 ? Infinity : null);
   const payoffRatio = (avgWinUsd != null && avgLossUsd != null && avgLossUsd !== 0)
     ? avgWinUsd / Math.abs(avgLossUsd) : null;
@@ -114,6 +137,7 @@ export function computeTradeStats(records = []) {
     max_drawdown_usd: r2(maxDD),
     max_consecutive_losses: maxLossStreak,
     movement,
+    price_movement: priceMovement,
     by_strategy: groupStats(perf, "strategy"),
     by_session: groupStats(perf, "open_session"),
     by_narrative: groupStats(perf, "narrative_category"),
@@ -124,13 +148,29 @@ export function computeTradeStats(records = []) {
 /** PnL movement block (peak → exit give-back, trough). Null until data accrues. */
 export function formatMovement(st) {
   const m = st?.movement;
-  if (!m) return null;
-  const lines = [
-    `<b>📈 PnL Movement (${m.samples} tracked):</b>`,
-    `  avg peak ${pct(m.avg_peak_pct)} → avg exit ${pct(m.avg_exit_pct)} (give-back ${pct(m.giveback_pct)})`,
-  ];
-  if (m.avg_trough_pct != null) lines.push(`  avg trough (worst dip) ${pct(m.avg_trough_pct)}`);
-  if (m.left_on_table > 0) lines.push(`  ${m.left_on_table} trade(s) gave back ≥5pp from peak`);
+  const pm = st?.price_movement;
+  if (!m && !pm) return null;
+  const lines = [];
+  if (m) {
+    lines.push(
+      `<b>📈 PnL Movement (${m.samples} tracked):</b>`,
+      `  avg peak ${pct(m.avg_peak_pct)} → avg exit ${pct(m.avg_exit_pct)} (give-back ${pct(m.giveback_pct)})`,
+    );
+    if (m.avg_trough_pct != null) lines.push(`  avg trough (worst dip) ${pct(m.avg_trough_pct)}`);
+    if (m.left_on_table > 0) lines.push(`  ${m.left_on_table} trade(s) gave back ≥5pp from peak`);
+  }
+  if (pm) {
+    lines.push(
+      `<b>💹 Price Movement vs entry (${pm.samples} tracked):</b>`,
+      `  avg peak ${pct(pm.avg_peak_pct)} (best ${pct(pm.best_peak_pct)}) | avg drawdown ${pct(pm.avg_trough_pct)} (worst ${pct(pm.worst_trough_pct)})`,
+    );
+    if (pm.win_avg_trough_pct != null) {
+      lines.push(`  winners dipped avg ${pct(pm.win_avg_trough_pct)} (deepest ${pct(pm.win_worst_trough_pct)}) before recovering — SL must survive this`);
+    }
+    if (pm.loss_avg_trough_pct != null) {
+      lines.push(`  losers dipped avg ${pct(pm.loss_avg_trough_pct)}`);
+    }
+  }
   return lines.join("\n");
 }
 

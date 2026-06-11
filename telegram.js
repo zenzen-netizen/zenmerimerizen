@@ -594,15 +594,35 @@ export async function notifyDeploy({ pair, amountSol, position, tx, priceRange, 
   );
 }
 
-export async function notifyClose({ pair, pnlUsd, pnlPct, reason, lesson }) {
+export async function notifyClose({ pair, pnlUsd, pnlPct, reason, lesson, feesUsd }) {
   if (hasActiveLiveMessage()) return;
   const safePair = escapeHtml(pair || "?");
   const sign = pnlUsd >= 0 ? "+" : "";
   const reasonLine = reason ? `\n📋 <b>Reason:</b> ${escapeHtml(String(reason).slice(0, 200))}` : "";
   const lessonLine = lesson ? `\n📚 <b>Lesson:</b> <i>${escapeHtml(String(lesson).slice(0, 300))}</i>` : "";
+  // PnL already includes claimed fees — say so, so a softened/worsened number
+  // is never mistaken for "fees not yet counted".
+  const feeLine = feesUsd != null && feesUsd > 0
+    ? `\n💎 Fees earned: +$${feesUsd.toFixed(2)} (sudah termasuk dalam PnL)`
+    : "";
+  // Stop-loss/trailing reasons embed the PnL reading that TRIGGERED the close
+  // (e.g. "Stop loss: PnL -12.16% <= -12%"). The realized PnL can land far away
+  // when price keeps moving during the ~1 min close execution — flag the gap so
+  // it reads as execution slippage, not a math error.
+  let gapLine = "";
+  const trig = reason ? String(reason).match(/PnL (-?\d+(?:\.\d+)?)%/) : null;
+  if (trig && pnlPct != null) {
+    const triggerPct = parseFloat(trig[1]);
+    const gap = Math.abs((pnlPct ?? 0) - triggerPct);
+    if (Number.isFinite(gap) && gap >= 5) {
+      gapLine = `\n⚠️ Trigger di ${triggerPct.toFixed(2)}%, realisasi ${(pnlPct ?? 0).toFixed(2)}% — harga terus bergerak selama eksekusi close (gap ${gap.toFixed(1)}pp).`;
+    }
+  }
   await sendHTML(
     `🔒 <b>Closed</b> ${safePair}\n` +
     `PnL: ${sign}$${(pnlUsd ?? 0).toFixed(2)} (${sign}${(pnlPct ?? 0).toFixed(2)}%)` +
+    feeLine +
+    gapLine +
     reasonLine +
     lessonLine
   );

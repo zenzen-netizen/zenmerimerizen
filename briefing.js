@@ -280,7 +280,8 @@ export async function generateBriefing() {
 
   // 4. Current State + all-time stats (risk metrics, not just win-rate)
   const openPositions = allPositions.filter(p => !p.closed);
-  const statsAll = computeTradeStats(lessonsData.performance || []);
+  const modePerf = (lessonsData.performance || []).filter(keepMode);
+  const statsAll = computeTradeStats(modePerf);
 
   // 5. Cost data (LLM + SOL price for gas USD) + gas estimate over the 24h window
   const [costData, balance, credits, wallet] = await Promise.all([
@@ -310,7 +311,7 @@ export async function generateBriefing() {
       ? `📈 Win Rate (24h): ${Math.round((perfLast24h.filter(p => p.pnl_usd > 0).length / perfLast24h.length) * 100)}% (${perfLast24h.length} closed)`
       : "📈 Win Rate (24h): N/A",
     "",
-    formatPnlTracker(lessonsData.performance, { solPriceUsd: solPrice || null }),
+    formatPnlTracker(modePerf, { solPriceUsd: solPrice || null }),
     "",
     formatStatsBlock(statsAll, "All-time"),
     buildVerdict(statsAll) || "",
@@ -337,7 +338,7 @@ export async function generateBriefing() {
     "",
     formatBreakdown(statsAll, { sessions: false }) || "",
     "",
-    buildRecommendations(lessonsData.performance, statsAll, {
+    buildRecommendations(modePerf, statsAll, {
       gasPerTradeUsd: solPrice && perfLast24h.length ? (gasSol * solPrice) / perfLast24h.length : 0,
     }) || "",
     "────────────────"
@@ -429,7 +430,7 @@ export async function generatePeriodicBriefing(period = "week") {
 
   const parts = [
     report,
-    formatPnlTracker(lessonsData.performance, { solPriceUsd: solPrice || null }) || null,
+    formatPnlTracker((lessonsData.performance || []).filter(keepMode), { solPriceUsd: solPrice || null }) || null,
     `<b>Activity (${days}d):</b> 📥 ${opened} opened | 📤 ${windowPerf.length} closed`,
     buildFeatureStatus(),
     costLines.length > 1 ? costLines.join("\n") : null,

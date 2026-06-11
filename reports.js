@@ -107,6 +107,10 @@ export function computeTradeStats(records = []) {
     };
   }
 
+  // Canonical close-rule per record, so the breakdown can show how much each
+  // exit rule (SL / trailing / TP / OOR / …) contributes to the overall book.
+  const perfWithRule = perf.map((p) => ({ ...p, close_rule: classifyCloseRule(p.close_reason) }));
+
   const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : (grossProfit > 0 ? Infinity : null);
   const payoffRatio = (avgWinUsd != null && avgLossUsd != null && avgLossUsd !== 0)
     ? avgWinUsd / Math.abs(avgLossUsd) : null;
@@ -142,7 +146,27 @@ export function computeTradeStats(records = []) {
     by_session: groupStats(perf, "open_session"),
     by_narrative: groupStats(perf, "narrative_category"),
     by_setup: groupStats(perf, "active_setup"),
+    by_close_rule: groupStats(perfWithRule, "close_rule"),
   };
+}
+
+/**
+ * Map a free-text close_reason to a canonical exit rule. Reasons are messy
+ * ("Trailing TP: Stop loss: PnL -12% <= -12%", "⚡ Trailing TP: Out of range…"),
+ * so the SPECIFIC cause is matched before the generic trailing-TP wrapper the
+ * exit pipeline prepends.
+ */
+export function classifyCloseRule(reason) {
+  const r = String(reason || "").toLowerCase();
+  if (!r) return "lainnya";
+  if (r.includes("stop loss")) return "stopLoss";
+  if (r.includes("out of range")) return "outOfRange (OOR)";
+  if (r.includes("low yield")) return "lowYield (R5)";
+  if (r.includes("take profit")) return "takeProfit (R2)";
+  if (r.includes("pumped far above range") || r.includes("above range")) return "pumpedAboveRange (R3)";
+  if (r.includes("indicator")) return "indicatorExit";
+  if (r.includes("trailing tp") || (r.includes("dropped") && r.includes("peak"))) return "trailingTP";
+  return "manual/lainnya";
 }
 
 /** PnL movement block (peak → exit give-back, trough). Null until data accrues. */
@@ -231,8 +255,8 @@ function fmtHold(m) {
 export function formatBreakdown(st, opts = {}) {
   if (!st || st.count === 0) return null;
   const out = [];
-  const block = (title, rows, { minCount = 1, keyFmt = (k) => k } = {}) => {
-    const shown = rows.filter((r) => r.count >= minCount).slice(0, 5);
+  const block = (title, rows, { minCount = 1, keyFmt = (k) => k, maxRows = 5 } = {}) => {
+    const shown = rows.filter((r) => r.count >= minCount).slice(0, maxRows);
     if (shown.length === 0) return;
     out.push(`<b>${title}</b>`);
     shown.forEach((r, i) => {
@@ -244,6 +268,8 @@ export function formatBreakdown(st, opts = {}) {
   // Session keys render with their WIB hour range ("siang" → "11–15 siang").
   if (opts.sessions !== false) block("🕒 By session (WIB):", st.by_session, { keyFmt: sessionLabel });
   if (st.by_narrative.length) block("🏷️ By narrative:", st.by_narrative);
+  // Exit-rule contribution: which hard-stop/close rule produced how much of the book.
+  if (st.by_close_rule && st.by_close_rule.length) block("🛑 By close rule:", st.by_close_rule, { maxRows: 8 });
   return out.length ? out.join("\n") : null;
 }
 

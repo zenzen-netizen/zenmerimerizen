@@ -116,6 +116,12 @@ function makePositionRecord({
     notes: [],
     peak_pnl_pct: 0,
     trough_pnl_pct: 0, // lowest PnL% seen while open — for report movement analysis
+    // Raw PRICE excursion vs entry (from active-bin movement, exact in DLMM):
+    // highest/lowest % the token price moved while open. Unlike the PnL pair
+    // above this ignores fees/IL — it's the input for tuning stopLossPct against
+    // how deep entries actually dip before recovering.
+    price_peak_pct: 0,
+    price_trough_pct: 0,
     pending_peak_pnl_pct: null,
     pending_peak_started_at: null,
     pending_trailing_current_pnl_pct: null,
@@ -489,6 +495,23 @@ export function updatePnlAndCheckExits(position_address, positionData, mgmtConfi
   if (currentPnlPct != null && !pnl_pct_suspicious) {
     if (pos.trough_pnl_pct == null || currentPnlPct < pos.trough_pnl_pct) {
       pos.trough_pnl_pct = currentPnlPct;
+      changed = true;
+    }
+  }
+
+  // Track raw PRICE excursion vs entry. Bin movement is an exact price measure in
+  // DLMM (each bin = bin_step/10000 price step), so this needs no extra API call
+  // and no recheck machinery: price_pct = ((1 + step/1e4)^(bin_now − bin_entry) − 1)·100.
+  const binNow = positionData.active_bin;
+  const binEntry = pos.active_bin_at_deploy ?? pos.bin_range?.active ?? null;
+  if (Number.isFinite(binNow) && Number.isFinite(binEntry) && Number.isFinite(pos.bin_step) && pos.bin_step > 0) {
+    const priceMovePct = (Math.pow(1 + pos.bin_step / 10000, binNow - binEntry) - 1) * 100;
+    if (pos.price_peak_pct == null || priceMovePct > pos.price_peak_pct) {
+      pos.price_peak_pct = Math.round(priceMovePct * 100) / 100;
+      changed = true;
+    }
+    if (pos.price_trough_pct == null || priceMovePct < pos.price_trough_pct) {
+      pos.price_trough_pct = Math.round(priceMovePct * 100) / 100;
       changed = true;
     }
   }

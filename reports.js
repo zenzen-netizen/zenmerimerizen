@@ -13,7 +13,7 @@
  */
 
 import { config } from "./config.js";
-import { getHourlyProfile, classifySession, getNarrativeProfile, classifyNarrative } from "./lessons.js";
+import { getHourlyProfile, classifySession, getNarrativeProfile, classifyNarrative, sessionLabel } from "./lessons.js";
 
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const fin = (arr) => arr.filter((n) => Number.isFinite(n));
@@ -231,17 +231,18 @@ function fmtHold(m) {
 export function formatBreakdown(st, opts = {}) {
   if (!st || st.count === 0) return null;
   const out = [];
-  const block = (title, rows, minCount = 1) => {
+  const block = (title, rows, { minCount = 1, keyFmt = (k) => k } = {}) => {
     const shown = rows.filter((r) => r.count >= minCount).slice(0, 5);
     if (shown.length === 0) return;
     out.push(`<b>${title}</b>`);
     shown.forEach((r, i) => {
-      out.push(`  ${i + 1}. ${esc(r.key)}: ${money(r.net_usd)} net, ${r.win_rate_pct}% win, avg/trade ${money(r.avg_net_usd)} (${r.count})`);
+      out.push(`  ${i + 1}. ${esc(keyFmt(r.key))}: ${money(r.net_usd)} net, ${r.win_rate_pct}% win, avg/trade ${money(r.avg_net_usd)} (${r.count})`);
     });
   };
   block("📦 By strategy:", st.by_strategy);
   if (st.by_setup && st.by_setup.length) block("🗂️ By racikan:", st.by_setup);
-  if (opts.sessions !== false) block("🕒 By session (WIB):", st.by_session);
+  // Session keys render with their WIB hour range ("siang" → "11–15 siang").
+  if (opts.sessions !== false) block("🕒 By session (WIB):", st.by_session, { keyFmt: sessionLabel });
   if (st.by_narrative.length) block("🏷️ By narrative:", st.by_narrative);
   return out.length ? out.join("\n") : null;
 }

@@ -78,6 +78,11 @@ export function currentWibSession(date = new Date()) {
   return sessionForHour((date.getUTCHours() + WIB_OFFSET_HOURS) % 24);
 }
 
+/** Display label (with WIB hour range) for a session key, e.g. "siang" → "11–15 siang". */
+export function sessionLabel(key) {
+  return SESSIONS.find((s) => s.key === key)?.label || key;
+}
+
 function sanitizeLessonText(text, maxLen = MAX_MANUAL_LESSON_LENGTH) {
   if (text == null) return null;
   const cleaned = String(text)

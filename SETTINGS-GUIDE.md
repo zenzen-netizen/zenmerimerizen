@@ -45,16 +45,41 @@ config.js            ← Bot membaca semua file di atas (JANGAN EDIT)
 
 ---
 
-## Config Presets (Simpan & Ganti Profil Config)
+## 🧬 Profil vs 🗂️ Racikan (dua konsep "preset" yang beda!)
 
-Sebuah **config preset** = snapshot LENGKAP `user-config.json` yang disimpan di folder
-`presets/<nama>.json`. Gunanya: simpan beberapa "profil" bot lalu tukar cepat tanpa ngisi
-ulang puluhan setting (mis. profil `mainzen` untuk small/mid degen vs `bigcapagresif` untuk
+Dulu kata "preset" dipakai untuk dua hal berbeda → bikin bingung. Sekarang dipisah jelas:
+
+| | 🧬 **Profil** | 🗂️ **Racikan** |
+|---|---|---|
+| Apa | Arketipe/karakter dasar dari **wizard setup** | **Snapshot config penuh** yang kamu simpan sendiri |
+| Nilai | `degen` / `moderate` / `safe` / `custom` | nama bebas: `mainzen`, `mainzen_v2`, `bigcapagresif`, … |
+| Kapan di-set | Sekali, saat instalasi (`setup.js`) | Tiap kali `/preset save` atau `/preset use` |
+| Sifat | **Statis** (cuma ganti kalau setup ulang) | **Dinamis** (ganti racikan kapan aja) |
+| Field | `preset` di `user-config.json` | `activeSetup` (otomatis di-stamp) |
+
+Keduanya **hidup bareng**: kamu bisa "Profil ⚖️ Moderate + lagi pakai Racikan `mainzen_v2`".
+Beda lagi dari **indicator preset** (`entryPreset`/`exitPreset`) yang itu sinyal teknikal, bukan config utuh.
+
+Cek dua-duanya: baris paling atas `/config` dan menu `/settings` nampilin:
+```
+🧬 Profil: ⚖️ Moderate
+🗂️ Racikan: mainzen_v2 ✎ (ada edit manual)
+```
+Tanda **`✎ (ada edit manual)`** muncul kalau config live udah kamu obok-obok setelah load racikan —
+jadi tahu "ini mainzen_v2 tapi udah nggak murni lagi". Tiap deploy/close juga di-stamp racikan-nya,
+jadi `/report` punya breakdown **🗂️ By racikan** (atribusi performa per racikan) + notif deploy nampilin barisnya.
+
+> Loading racikan via `/preset use mainzen_v2` otomatis nge-set `activeSetup="mainzen_v2"`.
+> `/preset save mainzen_v4` = "namai config sekarang jadi mainzen_v4" (live `activeSetup` ikut ke-set).
+
+---
+
+## Config Presets / Racikan (Simpan & Ganti Config)
+
+Sebuah **racikan (config preset)** = snapshot LENGKAP `user-config.json` yang disimpan di folder
+`presets/<nama>.json`. Gunanya: simpan beberapa racikan bot lalu tukar cepat tanpa ngisi
+ulang puluhan setting (mis. `mainzen` untuk small/mid degen vs `bigcapagresif` untuk
 fee-farm pool besar). Folder `presets/` **local-only** (gitignore — berisi API key/identitas).
-
-> Beda dari "preset" lain: ini **bukan** preset wizard `setup.js` (degen/moderate/safe, cuma
-> saat instalasi) dan **bukan** indicator preset (`entryPreset`/`exitPreset`, sinyal teknikal).
-> Ini snapshot config utuh.
 
 **Lewat Telegram / REPL — command `/preset`:**
 | Command | Aksi |
@@ -66,7 +91,7 @@ fee-farm pool besar). Folder `presets/` **local-only** (gitignore — berisi API
 | `/preset rm <nama>` | Hapus preset |
 
 **Lewat menu tombol:**
-`/settings` → tombol **🗂️ Presets**. Tiap preset punya 3 tombol: **▶** load (konfirmasi → backup → restart), **🔍** lihat beda vs config sekarang, **🗑️** hapus (ada konfirmasi). Tombol **💾 Simpan config sekarang** di bawah → bot tanya nama → kesimpan jadi preset baru. Jadi save + load + hapus semua bisa dari menu tanpa ngetik command (kecuali nama preset saat save).
+`/settings` → tombol **🗂️ Racikan**. Tiap racikan punya 3 tombol: **▶** load (konfirmasi → backup → restart), **🔍** lihat beda vs config sekarang, **🗑️** hapus (ada konfirmasi). Tombol **💾 Simpan config sekarang** di bawah → bot tanya nama → kesimpan jadi racikan baru. Jadi save + load + hapus semua bisa dari menu tanpa ngetik command (kecuali nama racikan saat save).
 
 **Lewat terminal (bot boleh dalam keadaan mati):**
 ```
@@ -175,6 +200,29 @@ restart (pm2 menghidupkan lagi); kalau tidak, jalankan `pm2 restart meridian` ma
 
 > Ini dieksekusi OTOMATIS oleh kode, bukan LLM. LLM hanya dikonsultasi kalau kode sudah tandai posisi perlu tindakan.
 > Di `config.js` masuk ke: `config.management`
+
+---
+
+## 🔻 Urutan Rule Close (cara bot mutusin tutup posisi)
+
+Setiap siklus, kode (`getDeterministicCloseRule()`, bukan LLM) ngecek posisi **urut dari atas ke bawah — yang PERTAMA cocok langsung menang**, sisanya nggak dicek. Ada **5 rule bernomor** + 2 jalur tambahan. Tiap baris: **mekanisme teknis** (syarat persis + nilai live) lalu **arti awam**.
+
+| # | Nama | Mekanisme teknis — syarat (nilai live) | Arti awam |
+|---|------|----------------------------------------|-----------|
+| **1** | stop loss | `pnl_pct ≤ stopLossPct` (**−12%**) | Rugi nyentuh −12% → potong, jangan makin dalam |
+| **2** | take profit | `pnl_pct ≥ takeProfitPct` (**+4%**) | Untung nyentuh +4% → kunci hasilnya |
+| **3** | pumped far above range | `active_bin > upper_bin + outOfRangeBinsToClose` (**+10 bin**) | Harga pump jauh **ke atas** atap range (>10 bin di atas). Token kabur ke atas, kita udah nggak narik fee → tutup & redeploy |
+| **4** | OOR (out of range) | `active_bin > upper_bin` **DAN** keluar ≥ `outOfRangeWaitMinutes` (**30 mnt**) | Harga keluar range ke atas **dan nyangkut** di luar >30 menit → tutup |
+| **5** | low yield | `fee_per_tvl_24h < minFeePerTvl24h` (**6%**) **DAN** umur ≥ **60 menit** | Posisi udah >1 jam tapi fee yang dihasilkan di bawah lantai 6% → recycle modal ke pool yang lebih produktif |
+
+**Plus 2 jalur tambahan (BUKAN nomor):**
+
+| Jalur | Mekanisme teknis | Arti awam |
+|-------|------------------|-----------|
+| **Trailing TP** | Mekanisme terpisah (`trailingTakeProfit`). Track **puncak** PnL; tutup kalau turun dari puncak. Live: arm di `trailingTriggerPct` (**+1.5%**), tutup kalau drop `trailingDropPct` (**1%**) dari puncak | "Biarin untung lari, tapi amanin kalau mulai balik" — kunci sebagian profit yang udah ngambang |
+| **indicator** | Exit via `exitPreset`. **Hanya jalan kalau `indicators.exitEnabled` = ON** (sekarang **OFF**). Dicek **setelah** rule 1–5 → rule keselamatan selalu menang | Sinyal teknikal (mis. RSI balik arah) ikut mutusin keluar — opsional, default mati |
+
+> ⚠️ **Catatan baca log.** Pesan close kadang nampilin konteks ekstra, contoh: `Rule 5: low yield | fee_per_tvl_24h=1.97% < minFeePerTvl24h=6%, pnl=-0.05%, oor_minutes=18`. Angka `pnl` & `oor_minutes` di situ cuma **info tambahan**, BUKAN syarat. Pemicu Rule 5 cuma dua: fee di bawah lantai **dan** umur ≥ 60 menit.
 
 ---
 

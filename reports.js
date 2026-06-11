@@ -117,6 +117,7 @@ export function computeTradeStats(records = []) {
     by_strategy: groupStats(perf, "strategy"),
     by_session: groupStats(perf, "open_session"),
     by_narrative: groupStats(perf, "narrative_category"),
+    by_setup: groupStats(perf, "active_setup"),
   };
 }
 
@@ -133,7 +134,11 @@ export function formatMovement(st) {
   return lines.join("\n");
 }
 
-// Per-bucket {count, win_rate_pct, avg_pnl_pct, net_usd} sorted best-first by net.
+// Buckets carry an N-fair "score" = shrunk per-trade expectancy ($): each
+// bucket's per-trade net is blended toward the GLOBAL per-trade net with weight
+// SHRINK_K, so a 1-trade fluke can't top a 15-trade bucket, and total-net volume
+// (more trades = bigger net) doesn't unfairly win. Ranked best-first by score.
+const SHRINK_K = 5; // trades of "prior belief" pulling small samples to the mean
 function groupStats(perf, key) {
   const buckets = {};
   for (const p of perf) {
@@ -141,15 +146,21 @@ function groupStats(perf, key) {
     if (!k) continue;
     (buckets[k] ??= []).push(p);
   }
+  const globalAvg = perf.length ? sum(perf.map((p) => p.pnl_usd)) / perf.length : 0;
   return Object.entries(buckets)
-    .map(([k, arr]) => ({
-      key: k,
-      count: arr.length,
-      win_rate_pct: Math.round((arr.filter((p) => p.pnl_usd > 0).length / arr.length) * 100),
-      avg_pnl_pct: r2(mean(fin(arr.map((p) => p.pnl_pct)))),
-      net_usd: r2(sum(arr.map((p) => p.pnl_usd))),
-    }))
-    .sort((a, b) => (b.net_usd ?? 0) - (a.net_usd ?? 0));
+    .map(([k, arr]) => {
+      const net = sum(arr.map((p) => p.pnl_usd));
+      return {
+        key: k,
+        count: arr.length,
+        win_rate_pct: Math.round((arr.filter((p) => p.pnl_usd > 0).length / arr.length) * 100),
+        avg_pnl_pct: r2(mean(fin(arr.map((p) => p.pnl_pct)))),
+        net_usd: r2(net),
+        avg_net_usd: r2(net / arr.length),
+        score: r2((net + SHRINK_K * globalAvg) / (arr.length + SHRINK_K)),
+      };
+    })
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 }
 
 const pf = (v) => (v === Infinity ? "∞" : v == null ? "?" : v.toFixed(2));
@@ -184,11 +195,12 @@ export function formatBreakdown(st, opts = {}) {
     const shown = rows.filter((r) => r.count >= minCount).slice(0, 5);
     if (shown.length === 0) return;
     out.push(`<b>${title}</b>`);
-    for (const r of shown) {
-      out.push(`  • ${esc(r.key)}: ${money(r.net_usd)} net, ${r.win_rate_pct}% win, avg ${pct(r.avg_pnl_pct)} (${r.count})`);
-    }
+    shown.forEach((r, i) => {
+      out.push(`  ${i + 1}. ${esc(r.key)}: ${money(r.net_usd)} net, ${r.win_rate_pct}% win, avg/trade ${money(r.avg_net_usd)} (${r.count})`);
+    });
   };
   block("📦 By strategy:", st.by_strategy);
+  if (st.by_setup && st.by_setup.length) block("🗂️ By racikan:", st.by_setup);
   if (opts.sessions !== false) block("🕒 By session (WIB):", st.by_session);
   if (st.by_narrative.length) block("🏷️ By narrative:", st.by_narrative);
   return out.length ? out.join("\n") : null;
@@ -334,11 +346,12 @@ export function buildVerdict(st) {
  * weekly/monthly digests — they differ only in which records they pass in and
  * the title/labels. Returns null when there's nothing to say.
  */
-export function buildTradeReport(perf, { title, statsLabel = "Summary", trendN = 10, includeBreakdown = true, includeTrend = true } = {}) {
+export function buildTradeReport(perf, { title, statsLabel = "Summary", trendN = 10, includeBreakdown = true, includeTrend = true, identity = null } = {}) {
   const records = (perf || []).filter((p) => p && Number.isFinite(p.pnl_usd));
-  if (records.length === 0) return `<b>${esc(title || "Trade Report")}</b>\nNo closed positions in this window yet.`;
+  const idLine = identity ? `${identity}\n` : ""; // 🧬 Profil + 🗂️ Racikan, passed by caller (keeps this module config-free)
+  if (records.length === 0) return `<b>${esc(title || "Trade Report")}</b>\n${idLine}No closed positions in this window yet.`;
   const st = computeTradeStats(records);
-  const parts = [`<b>${esc(title)}</b>`, "────────────────", formatStatsBlock(st, statsLabel)];
+  const parts = [`<b>${esc(title)}</b>`, ...(identity ? [identity] : []), "────────────────", formatStatsBlock(st, statsLabel)];
   const verdict = buildVerdict(st); if (verdict) parts.push(verdict);
   if (includeTrend) { const t = formatTrend(records, trendN); if (t) parts.push("", t); }
   const mv = formatMovement(st); if (mv) parts.push("", mv);

@@ -14,6 +14,8 @@ import {
   computeTradeStats, formatStatsBlock, formatBreakdown, formatMovement, buildVerdict,
   buildRecommendations, buildRoleCostLines, estimateGasSol, buildTradeReport,
 } from "./reports.js";
+import { formatIdentity } from "./preset-manager.js";
+import { formatPnlTracker } from "./pnl-tracker.js";
 
 const money = (n) => `${n >= 0 ? "+" : "-"}$${Math.abs(n).toFixed(2)}`;
 
@@ -295,6 +297,7 @@ export async function generateBriefing() {
   // 6. Format Message
   const lines = [
     "☀️ <b>Morning Briefing</b> (Last 24h)",
+    (() => { try { return formatIdentity({ compact: true }); } catch { return null; } })(),
     "────────────────",
     `<b>Activity:</b>`,
     `📥 Positions Opened: ${openedLast24h.length}`,
@@ -306,6 +309,8 @@ export async function generateBriefing() {
     perfLast24h.length > 0
       ? `📈 Win Rate (24h): ${Math.round((perfLast24h.filter(p => p.pnl_usd > 0).length / perfLast24h.length) * 100)}% (${perfLast24h.length} closed)`
       : "📈 Win Rate (24h): N/A",
+    "",
+    formatPnlTracker(lessonsData.performance, { solPriceUsd: solPrice || null }),
     "",
     formatStatsBlock(statsAll, "All-time"),
     buildVerdict(statsAll) || "",
@@ -389,6 +394,7 @@ export async function generatePeriodicBriefing(period = "week") {
     title: `${emoji} ${label} Briefing — last ${days}d`,
     statsLabel: `Last ${days}d`,
     trendN: period === "month" ? 10 : 7,
+    identity: (() => { try { return formatIdentity({ compact: true }); } catch { return null; } })(),
   });
 
   const costLines = [`<b>💵 Costs (${days}d)${paper ? " — 🧪 simulasi" : ""}:</b>`];
@@ -423,6 +429,7 @@ export async function generatePeriodicBriefing(period = "week") {
 
   const parts = [
     report,
+    formatPnlTracker(lessonsData.performance, { solPriceUsd: solPrice || null }) || null,
     `<b>Activity (${days}d):</b> 📥 ${opened} opened | 📤 ${windowPerf.length} closed`,
     buildFeatureStatus(),
     costLines.length > 1 ? costLines.join("\n") : null,

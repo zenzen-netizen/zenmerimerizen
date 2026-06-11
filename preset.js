@@ -18,6 +18,7 @@ import {
   deletePreset,
   validName,
   presetExists,
+  getActiveSetupStatus,
 } from "./preset-manager.js";
 
 const [, , sub = "list", name] = process.argv;
@@ -30,7 +31,9 @@ try {
     case "ls": {
       const ps = listPresets();
       if (!ps.length) { out("No presets yet. Save one: node preset.js save <name>"); break; }
-      out("Config presets (* = matches current config):");
+      const st = getActiveSetupStatus();
+      out(`Active racikan: ${st.name ? st.name + (st.edited ? " (edited)" : "") : "— (none)"}`);
+      out("Config presets / racikan (* = matches current config):");
       for (const p of ps) {
         if (p.error) { out(`  ! ${p.name}  (unreadable)`); continue; }
         out(`  ${p.isCurrent ? "*" : " "} ${p.name}  (${p.dryRun ? "dry-run" : "live"}, ${p.keys} keys)`);

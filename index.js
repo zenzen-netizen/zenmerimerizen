@@ -34,7 +34,7 @@ import { generateBriefing, generatePeriodicBriefing } from "./briefing.js";
 import { renderGuide } from "./guide.js";
 import { getLastBriefingDate, setLastBriefingDate, getLastBriefingPinId, setLastBriefingPinId, getLastReportedMilestone, setLastReportedMilestone, getLastPeriodicBriefing, setLastPeriodicBriefing, getTrackedPosition, getTrackedPositions, setPositionInstruction, updatePnlAndCheckExits, queuePeakConfirmation, resolvePendingPeak, queueTrailingDropConfirmation, resolvePendingTrailingDrop } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
-import { listPresets, savePreset, applyPreset, getPresetDiff, deletePreset, validName, presetExists } from "./preset-manager.js";
+import { listPresets, savePreset, applyPreset, getPresetDiff, deletePreset, validName, presetExists, getActiveSetupStatus, formatIdentity } from "./preset-manager.js";
 import { recordPositionSnapshot, recallForPool, addPoolNote } from "./pool-memory.js";
 import { isPaperMode } from "./paper-trading.js";
 import { recordCandidateSnapshots, getCandidateMomentum, formatCandidateMomentum, recordSmartWalletCounts, getSmartWalletMomentum, formatSmartWalletMomentum } from "./candidate-memory.js";
@@ -44,6 +44,8 @@ import { stageSignals } from "./signal-tracker.js";
 import { getWeightsSummary } from "./signal-weights.js";
 import { bootstrapHiveMind, ensureAgentId, getHiveMindPullMode, isHiveMindEnabled, pullHiveMindLessons, pullHiveMindPresets, registerHiveMindAgent, startHiveMindBackgroundSync } from "./hivemind.js";
 import { appendDecision } from "./decision-log.js";
+import { formatSolTracker } from "./sol-tracker.js";
+import { formatPnlTracker } from "./pnl-tracker.js";
 import { getOpenRouterBalance, getOpenRouterCredits } from "./openrouter-usage.js";
 
 import { REPO_ROOT, repoPath } from "./repo-root.js";
@@ -214,6 +216,7 @@ async function maybeFireLearningReport() {
       title: `🎓 Learning Report — ${milestone} closed positions`,
       statsLabel: "All-time",
       trendN: config.reports?.learningReportTrendN ?? 10,
+      identity: formatIdentity(),
     });
     if (telegramEnabled() && report) await sendHTML(report);
     setLastReportedMilestone(milestone);
@@ -233,7 +236,10 @@ async function buildReportForArg(arg = "") {
   if (["week", "weekly", "7d", "minggu", "mingguan"].includes(a)) return generatePeriodicBriefing("week");
   if (["month", "monthly", "30d", "bulan", "bulanan"].includes(a)) return generatePeriodicBriefing("month");
   if (["day", "today", "24h", "hari", "harian"].includes(a)) return generatePeriodicBriefing("day");
-  return buildTradeReport(getModePerformance(), { title: "🎓 Trade Report (all-time)", statsLabel: "All-time", trendN: config.reports?.learningReportTrendN ?? 10 });
+  const modePerf = getModePerformance();
+  const rep = buildTradeReport(modePerf, { title: "🎓 Trade Report (all-time)", statsLabel: "All-time", trendN: config.reports?.learningReportTrendN ?? 10, identity: formatIdentity() });
+  const tracker = formatPnlTracker(modePerf);
+  return tracker ? `${rep}\n\n${tracker}` : rep;
 }
 
 /**
@@ -1443,6 +1449,12 @@ function formatConfigSnapshot() {
 
 // Full runtime config, grouped to match SETTINGS-GUIDE.md (GRUP 1–15) + GMGN.
 // /config shows the complete surface; long output is auto-split by sendMessage.
+// 🧬 Profil + 🗂️ Racikan identity — canonical formatter lives in preset-manager
+// (formatIdentity); thin wrapper here keeps the existing call sites fail-safe.
+function formatIdentityLines() {
+  try { return formatIdentity(); } catch { return "🧬 Profil: —\n🗂️ Racikan: —"; }
+}
+
 export function formatFullConfig() {
   const c = config;
   const fmt = (v) => {
@@ -1654,7 +1666,7 @@ export function formatFullConfig() {
     ]),
   ];
 
-  return `⚙️ Config lengkap (semua grup)\n\n${blocks.join("\n\n")}\n\nUbah lewat /settings (menu tombol) atau chat biasa. Detail tiap setting: SETTINGS-GUIDE.md`;
+  return `⚙️ Config lengkap (semua grup)\n\n${formatIdentityLines()}\n\n${blocks.join("\n\n")}\n\nUbah lewat /settings (menu tombol) atau chat biasa. Detail tiap setting: SETTINGS-GUIDE.md`;
 }
 
 function parseConfigValue(raw) {
@@ -1765,22 +1777,39 @@ function getConfigValue(key) {
 }
 
 async function requestConfirmation(toolName, args) {
-  // Accept both shapes: { changes: {...} } and the flat { key, value } pair that
-  // weak models use (they cannot fill a free-form object param). Coerce value type
-  // the same way the executor does so the prompt shows the real target value.
-  let changes = (args.changes && typeof args.changes === "object") ? { ...args.changes } : {};
-  if (Object.keys(changes).length === 0 && typeof args.key === "string" && args.key.trim()) {
-    const v = args.value;
-    let coerced = v;
-    if (typeof v === "string") {
-      const lc = v.trim().toLowerCase();
-      if (lc === "true") coerced = true;
-      else if (lc === "false") coerced = false;
-      else if (lc === "off" || lc === "null") coerced = null;
-      else if (v.trim() !== "" && Number.isFinite(Number(v))) coerced = Number(v);
+  // Recover EVERY arg shape the executor's update_config accepts, so the
+  // confirmation gate never lets one slip through unprompted. Weak models invent:
+  //   { changes: {...} } | { key, value } | { path: "a.b", value }
+  //   { management: { solMode: true } } (section-nested) | { solMode: true } (bare)
+  // BUG this fixes: requestConfirmation only parsed changes/key+value, so the
+  // section-nested + bare shapes (which the executor DOES apply) skipped the
+  // prompt entirely — observed on boolean toggles like "sol mode on". Mirrors
+  // tools/executor.js update_config recovery; keep the two in sync.
+  const coerce = (v) => {
+    if (typeof v !== "string") return v;
+    const lc = v.trim().toLowerCase();
+    if (lc === "true") return true;
+    if (lc === "false") return false;
+    if (lc === "off" || lc === "null") return null;
+    if (v.trim() !== "" && Number.isFinite(Number(v))) return Number(v);
+    return v;
+  };
+  const RESERVED = new Set(["changes", "key", "value", "path", "reason"]);
+  const KNOWN_SECTIONS = new Set(["screening", "management", "risk", "schedule", "llm", "strategy", "hiveMind", "api", "gmgn", "indicators", "chartIndicators", "experiments", "reports", "tokens", "darwin"]);
+  const raw = {};
+  if (args.changes && typeof args.changes === "object") Object.assign(raw, args.changes);
+  if (typeof args.key === "string" && args.key.trim()) raw[args.key.trim()] = args.value;
+  if (typeof args.path === "string" && args.path.trim()) raw[args.path.trim().split(".").pop()] = args.value;
+  for (const [k, v] of Object.entries(args)) {
+    if (RESERVED.has(k)) continue;
+    if (v && typeof v === "object" && !Array.isArray(v) && KNOWN_SECTIONS.has(k)) {
+      for (const [sk, sv] of Object.entries(v)) raw[sk] = sv;               // section-nested
+    } else if (!(k in raw) && getConfigValue(k) !== undefined) {
+      raw[k] = v;                                                          // bare flat (real key only)
     }
-    changes = { [args.key.trim()]: coerced };
   }
+  const changes = {};
+  for (const [k, v] of Object.entries(raw)) changes[k] = coerce(v);
 
   // Drop no-op entries (requested value already matches live config) so we never
   // prompt for a change that does nothing. If nothing actually changes, skip the
@@ -1885,9 +1914,11 @@ function pageForKey(key) {
 
 function renderSettingsMenu(page = "main") {
   const title = page === "main" ? "Settings menu" : `Settings: ${page}`;
+  const identityLine = (() => { try { return formatIdentity({ compact: true }); } catch { return "🧬 Profil: — · 🗂️ Racikan: —"; } })();
   const summary = [
     title,
     "",
+    identityLine,
     `Mode: ${config.management.solMode ? "SOL" : "USD"} | Relay: ${config.api.lpAgentRelayEnabled ? "on" : "off"}`,
     `Screening: ${config.screening.source} | cats ${Array.isArray(config.screening.categories) && config.screening.categories.length ? config.screening.categories.join(",") : `single (${config.screening.category})`} | GMGN KOL ${config.gmgn.requireKol ? "required" : "preferred"}`,
     `Strategy: ${config.strategy.strategy} | deploy ${config.management.deployAmountSol} SOL | max pos ${config.risk.maxPositions}`,
@@ -1912,7 +1943,7 @@ function renderSettingsMenu(page = "main") {
     [
       settingButton("🧪 Experiments", "cfg:page:experiments"),
       settingButton("📊 Reports", "cfg:page:reports"),
-      settingButton("🗂️ Presets", "cfg:page:presets"),
+      settingButton("🗂️ Racikan", "cfg:page:presets"),
     ],
   ];
 
@@ -2065,10 +2096,16 @@ function renderSettingsMenu(page = "main") {
           ? `⚠ ${p.name}`
           : `${p.isCurrent ? "●" : "○"} ${p.name} — ${p.dryRun ? "🧪 dry-run" : "live"} · ${p.keys} keys${p.isCurrent ? " (current)" : ""}`)
       : ["(belum ada preset)"];
-    bodyText = ["🗂️ Config Presets", "", ...lines, "",
+    const setupStatus = (() => {
+      try { const s = getActiveSetupStatus(); return s.name ? `${s.name}${s.edited ? " ✎ (ada edit manual)" : ""}` : "— (belum load)"; } catch { return "—"; }
+    })();
+    bodyText = ["🗂️ Racikan (setup tersimpan)", "",
+      `Aktif: ${setupStatus}`,
+      "(Racikan = snapshot config penuh. Beda dari 🧬 Profil = arketipe wizard.)", "",
+      ...lines, "",
       "● = sama dgn config live · 🧪 = isi file dryRun (bukan berarti jalan)",
       "Per baris: ▶ load · 🔍 lihat beda · 🗑️ hapus.",
-      "💾 = simpan config sekarang jadi preset baru.",
+      "💾 = simpan config sekarang jadi racikan baru.",
     ].join("\n");
     rows = presets.map((p) => p.error
       ? [settingButton(`⚠ ${p.name}`, "cfg:noop")]
@@ -2292,7 +2329,7 @@ function formatHelpText() {
     "",
     "📊 LAPORAN & STATUS",
     "/status — wallet + positions snapshot",
-    "/wallet — wallet, deploy amount, HiveMind status",
+    "/wallet — wallet, deploy amount, HiveMind + SOL growth tracker (1d/7d/30d)",
     "/positions — list open positions",
     "/pool <n> — detailed info for one position",
     "/briefing — morning briefing (auto-pinned)",
@@ -2343,14 +2380,16 @@ function runPresetCommand(argStr) {
   try {
     if (sub === "list" || sub === "ls") {
       const presets = listPresets();
-      if (!presets.length) return { text: "Belum ada preset. Simpan dengan: /preset save <nama>" };
+      if (!presets.length) return { text: "Belum ada racikan. Simpan dengan: /preset save <nama>" };
       const lines = presets.map((p) => {
         if (p.error) return `! ${p.name} — tidak terbaca`;
         const mark = p.isCurrent ? "●" : "○";
         const mode = p.dryRun ? "🧪 dry-run" : "live";
         return `${mark} ${p.name} — ${mode} · ${p.keys} keys${p.isCurrent ? "  (current)" : ""}`;
       });
-      return { text: `🗂️ Config Presets\n${lines.join("\n")}\n\n${presetUsageText()}` };
+      const st = getActiveSetupStatus();
+      const active = st.name ? `${st.name}${st.edited ? " ✎ (ada edit manual)" : ""}` : "— (belum load)";
+      return { text: `🗂️ Racikan (setup tersimpan)\nAktif: ${active}\n\n${lines.join("\n")}\n\n${presetUsageText()}` };
     }
     if (sub === "save") {
       if (!name) return { text: "Format: /preset save <nama>" };
@@ -2639,6 +2678,10 @@ async function telegramHandler(msg) {
           msg += `\n💳 OpenRouter: $${orBalance.usage.toFixed(4)} total spent`;
         }
       }
+      if (text === "/wallet") {
+        // SOL balance growth tracker (calendar 1d/7d/30d) — /wallet only.
+        msg += `\n\n${formatSolTracker(wallet.sol)}`;
+      }
       if (text === "/status") {
         if (positions.total_positions) msg += `\n\nUse /positions for the numbered list.`;
         const perf = getPerformanceSummary();
@@ -2655,6 +2698,9 @@ async function telegramHandler(msg) {
         if (lastBad) msg += `\n⚠️ ${condenseRule(lastBad.rule)}`;
         if (lastGood) msg += `\n✅ ${condenseRule(lastGood.rule)}`;
       }
+      // Realized-PnL & net-of-cost tracker (1d/7d/30d) — both /wallet and /status.
+      const pnlBlock = formatPnlTracker(getAllPerformance(), { solPriceUsd: wallet?.sol_price ?? null });
+      if (pnlBlock) msg += `\n\n${pnlBlock}`;
       await sendMessage(msg).catch(() => {});
     } catch (e) {
       await sendMessage(`Error: ${e.message}`).catch(() => {});
@@ -3072,6 +3118,8 @@ Commands:
           console.log(`  ${p.pair.padEnd(16)} ${status}  fees: ${config.management.solMode ? "◎" : "$"}${p.unclaimed_fees_usd}`);
         }
         console.log();
+        const pnlBlock = formatPnlTracker(getAllPerformance(), { solPriceUsd: wallet?.sol_price ?? null });
+        if (pnlBlock) console.log(`${pnlBlock}\n`);
       });
       return;
     }

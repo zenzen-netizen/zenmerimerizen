@@ -131,7 +131,9 @@ POOL MEMORY: Past losses or problems → strong skip signal.
 
 DEPLOY RULES:
 - COMPOUNDING: Use the deploy amount from the goal EXACTLY. Do NOT default to a smaller number.
-- strategy = ${config.strategy.strategy} — always use this exact value, never change it.
+- ${(config.strategy.strategyLock ?? "default") !== "default"
+    ? `strategy = ${config.strategy.strategyLock} — LOCKED by config (strategyLock). Enforced mechanically; any other value will be overridden.`
+    : `strategy: default ${config.strategy.strategy}. You may pick spot/bid_ask/curve per pool if conditions clearly favor it; omit the field to use the default.`}
 - bins_below = round(${config.strategy.minBinsBelow} + (candidate volatility/5)*${config.strategy.maxBinsBelow - config.strategy.minBinsBelow}) clamped to [${config.strategy.minBinsBelow},${config.strategy.maxBinsBelow}]. bins_above = 0.
 - Bin steps must be [${config.screening.minBinStep}-${config.screening.maxBinStep}].
 - Pick ONE pool only if it qualifies. Otherwise explain why none qualify.

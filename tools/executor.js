@@ -394,6 +394,7 @@ const toolMap = {
       maxSteps: ["llm", "maxSteps"],
       // strategy
       strategy:     ["strategy", "strategy"],
+      strategyLock: ["strategy", "strategyLock"],
       binsBelow:    ["strategy", "maxBinsBelow", ["maxBinsBelow"]],
       minBinsBelow: ["strategy", "minBinsBelow"],
       maxBinsBelow: ["strategy", "maxBinsBelow"],
@@ -611,6 +612,14 @@ const toolMap = {
         log("config", `update_config: config.${section}.${field} ${redactConfigValue(key, before)} → ${redactConfigValue(key, val)} (verify: ${redactConfigValue(key, config[section][field])})`);
       }
     }
+    if (applied.strategyLock != null) {
+      const VALID_LOCKS = ["default", "spot", "bid_ask", "curve"];
+      if (!VALID_LOCKS.includes(config.strategy.strategyLock)) {
+        log("config", `update_config: invalid strategyLock "${config.strategy.strategyLock}" → reset to "default" (valid: ${VALID_LOCKS.join(", ")})`);
+        config.strategy.strategyLock = "default";
+        applied.strategyLock = "default"; // keep the persisted value in sync with the corrected runtime value
+      }
+    }
     if (
       applied.binsBelow != null ||
       applied.minBinsBelow != null ||
@@ -821,6 +830,18 @@ export async function executeTool(name, args) {
 async function runSafetyChecks(name, args) {
   switch (name) {
     case "deploy_position": {
+      // ─── Strategy lock ────────────────────────────────────────
+      // strategyLock=default (factory) → args.strategy untouched (LLM/user choice,
+      // dlmm.js falls back to config.strategy.strategy when omitted). When locked
+      // (spot/bid_ask/curve), hard-overwrite whatever was requested so the lock is
+      // mechanical — prompt drift, library context, or manual chat deploys can't
+      // bypass it. To deviate, set strategyLock=default first.
+      const stratLock = config.strategy?.strategyLock ?? "default";
+      if (stratLock !== "default" && args.strategy !== stratLock) {
+        if (args.strategy) log("safety", `strategyLock: requested strategy "${args.strategy}" overridden → "${stratLock}"`);
+        args.strategy = stratLock;
+      }
+
       const poolThresholds = await validateDeployPoolThresholds(args);
       if (!poolThresholds.pass) return poolThresholds;
       if (poolThresholds.entryMarketData) Object.assign(args, poolThresholds.entryMarketData);

@@ -218,6 +218,10 @@ export const config = {
   // ─── Strategy Mapping ───────────────────
   strategy: {
     strategy:     u.strategy     ?? "bid_ask",
+    // "default" (factory) = flexible: LLM/user choice wins, config.strategy.strategy
+    // is only the fallback. "spot" | "bid_ask" | "curve" = mechanical lock: executor
+    // force-overwrites every deploy's strategy regardless of what was requested.
+    strategyLock: u.strategyLock ?? "default",
     minBinsBelow: strategyMinBinsBelow,
     maxBinsBelow: strategyMaxBinsBelow,
     defaultBinsBelow: strategyDefaultBinsBelow,

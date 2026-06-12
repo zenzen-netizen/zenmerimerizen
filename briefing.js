@@ -40,6 +40,11 @@ function countOnChainActions(sinceMs) {
         let o; try { o = JSON.parse(line); } catch { continue; }
         if (!o.success || !ONCHAIN_TOOLS.includes(o.tool)) continue;
         if (new Date(o.timestamp).getTime() < sinceMs) continue;
+        // Dry-run/paper actions never paid gas — keep them out of the live estimate.
+        // (result is sometimes logged as a JSON string, sometimes as an object)
+        let r = o.result;
+        if (typeof r === "string") { try { r = JSON.parse(r); } catch { r = null; } }
+        if (r?.dry_run || r?.paper) continue;
         counts[o.tool] = (counts[o.tool] || 0) + 1;
       }
     }
@@ -270,13 +275,18 @@ export async function generateBriefing() {
   const now = new Date();
   const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-  // 1. Positions Activity
-  const allPositions = Object.values(state.positions || {});
-  const openedLast24h = allPositions.filter(p => new Date(p.deployed_at) > last24h);
-  const closedLast24h = allPositions.filter(p => p.closed && new Date(p.closed_at) > last24h);
-
   // Mode scope: dry-run → sim rows only, live → real rows only (no cross-mix).
   const keepMode = (x) => (isPaperMode() ? !!x.paper : !x.paper);
+  // Tracked positions carry no paper flag — the synthetic id prefix marks sim rows.
+  const keepModePos = (p) => {
+    const sim = String(p.position || "").startsWith("paper_");
+    return isPaperMode() ? sim : !sim;
+  };
+
+  // 1. Positions Activity
+  const allPositions = Object.values(state.positions || {}).filter(keepModePos);
+  const openedLast24h = allPositions.filter(p => new Date(p.deployed_at) > last24h);
+  const closedLast24h = allPositions.filter(p => p.closed && new Date(p.closed_at) > last24h);
 
   // 2. Performance Activity (from performance log)
   const perfLast24h = (lessonsData.performance || []).filter(p => keepMode(p) && new Date(p.recorded_at) > last24h);
@@ -378,7 +388,11 @@ export async function generatePeriodicBriefing(period = "week") {
   // Mode scope: dry-run → sim rows only, live → real rows only (no cross-mix).
   const keepMode = (p) => (isPaperMode() ? !!p.paper : !p.paper);
   const windowPerf = (lessonsData.performance || []).filter((p) => keepMode(p) && new Date(p.closed_at || p.recorded_at || 0).getTime() >= since);
-  const allPositions = Object.values(state.positions || {});
+  // Tracked positions carry no paper flag — the synthetic id prefix marks sim rows.
+  const allPositions = Object.values(state.positions || {}).filter((p) => {
+    const sim = String(p.position || "").startsWith("paper_");
+    return isPaperMode() ? sim : !sim;
+  });
   const opened = allPositions.filter((p) => new Date(p.deployed_at).getTime() >= since).length;
   const netPnl = windowPerf.reduce((s, p) => s + (p.pnl_usd || 0), 0);
 

@@ -878,8 +878,10 @@ export function getPerformanceSummary() {
  * Tool handler: get_time_profile
  */
 export function getHourlyProfile() {
-  const data = load();
-  const perf = (data.performance || []).filter((p) => p.open_session && isFiniteNum(p.pnl_pct));
+  // Mode-scoped: paper mode profiles sim rows only, live profiles real rows only —
+  // a paper history left on file must never steer the live SCREENER prompt,
+  // adaptive screening, or the briefing time-profile section.
+  const perf = getModePerformance().filter((p) => p.open_session && isFiniteNum(p.pnl_pct));
 
   const buckets = {};
   for (const s of SESSIONS) buckets[s.key] = { wins: 0, count: 0, pnlSum: 0, holdSum: 0, holdCount: 0 };
@@ -983,8 +985,8 @@ export function getTimeProfileForPrompt() {
  * Tool handler: get_narrative_profile
  */
 export function getNarrativeProfile() {
-  const data = load();
-  const perf = (data.performance || []).filter(
+  // Mode-scoped (same reason as getHourlyProfile): sim and live never cross-feed.
+  const perf = getModePerformance().filter(
     (p) => NARRATIVE_CATEGORIES.includes(p.narrative_category) && isFiniteNum(p.pnl_pct)
   );
 

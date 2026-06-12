@@ -1134,6 +1134,53 @@ Setiap siklus, kode (`getDeterministicCloseRule()`, bukan LLM) ngecek posisi **u
 
 ---
 
+### `pnlSource`
+| | |
+|---|---|
+| **Default** | `"rpc"` |
+| **Format** | String |
+| **Opsi** | `"rpc"` / `"meteora"` |
+| **Penjelasan** | Sumber data nilai posisi & PnL (di `config.pnl`). `rpc` (default) = baca langsung on-chain lewat RPC publik + harga Jupiter + riwayat deposit Meteora — tanpa ketergantungan LPAgent/relay, jadi poller bisa jalan agresif. Kalau jalur RPC error, otomatis jatuh ke jalur API Meteora (fail-open). `meteora` = pakai jalur API Meteora saja |
+
+---
+
+### `pnlRpcUrl`
+| | |
+|---|---|
+| **Default** | `"https://pump.helius-rpc.com"` |
+| **Format** | String (URL) |
+| **Penjelasan** | RPC endpoint khusus untuk pembacaan PnL (terpisah dari `RPC_URL` utama yang dipakai transaksi). Sengaja pakai RPC publik supaya polling rapat tidak menghabiskan kuota RPC utama. Bisa juga diset lewat env `PNL_RPC_URL` |
+
+---
+
+### `pnlPollIntervalSec`
+| | |
+|---|---|
+| **Default** | `3` |
+| **Format** | Angka (detik) |
+| **Penjelasan** | Jarak antar tick PnL poller (pemantau trailing TP / SL / close rules di antara siklus management). Dulu fix 30 detik; sekarang bisa rapat (default 3 dtk) karena jalur RPC publik. Mengubah ini lewat `/setcfg` otomatis me-restart poller — tidak perlu restart bot |
+
+---
+
+### `pnlDepositCacheTtlSec`
+| | |
+|---|---|
+| **Default** | `300` |
+| **Format** | Angka (detik) |
+| **Penjelasan** | Umur cache riwayat deposit (dari API Meteora `/pnl`) sebelum di-refresh. Cache juga di-invalidate otomatis kalau ada signature transaksi baru, jadi angka ini cuma batas atas. Makin kecil = makin sering hit API Meteora |
+
+---
+
+### `gmgnFeeSource`
+| | |
+|---|---|
+| **Default** | `"gmgn"` |
+| **Format** | String |
+| **Opsi** | `"gmgn"` / `"jupiter"` |
+| **Penjelasan** | Sumber data `global_fees_sol` (gerbang `minTokenFeesSol` di GRUP 6). `gmgn` = ambil `total_fee` dari GMGN (butuh `gmgnApiKey`; tanpa key otomatis jatuh ke Jupiter). `jupiter` = selalu pakai Jupiter. ⚠️ Beda dengan blok GMGN screening: setting ini **tetap bekerja walau `screeningSource = meteora`** |
+
+---
+
 ---
 
 # GRUP 15 — HIVEMIND (Kolektif)

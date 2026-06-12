@@ -1614,6 +1614,11 @@ export function formatFullConfig() {
       ["solMode", fmt(c.management.solMode)],
       ["agentId", fmt(c.hiveMind.agentId)],
       ["publicApiKey", secret(c.api.publicApiKey)],
+      ["pnlSource", fmt(c.pnl.source)],
+      ["pnlRpcUrl", fmt(c.pnl.rpcUrl)],
+      ["pnlPollIntervalSec", fmt(c.pnl.pollIntervalSec)],
+      ["pnlDepositCacheTtlSec", fmt(c.pnl.depositCacheTtlSec)],
+      ["gmgnFeeSource", fmt(c.gmgn.feeSource)],
     ]),
     group("━ GRUP 15 — HiveMind", [
       ["status", isHiveMindEnabled() ? "enabled" : "disabled"],
@@ -1728,6 +1733,11 @@ function settingValue(key) {
     gmgnMinKolCount: config.gmgn.minKolCount,
     gmgnMinTotalFeeSol: config.gmgn.minTotalFeeSol,
     gmgnMinHolders: config.gmgn.minHolders,
+    gmgnFeeSource: config.gmgn.feeSource,
+    pnlSource: config.pnl.source,
+    pnlRpcUrl: config.pnl.rpcUrl,
+    pnlPollIntervalSec: config.pnl.pollIntervalSec,
+    pnlDepositCacheTtlSec: config.pnl.depositCacheTtlSec,
     strategy: config.strategy.strategy,
     strategyLock: config.strategy.strategyLock,
     minBinsBelow: config.strategy.minBinsBelow,
@@ -1920,7 +1930,8 @@ function inputButton(key, label, { digits = 0 } = {}) {
 // a toggle/step/set/input. Single source of truth (was duplicated in two callbacks).
 function pageForKey(key) {
   if (["gmgnPreferredKolNames", "gmgnPreferredKolMinHoldPct", "gmgnDumpKolNames", "gmgnDumpKolMinHoldPct"].includes(key)) return "kol";
-  if (["gmgnMinVolume", "gmgnMaxBundlerRate", "gmgnMinTokenAgeHours", "gmgnMaxTokenAgeHours"].includes(key)) return "screen";
+  if (["gmgnMinVolume", "gmgnMaxBundlerRate", "gmgnMinTokenAgeHours", "gmgnMaxTokenAgeHours", "gmgnFeeSource"].includes(key)) return "screen";
+  if (key.startsWith("pnl")) return "screen";
   if (key.startsWith("gmgn") && key !== "gmgnRequireKol") return "gmgn";
   if (key.startsWith("indicator") || key.startsWith("smi") || key === "chartIndicatorsEnabled" || key === "rsiLength" || key === "requireAllIntervals") return "indicators";
   if (["minBinsBelow", "maxBinsBelow", "strategy", "strategyLock"].includes(key)) return "strategy";
@@ -2021,6 +2032,19 @@ function renderSettingsMenu(page = "main") {
       inputButton("screeningIntervalMin", "Screen interval — min/floor (min)"),
       [toggleButton("adaptiveScreening", "Adaptive screening")],
       inputButton("maxScreeningIntervalMin", "Screen interval — max/ceil (min)"),
+      // PnL data source + poller (public infra; meteora = fallback-only path)
+      [
+        settingButton(`PnL src: ${fmtSettingValue(settingValue("pnlSource"))}`, "cfg:noop"),
+        settingButton("rpc", "cfg:set:pnlSource:rpc"),
+        settingButton("meteora", "cfg:set:pnlSource:meteora"),
+      ],
+      inputButton("pnlPollIntervalSec", "PnL poll (sec)"),
+      // Fee gate (global_fees_sol) source: gmgn total_fee vs jupiter — works in BOTH screening sources
+      [
+        settingButton(`Fee src: ${fmtSettingValue(settingValue("gmgnFeeSource"))}`, "cfg:noop"),
+        settingButton("gmgn", "cfg:set:gmgnFeeSource:gmgn"),
+        settingButton("jupiter", "cfg:set:gmgnFeeSource:jupiter"),
+      ],
     ];
   } else if (page === "strategy") {
     rows = [

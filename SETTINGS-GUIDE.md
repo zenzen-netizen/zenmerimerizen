@@ -107,6 +107,21 @@ node preset.js use  bigcapagresif
 start — restart cron saja tidak cukup. Kalau bot jalan di bawah **pm2**, `/preset use` otomatis
 restart (pm2 menghidupkan lagi); kalau tidak, jalankan `pm2 restart meridian` manual.
 
+### `promptNotes` — instruksi prompt bawaan racikan
+
+Racikan bisa membawa **"karakter" prompt-nya sendiri** lewat key `promptNotes` di file
+`presets/<nama>.json`: array berisi kalimat instruksi bebas yang disuntikkan ke prompt
+SCREENER sebagai blok **RACIKAN RULES** — instruksi keras, menang atas guideline soft
+(tapi tidak pernah menimpa HARD RULE / safety check mekanis). Bentuk object
+`{ "screener": [...], "manager": [...], "general": [...] }` bisa dipakai untuk per-role;
+array polos = khusus SCREENER. Racikan tanpa `promptNotes` = prompt pabrik murni.
+
+Gunanya: identitas/perilaku ngikut racikan, bukan kode — clone bot ke mana pun, load
+racikan yang sama → perilaku sama persis. Edit hanya lewat **file preset** (bukan
+`/setcfg`): tambah/ubah kalimat di `presets/<nama>.json` → `/preset use <nama>` → beres.
+Contoh nyata: `mainzen_v3` membawa aturan "zero smart wallet = sinyal soft, bukan filter
+keras" — dulu hardcoded di prompt.js, sekarang ikut racikan.
+
 ---
 
 # GRUP 1 — RISIKO & MODAL

@@ -54,6 +54,24 @@ if (u.telegramChatId) process.env.TELEGRAM_CHAT_ID ||= String(u.telegramChatId);
 
 const indicatorUserConfig = u.chartIndicators ?? {};
 
+/**
+ * Racikan-borne prompt rules (`promptNotes` in user-config.json). The loaded
+ * preset carries its own prompt "character" as data, so behavior travels with
+ * the racikan file — never hardcode racikan-specific prompt text in code.
+ * Accepts a plain array (= SCREENER notes) or a per-role object
+ * { screener: [], manager: [], general: [] }. Anything malformed → empty.
+ */
+function normalizePromptNotes(raw) {
+  const clean = (v) => Array.isArray(v)
+    ? v.filter((s) => typeof s === "string" && s.trim()).map((s) => s.trim())
+    : [];
+  if (Array.isArray(raw)) return { screener: clean(raw), manager: [], general: [] };
+  if (raw && typeof raw === "object") {
+    return { screener: clean(raw.screener), manager: clean(raw.manager), general: clean(raw.general) };
+  }
+  return { screener: [], manager: [], general: [] };
+}
+
 function nonEmptyString(...values) {
   for (const value of values) {
     if (typeof value !== "string") continue;
@@ -83,6 +101,8 @@ export const config = {
   // See preset-manager.js + SETTINGS-GUIDE "Profil vs Racikan".
   profile:     u.preset       ?? "moderate",
   activeSetup: u.activeSetup  ?? null,
+  // Free-text prompt rules carried by the loaded Racikan (see normalizePromptNotes).
+  promptNotes: normalizePromptNotes(u.promptNotes),
 
   // ─── Risk Limits ─────────────────────────
   risk: {
@@ -517,6 +537,9 @@ export function reloadScreeningThresholds() {
     if (fresh.maxBotHoldersPct  != null) s.maxBotHoldersPct = fresh.maxBotHoldersPct;
     if (fresh.allowedLaunchpads !== undefined) s.allowedLaunchpads = fresh.allowedLaunchpads;
     if (fresh.blockedLaunchpads !== undefined) s.blockedLaunchpads = fresh.blockedLaunchpads;
+    // Racikan prompt rules: pick up hand-edits to user-config.json without a restart.
+    if (fresh.promptNotes !== undefined) config.promptNotes = normalizePromptNotes(fresh.promptNotes);
+    if (fresh.activeSetup !== undefined) config.activeSetup = fresh.activeSetup;
     const minBinsBelow = numericConfig(fresh.minBinsBelow) ?? config.strategy.minBinsBelow;
     const maxBinsBelow = numericConfig(fresh.maxBinsBelow) ?? numericConfig(fresh.binsBelow) ?? config.strategy.maxBinsBelow;
     const defaultBinsBelow = numericConfig(fresh.defaultBinsBelow) ?? numericConfig(fresh.binsBelow) ?? config.strategy.defaultBinsBelow ?? maxBinsBelow;

@@ -12,6 +12,22 @@
 import { config } from "./config.js";
 import { getTimeProfileForPrompt, getNarrativeProfileForPrompt } from "./lessons.js";
 
+/**
+ * Racikan-borne prompt rules — config.promptNotes, carried by the loaded
+ * preset (see config.js). A racikan ships its own prompt "character" as data;
+ * racikan-specific behavior must live here, never hardcoded in this file.
+ * No notes for the role → "" (pure factory prompt).
+ */
+function racikanRules(role) {
+  const notes = config.promptNotes?.[role] ?? [];
+  if (!notes.length) return "";
+  const src = config.activeSetup ? ` — carried by racikan "${config.activeSetup}"` : "";
+  return `RACIKAN RULES${src} (HARD instructions from the loaded config; when they conflict with a soft guideline above, RACIKAN RULES win — they never override HARD RULE or mechanical safety checks):
+${notes.map((n) => `- ${n}`).join("\n")}
+
+`;
+}
+
 export function buildSystemPrompt(agentType, portfolio, positions, stateSummary = null, lessons = null, perfSummary = null, weightsSummary = null, decisionSummary = null) {
   const s = config.screening;
 
@@ -31,7 +47,7 @@ BEHAVIORAL CORE:
 2. GAS EFFICIENCY: close_position costs gas — only close for clear reasons. After close, swap_token is MANDATORY for any token worth >= $0.10 (dust < $0.10 = skip). Always check token USD value before swapping.
 3. DATA-DRIVEN AUTONOMY: You have full autonomy. Guidelines are heuristics.
 
-${lessons ? `LESSONS LEARNED:\n${lessons}\n` : ""}Timestamp: ${new Date().toISOString()}
+${racikanRules("manager")}${lessons ? `LESSONS LEARNED:\n${lessons}\n` : ""}Timestamp: ${new Date().toISOString()}
 `;
   }
 
@@ -122,7 +138,7 @@ RISK SIGNALS (guidelines — use judgment):
 - no narrative + no smart wallets → skip
 - If only one candidate is returned, do not deploy by default. Treat it as "maybe nothing is good enough"; deploy only if it still has a strong narrative, smart-wallet confirmation, and clean pool metrics.
 
-NARRATIVE QUALITY (your main judgment call):
+${racikanRules("screener")}NARRATIVE QUALITY (your main judgment call):
 - GOOD: specific origin — real event, viral moment, named entity, active community
 - BAD: generic hype ("next 100x", "community token") with no identifiable subject
 - Smart wallets present → can override weak narrative
@@ -172,7 +188,8 @@ PARALLEL FETCH RULE: When deploying to a specific pool, call get_pool_detail, ch
 TOP LPERS RULE: If the user asks about top LPers, LP behavior, or wants to add top LPers to the smart-wallet list, you MUST call study_top_lpers or get_top_lpers first. Do NOT substitute token holders for top LPers. Only add wallets after you have identified them from the LPers study result.
 
 PVP RULE: Treat \`pvp: HIGH\` as a major negative. It means another mint with the same exact symbol also has a real active pool with meaningful TVL, holders, and fees. Avoid these by default unless the current candidate is clearly stronger.
-`;
+
+${racikanRules("general")}`;
   }
 
   return basePrompt + `\nTimestamp: ${new Date().toISOString()}\n`;

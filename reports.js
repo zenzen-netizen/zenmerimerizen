@@ -146,7 +146,11 @@ export function computeTradeStats(records = []) {
     by_session: groupStats(perf, "open_session"),
     by_narrative: groupStats(perf, "narrative_category"),
     by_setup: groupStats(perf, "active_setup"),
-    by_close_rule: groupStats(perfWithRule, "close_rule"),
+    // Close rules are safety mechanisms, not choices to "do more of" — so unlike
+    // the other breakdowns, rank them by absolute $ impact (|net|): which rule
+    // moves the book the most, gain or leak. Per-row avg/trade still shows quality.
+    by_close_rule: groupStats(perfWithRule, "close_rule")
+      .sort((a, b) => Math.abs(b.net_usd ?? 0) - Math.abs(a.net_usd ?? 0)),
   };
 }
 
@@ -269,7 +273,7 @@ export function formatBreakdown(st, opts = {}) {
   if (opts.sessions !== false) block("🕒 By session (WIB):", st.by_session, { keyFmt: sessionLabel });
   if (st.by_narrative.length) block("🏷️ By narrative:", st.by_narrative);
   // Exit-rule contribution: which hard-stop/close rule produced how much of the book.
-  if (st.by_close_rule && st.by_close_rule.length) block("🛑 By close rule:", st.by_close_rule, { maxRows: 8 });
+  if (st.by_close_rule && st.by_close_rule.length) block("🛑 By close rule (urut dampak $):", st.by_close_rule, { maxRows: 8 });
   return out.length ? out.join("\n") : null;
 }
 

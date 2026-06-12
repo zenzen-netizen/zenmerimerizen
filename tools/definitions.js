@@ -168,7 +168,7 @@ WARNING: This executes a real on-chain transaction. Check DRY_RUN mode.`,
           strategy: {
             type: "string",
             enum: ["bid_ask", "spot"],
-            description: "DLMM strategy type. If user specifies, use exactly what they said. Otherwise omit — the system default from config.strategy.strategy will be used automatically."
+            description: "DLMM strategy type. If user specifies, use exactly what they said. Otherwise omit — the system default from config.strategy.strategy will be used automatically. NOTE: if config.strategy.strategyLock is set (not \"default\"), the locked strategy is enforced mechanically and overrides this field."
           },
           bins_below: {
             type: "number",
@@ -403,7 +403,7 @@ Management: minClaimAmount, autoSwapAfterClaim, outOfRangeBinsToClose, outOfRang
 Risk: maxPositions, maxDeployAmount
 Schedule: managementIntervalMin, screeningIntervalMin, healthCheckIntervalMin
 Models: managementModel, screeningModel, generalModel, temperature, maxTokens, generalMaxTokens, maxSteps
-Strategy: strategy, binsBelow, minBinsBelow, maxBinsBelow, defaultBinsBelow
+Strategy: strategy, strategyLock (default|spot|bid_ask|curve — "default"=flexible, else every deploy is force-locked to that strategy), binsBelow, minBinsBelow, maxBinsBelow, defaultBinsBelow
 Hive/API: hiveMindUrl, hiveMindApiKey, agentId, hiveMindPullMode, publicApiKey, agentMeridianApiUrl, lpAgentRelayEnabled
 Indicators: chartIndicatorsEnabled, indicatorEntryPreset, indicatorExitPreset, indicatorExitEnabled, indicatorRejectAtBottom, rsiLength, indicatorIntervals, indicatorCandles, rsiOversold, rsiOverbought, requireAllIntervals, smiPdLookback, smiPaLookback, smiCrossWindow (last 3 only apply when indicatorEntryPreset=supertrend_plus_smi)
 Reports: learningReportEvery, learningReportTrendN

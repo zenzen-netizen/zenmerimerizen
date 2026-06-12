@@ -743,6 +743,16 @@ Setiap siklus, kode (`getDeterministicCloseRule()`, bukan LLM) ngecek posisi **u
 
 ---
 
+### `strategyLock`
+| | |
+|---|---|
+| **Default** | `"default"` |
+| **Format** | String |
+| **Opsi** | `"default"` / `"spot"` / `"bid_ask"` / `"curve"` |
+| **Penjelasan** | Gembok strategi. `default` = perilaku pabrik yang fleksibel: AI boleh memilih strategi per pool, dan `strategy` di atas hanya jadi nilai cadangan kalau AI tidak menyebut apa-apa. Selain `default` = **kunci mekanis**: SETIAP deploy dipaksa pakai strategi itu di level kode (executor), apa pun yang diminta AI atau chat manual — beda dengan instruksi prompt yang masih bisa "dilanggar" model. Ini cara resmi meniru lock bid_ask ala mainzen_v2. Mau deploy manual dengan strategi lain? Set dulu `strategyLock` ke `default`. |
+
+---
+
 ### `minBinsBelow`, `maxBinsBelow`, `defaultBinsBelow`
 | | |
 |---|---|

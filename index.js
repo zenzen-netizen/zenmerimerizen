@@ -642,8 +642,11 @@ export async function runScreeningCycle({ silent = false } = {}) {
 
     // Load active strategy
     const activeStrategy = getActiveStrategy();
-    const deployStrategy = config.strategy.strategy;
-    const strategyBlock = `DEPLOY STRATEGY: ${deployStrategy} (from config) | bins_above: 0 (FIXED — never change) | deposit: SOL only (amount_y, amount_x=0)`
+    // strategyLock != default → the lock value IS the strategy (enforced in executor);
+    // default → flexible, config.strategy.strategy is the fallback default.
+    const stratLock = config.strategy.strategyLock ?? "default";
+    const deployStrategy = stratLock !== "default" ? stratLock : config.strategy.strategy;
+    const strategyBlock = `DEPLOY STRATEGY: ${deployStrategy} ${stratLock !== "default" ? "(LOCKED by strategyLock — enforced, do not deviate)" : "(default from config — may deviate per pool if clearly justified)"} | bins_above: 0 (FIXED — never change) | deposit: SOL only (amount_y, amount_x=0)`
       + (activeStrategy ? `\nSTRATEGY CONTEXT: ${activeStrategy.name} — entry: ${activeStrategy.entry?.condition || "n/a"} | exit: ${activeStrategy.exit?.notes || "n/a"} | best for: ${activeStrategy.best_for}` : "");
 
     // Fetch top candidates, then recon each sequentially with a small delay to avoid 429s
@@ -1442,7 +1445,7 @@ function formatConfigSnapshot() {
     "Config snapshot",
     "",
     `Screening source: ${config.screening.source}`,
-    `Strategy: ${config.strategy.strategy} | bins: [${config.strategy.minBinsBelow}–${config.strategy.maxBinsBelow}] (volatility-scaled)`,
+    `Strategy: ${config.strategy.strategy}${(config.strategy.strategyLock ?? "default") !== "default" ? ` 🔒(lock: ${config.strategy.strategyLock})` : ""} | bins: [${config.strategy.minBinsBelow}–${config.strategy.maxBinsBelow}] (volatility-scaled)`,
     `Deploy: ${config.management.deployAmountSol} SOL | gasReserve: ${config.management.gasReserve} | maxPositions: ${config.risk.maxPositions}`,
     `Stop loss: ${config.management.stopLossPct}% | take profit: ${config.management.takeProfitPct}%`,
     `Trailing: ${config.management.trailingTakeProfit ? "on" : "off"} | trigger ${config.management.trailingTriggerPct}% | drop ${config.management.trailingDropPct}%`,
@@ -1555,6 +1558,7 @@ export function formatFullConfig() {
     ]),
     group("━ GRUP 9 — Strategi Range (Bins)", [
       ["strategy", fmt(c.strategy.strategy)],
+      ["strategyLock", fmt(c.strategy.strategyLock ?? "default")],
       ["minBinsBelow", fmt(c.strategy.minBinsBelow)],
       ["maxBinsBelow", fmt(c.strategy.maxBinsBelow)],
       ["defaultBinsBelow", fmt(c.strategy.defaultBinsBelow)],
@@ -1721,6 +1725,7 @@ function settingValue(key) {
     gmgnMinTotalFeeSol: config.gmgn.minTotalFeeSol,
     gmgnMinHolders: config.gmgn.minHolders,
     strategy: config.strategy.strategy,
+    strategyLock: config.strategy.strategyLock,
     minBinsBelow: config.strategy.minBinsBelow,
     maxBinsBelow: config.strategy.maxBinsBelow,
     deployAmountSol: config.management.deployAmountSol,
@@ -1914,7 +1919,7 @@ function pageForKey(key) {
   if (["gmgnMinVolume", "gmgnMaxBundlerRate", "gmgnMinTokenAgeHours", "gmgnMaxTokenAgeHours"].includes(key)) return "screen";
   if (key.startsWith("gmgn") && key !== "gmgnRequireKol") return "gmgn";
   if (key.startsWith("indicator") || key.startsWith("smi") || key === "chartIndicatorsEnabled" || key === "rsiLength" || key === "requireAllIntervals") return "indicators";
-  if (["minBinsBelow", "maxBinsBelow"].includes(key)) return "strategy";
+  if (["minBinsBelow", "maxBinsBelow", "strategy", "strategyLock"].includes(key)) return "strategy";
   if (["useDiscordSignals", "blockPvpSymbols", "managementIntervalMin", "screeningIntervalMin", "maxScreeningIntervalMin", "adaptiveScreening", "screeningSource", "screeningCategories", "gmgnRequireKol"].includes(key)) return "screen";
   if (["candidateMomentum", "smartWalletMomentum", "expectedYieldSignal", "narrativeProfileSignal", "counterfactualReview", "counterfactualMinMcapGainPct", "exitLiquidityCheck", "exitLiquidityMaxSlippagePct", "marketRegimeGate", "marketRegimeMaxDrop24hPct", "convictionSizing", "convictionSizingMaxAdjustPct", "idleScreeningCooldown", "idleScreeningCooldownMin", "paperTrading", "usePaperHistoryWhenLive"].includes(key)) return "experiments";
   if (["learningReportEvery", "learningReportTrendN", "gasReserveAutoTune", "gasReserveBufferDays", "gasReserveFloorSol"].includes(key)) return "reports";
@@ -1930,7 +1935,7 @@ function renderSettingsMenu(page = "main") {
     identityLine,
     `Mode: ${config.management.solMode ? "SOL" : "USD"} | Relay: ${config.api.lpAgentRelayEnabled ? "on" : "off"}`,
     `Screening: ${config.screening.source} | cats ${Array.isArray(config.screening.categories) && config.screening.categories.length ? config.screening.categories.join(",") : `single (${config.screening.category})`} | GMGN KOL ${config.gmgn.requireKol ? "required" : "preferred"}`,
-    `Strategy: ${config.strategy.strategy} | deploy ${config.management.deployAmountSol} SOL | max pos ${config.risk.maxPositions}`,
+    `Strategy: ${config.strategy.strategy}${(config.strategy.strategyLock ?? "default") !== "default" ? ` 🔒${config.strategy.strategyLock}` : ""} | deploy ${config.management.deployAmountSol} SOL | max pos ${config.risk.maxPositions}`,
     `TP/SL: ${config.management.takeProfitPct}% / ${config.management.stopLossPct}% | trailing ${config.management.trailingTakeProfit ? "on" : "off"}`,
     `Indicators: ${config.indicators.enabled ? "on" : "off"} | entry ${config.indicators.entryPreset} | ${fmtSettingValue(config.indicators.intervals)}`,
     `🧪 Experiments ON: ${Object.entries(config.experiments).filter(([, v]) => v === true).map(([k]) => k).join(", ") || "none"}`,
@@ -2018,6 +2023,16 @@ function renderSettingsMenu(page = "main") {
       [
         settingButton("spot", "cfg:set:strategy:spot"),
         settingButton("bid_ask", "cfg:set:strategy:bid_ask"),
+      ],
+      // strategyLock: default = flexible (factory), spot/bid_ask = mechanical lock
+      // enforced in executor on every deploy (like mainzen_v2's bid_ask lock).
+      [
+        settingButton(`🔒 lock: ${fmtSettingValue(settingValue("strategyLock") ?? "default")}`, "cfg:page:strategy"),
+      ],
+      [
+        settingButton("default", "cfg:set:strategyLock:default"),
+        settingButton("lock spot", "cfg:set:strategyLock:spot"),
+        settingButton("lock bid_ask", "cfg:set:strategyLock:bid_ask"),
       ],
       inputButton("minBinsBelow", "Min bins"),
       inputButton("maxBinsBelow", "Max bins"),

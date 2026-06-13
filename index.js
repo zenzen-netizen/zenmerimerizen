@@ -35,6 +35,7 @@ import { renderGuide } from "./guide.js";
 import { getLastBriefingDate, setLastBriefingDate, getLastBriefingPinId, setLastBriefingPinId, getLastReportedMilestone, setLastReportedMilestone, getLastPeriodicBriefing, setLastPeriodicBriefing, getTrackedPosition, getTrackedPositions, setPositionInstruction, updatePnlAndCheckExits, queuePeakConfirmation, resolvePendingPeak, queueTrailingDropConfirmation, resolvePendingTrailingDrop } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
 import { listPresets, savePreset, applyPreset, getPresetDiff, deletePreset, validName, presetExists, getActiveSetupStatus, formatIdentity } from "./preset-manager.js";
+import { ORIGIN_SECTIONS, ORIGIN_NOTES } from "./config-origin.js";
 import { recordPositionSnapshot, recallForPool, addPoolNote } from "./pool-memory.js";
 import { isPaperMode } from "./paper-trading.js";
 import { recordCandidateSnapshots, getCandidateMomentum, formatCandidateMomentum, recordSmartWalletCounts, getSmartWalletMomentum, formatSmartWalletMomentum } from "./candidate-memory.js";
@@ -1471,6 +1472,12 @@ function formatIdentityLines() {
   try { return formatIdentity(); } catch { return "🧬 Profil: —\n🗂️ Racikan: —"; }
 }
 
+// RENDER-ONLY. Grouped by ORIGIN ("⚙️ Origin Dev" vs "🧩 Add by zen") per
+// config-origin.js (derived from notes/divergence-map.md). This function still
+// owns every live value + its formatting; config-origin.js owns only WHERE each
+// row lands. rowMap keys must match the keys listed in ORIGIN_SECTIONS — any
+// computed row not placed by the layout falls into a visible "review" bucket, so
+// no key is ever silently dropped (old key count == new key count).
 export function formatFullConfig() {
   const c = config;
   const fmt = (v) => {
@@ -1480,215 +1487,251 @@ export function formatFullConfig() {
     return String(v);
   };
   const secret = (v) => (v && String(v).length ? "(set)" : "(unset)");
-  const group = (title, rows) => [title, ...rows.map(([k, v]) => `  ${k}: ${v}`)].join("\n");
   const ir = c.gmgn.indicatorRules || {};
   const gmgnActive = String(c.screening.source).toLowerCase() === "gmgn";
 
-  const blocks = [
-    group("━ GRUP 1 — Risiko & Modal", [
-      ["dryRun", fmt(String(process.env.DRY_RUN || "").toLowerCase() === "true")],
-      ["maxPositions", fmt(c.risk.maxPositions)],
-      ["maxDeployAmount", fmt(c.risk.maxDeployAmount)],
-      ["deployAmountSol", fmt(c.management.deployAmountSol)],
-      ["positionSizePct", fmt(c.management.positionSizePct)],
-      ["minSolToOpen", fmt(c.management.minSolToOpen)],
-      ["gasReserve", `${fmt(c.management.gasReserve)}${c.management.gasReserveAutoTune ? " (auto-tune ON)" : " (manual)"}`],
-      ["gasReserveAutoTune", fmt(c.management.gasReserveAutoTune)],
-      ["gasReserveBufferDays", fmt(c.management.gasReserveBufferDays)],
-      ["gasReserveFloorSol", fmt(c.management.gasReserveFloorSol)],
-    ]),
-    group("━ GRUP 2 — Exit Rules", [
-      ["stopLossPct", fmt(c.management.stopLossPct)],
-      ["takeProfitPct", fmt(c.management.takeProfitPct)],
-      ["trailingTakeProfit", fmt(c.management.trailingTakeProfit)],
-      ["trailingTriggerPct", fmt(c.management.trailingTriggerPct)],
-      ["trailingDropPct", fmt(c.management.trailingDropPct)],
-      ["pnlSanityMaxDiffPct", fmt(c.management.pnlSanityMaxDiffPct)],
-    ]),
-    group("━ GRUP 3 — Out Of Range (OOR)", [
-      ["outOfRangeBinsToClose", fmt(c.management.outOfRangeBinsToClose)],
-      ["outOfRangeWaitMinutes", fmt(c.management.outOfRangeWaitMinutes)],
-      ["oorCooldownTriggerCount", fmt(c.management.oorCooldownTriggerCount)],
-      ["oorCooldownHours", fmt(c.management.oorCooldownHours)],
-    ]),
-    group("━ GRUP 4 — Yield Check", [
-      ["minFeePerTvl24h", fmt(c.management.minFeePerTvl24h)],
-      ["minAgeBeforeYieldCheck", fmt(c.management.minAgeBeforeYieldCheck)],
-      ["minVolumeToRebalance", fmt(c.management.minVolumeToRebalance)],
-    ]),
-    group("━ GRUP 5 — Claim & Cooldown Deploy Ulang", [
-      ["minClaimAmount", fmt(c.management.minClaimAmount)],
-      ["autoSwapAfterClaim", fmt(c.management.autoSwapAfterClaim)],
-      ["repeatDeployCooldownEnabled", fmt(c.management.repeatDeployCooldownEnabled)],
-      ["repeatDeployCooldownTriggerCount", fmt(c.management.repeatDeployCooldownTriggerCount)],
-      ["repeatDeployCooldownHours", fmt(c.management.repeatDeployCooldownHours)],
-      ["repeatDeployCooldownScope", fmt(c.management.repeatDeployCooldownScope)],
-      ["repeatDeployCooldownMinFeeEarnedPct", fmt(c.management.repeatDeployCooldownMinFeeEarnedPct)],
-    ]),
-    group("━ GRUP 6 — Screening (Filter Pool)", [
-      ["screeningSource", fmt(c.screening.source)],
-      ["timeframe", fmt(c.screening.timeframe)],
-      ["category", fmt(c.screening.category)],
-      ["screeningCategories", fmt(c.screening.categories)],
-      ["minTvl", fmt(c.screening.minTvl)],
-      ["maxTvl", fmt(c.screening.maxTvl)],
-      ["minVolume", fmt(c.screening.minVolume)],
-      ["minFeeActiveTvlRatio", fmt(c.screening.minFeeActiveTvlRatio)],
-      ["minTokenFeesSol", fmt(c.screening.minTokenFeesSol)],
-      ["minOrganic", fmt(c.screening.minOrganic)],
-      ["minQuoteOrganic", fmt(c.screening.minQuoteOrganic)],
-      ["minMcap", fmt(c.screening.minMcap)],
-      ["maxMcap", fmt(c.screening.maxMcap)],
-      ["minHolders", fmt(c.screening.minHolders)],
-      ["minTokenAgeHours", fmt(c.screening.minTokenAgeHours)],
-      ["maxTokenAgeHours", fmt(c.screening.maxTokenAgeHours)],
-      ["athFilterPct", fmt(c.screening.athFilterPct)],
-      ["minBinStep", fmt(c.screening.minBinStep)],
-      ["maxBinStep", fmt(c.screening.maxBinStep)],
-      ["excludeHighSupplyConcentration", fmt(c.screening.excludeHighSupplyConcentration)],
-    ]),
-    group("━ GRUP 7 — Keamanan Token", [
-      ["maxBundlePct", fmt(c.screening.maxBundlePct)],
-      ["maxBotHoldersPct", fmt(c.screening.maxBotHoldersPct)],
-      ["maxTop10Pct", fmt(c.screening.maxTop10Pct)],
-      ["avoidPvpSymbols", fmt(c.screening.avoidPvpSymbols)],
-      ["blockPvpSymbols", fmt(c.screening.blockPvpSymbols)],
-      ["allowedLaunchpads", fmt(c.screening.allowedLaunchpads)],
-      ["blockedLaunchpads", fmt(c.screening.blockedLaunchpads)],
-    ]),
-    group("━ GRUP 8 — Sinyal Tambahan", [
-      ["useDiscordSignals", fmt(c.screening.useDiscordSignals)],
-      ["discordSignalMode", fmt(c.screening.discordSignalMode)],
-    ]),
-    group("━ GRUP 9 — Strategi Range (Bins)", [
-      ["strategy", fmt(c.strategy.strategy)],
-      ["strategyLock", fmt(c.strategy.strategyLock ?? "default")],
-      ["minBinsBelow", fmt(c.strategy.minBinsBelow)],
-      ["maxBinsBelow", fmt(c.strategy.maxBinsBelow)],
-      ["defaultBinsBelow", fmt(c.strategy.defaultBinsBelow)],
-    ]),
-    group("━ GRUP 10 — Jadwal Bot", [
-      ["managementIntervalMin", fmt(c.schedule.managementIntervalMin)],
-      ["screeningIntervalMin", fmt(c.schedule.screeningIntervalMin)],
-      ["adaptiveScreening", fmt(c.schedule.adaptiveScreening)],
-      ["maxScreeningIntervalMin", fmt(c.schedule.maxScreeningIntervalMin)],
-      ["healthCheckIntervalMin", fmt(c.schedule.healthCheckIntervalMin)],
-    ]),
-    group("━ GRUP 11 — Model AI (LLM)", [
-      ["managementModel", fmt(c.llm.managementModel)],
-      ["screeningModel", fmt(c.llm.screeningModel)],
-      ["generalModel", fmt(c.llm.generalModel)],
-      ["temperature", fmt(c.llm.temperature)],
-      ["maxTokens", fmt(c.llm.maxTokens)],
-      ["generalMaxTokens", fmt(c.llm.generalMaxTokens)],
-      ["maxSteps", fmt(c.llm.maxSteps)],
-    ]),
-    group("━ GRUP 12 — Darwin (Bobot Sinyal)", [
-      ["darwinEnabled", fmt(c.darwin.enabled)],
-      ["darwinWindowDays", fmt(c.darwin.windowDays)],
-      ["darwinRecalcEvery", fmt(c.darwin.recalcEvery)],
-      ["darwinBoost", fmt(c.darwin.boostFactor)],
-      ["darwinDecay", fmt(c.darwin.decayFactor)],
-      ["darwinFloor", fmt(c.darwin.weightFloor)],
-      ["darwinCeiling", fmt(c.darwin.weightCeiling)],
-      ["darwinMinSamples", fmt(c.darwin.minSamples)],
-    ]),
-    group("━ GRUP 13 — Chart Indicators", [
-      ["enabled", fmt(c.indicators.enabled)],
-      ["entryPreset", fmt(c.indicators.entryPreset)],
-      ["exitPreset", fmt(c.indicators.exitPreset)],
-      ["exitEnabled", fmt(c.indicators.exitEnabled)],
-      ["rejectAlreadyAtBottom", fmt(c.indicators.rejectAlreadyAtBottom)],
-      ["rsiLength", fmt(c.indicators.rsiLength)],
-      ["intervals", fmt(c.indicators.intervals)],
-      ["candles", fmt(c.indicators.candles)],
-      ["rsiOversold", fmt(c.indicators.rsiOversold)],
-      ["rsiOverbought", fmt(c.indicators.rsiOverbought)],
-      ["requireAllIntervals", fmt(c.indicators.requireAllIntervals)],
-      ["smiPdLookback", fmt(c.indicators.smiPdLookback)],
-      ["smiPaLookback", fmt(c.indicators.smiPaLookback)],
-      ["smiCrossWindow", fmt(c.indicators.smiCrossWindow)],
-    ]),
-    group("━ GRUP 14 — Koneksi & Relay", [
-      ["lpAgentRelayEnabled", fmt(c.api.lpAgentRelayEnabled)],
-      ["solMode", fmt(c.management.solMode)],
-      ["agentId", fmt(c.hiveMind.agentId)],
-      ["publicApiKey", secret(c.api.publicApiKey)],
-      ["pnlSource", fmt(c.pnl.source)],
-      ["pnlRpcUrl", fmt(c.pnl.rpcUrl)],
-      ["pnlPollIntervalSec", fmt(c.pnl.pollIntervalSec)],
-      ["pnlDepositCacheTtlSec", fmt(c.pnl.depositCacheTtlSec)],
-      ["gmgnFeeSource", fmt(c.gmgn.feeSource)],
-    ]),
-    group("━ GRUP 15 — HiveMind", [
-      ["status", isHiveMindEnabled() ? "enabled" : "disabled"],
-      ["hiveMindPullMode", fmt(c.hiveMind.pullMode)],
-      ["hiveMindUrl", fmt(c.hiveMind.url)],
-    ]),
-    group("━ 🧪 GRUP 16 — Eksperimen (default OFF = pabrik)", [
-      ["exitLiquidityCheck", fmt(c.experiments?.exitLiquidityCheck)],
-      ["exitLiquidityMaxSlippagePct", fmt(c.experiments?.exitLiquidityMaxSlippagePct)],
-      ["marketRegimeGate", fmt(c.experiments?.marketRegimeGate)],
-      ["marketRegimeMaxDrop24hPct", fmt(c.experiments?.marketRegimeMaxDrop24hPct)],
-      ["candidateMomentum", fmt(c.experiments?.candidateMomentum)],
-      ["narrativeProfileSignal", fmt(c.experiments?.narrativeProfileSignal)],
-      ["expectedYieldSignal", fmt(c.experiments?.expectedYieldSignal)],
-      ["convictionSizing", fmt(c.experiments?.convictionSizing)],
-      ["convictionSizingMaxAdjustPct", fmt(c.experiments?.convictionSizingMaxAdjustPct)],
-      ["counterfactualReview", fmt(c.experiments?.counterfactualReview)],
-      ["counterfactualMinMcapGainPct", fmt(c.experiments?.counterfactualMinMcapGainPct)],
-      ["smartWalletMomentum", fmt(c.experiments?.smartWalletMomentum)],
-      ["idleScreeningCooldown", fmt(c.experiments?.idleScreeningCooldown)],
-      ["idleScreeningCooldownMin", fmt(c.experiments?.idleScreeningCooldownMin)],
-      ["paperTrading", `${fmt(c.experiments?.paperTrading)}${c.experiments?.paperTrading ? " (DRY-RUN sim)" : ""}`],
-      ["usePaperHistoryWhenLive", `${fmt(c.experiments?.usePaperHistoryWhenLive)}${c.experiments?.usePaperHistoryWhenLive ? " (live: paper=soft ref)" : ""}`],
-    ]),
-    group("━ GRUP 17 — Laporan", [
-      ["learningReportEvery", `${fmt(c.reports?.learningReportEvery)}${c.reports?.learningReportEvery > 0 ? " (ON)" : " (OFF)"}`],
-      ["learningReportTrendN", fmt(c.reports?.learningReportTrendN)],
-    ]),
-    group(`━ GMGN — ${gmgnActive ? "AKTIF (source=gmgn)" : `tidak aktif (source=${c.screening.source}, blok ini diabaikan)`}`, [
-      ["interval", fmt(c.gmgn.interval)],
-      ["orderBy", fmt(c.gmgn.orderBy)],
-      ["direction", fmt(c.gmgn.direction)],
-      ["platforms", fmt(c.gmgn.platforms)],
-      ["filters", fmt(c.gmgn.filters)],
-      ["minMcap", fmt(c.gmgn.minMcap)],
-      ["maxMcap", fmt(c.gmgn.maxMcap)],
-      ["minTvl", fmt(c.gmgn.minTvl)],
-      ["minVolume", fmt(c.gmgn.minVolume)],
-      ["minHolders", fmt(c.gmgn.minHolders)],
-      ["minTokenAgeHours", fmt(c.gmgn.minTokenAgeHours)],
-      ["maxTokenAgeHours", fmt(c.gmgn.maxTokenAgeHours)],
-      ["athFilterPct", fmt(c.gmgn.athFilterPct)],
-      ["minTotalFeeSol", fmt(c.gmgn.minTotalFeeSol)],
-      ["requireKol", fmt(c.gmgn.requireKol)],
-      ["minKolCount", fmt(c.gmgn.minKolCount)],
-      ["minSmartDegenCount", fmt(c.gmgn.minSmartDegenCount)],
-      ["maxRugRatio", fmt(c.gmgn.maxRugRatio)],
-      ["maxBundlerRate", fmt(c.gmgn.maxBundlerRate)],
-      ["maxRatTraderRate", fmt(c.gmgn.maxRatTraderRate)],
-      ["maxFreshWalletRate", fmt(c.gmgn.maxFreshWalletRate)],
-      ["maxDevTeamHoldRate", fmt(c.gmgn.maxDevTeamHoldRate)],
-      ["maxBotDegenRate", fmt(c.gmgn.maxBotDegenRate)],
-      ["maxSniperCount", fmt(c.gmgn.maxSniperCount)],
-      ["maxSniperHoldRate", fmt(c.gmgn.maxSniperHoldRate)],
-      ["preferredKolNames", fmt(c.gmgn.preferredKolNames)],
-      ["preferredKolMinHoldPct", fmt(c.gmgn.preferredKolMinHoldPct)],
-      ["dumpKolNames", fmt(c.gmgn.dumpKolNames)],
-      ["dumpKolMinHoldPct", fmt(c.gmgn.dumpKolMinHoldPct)],
-      ["indicatorFilter", fmt(c.gmgn.indicatorFilter)],
-      ["indicatorInterval", fmt(c.gmgn.indicatorInterval)],
-      ["rules.requireBullishSupertrend", fmt(ir.requireBullishSupertrend)],
-      ["rules.rejectAlreadyAtBottom", fmt(ir.rejectAlreadyAtBottom)],
-      ["rules.requireAboveSupertrend", fmt(ir.requireAboveSupertrend)],
-      ["rules.minRsi", fmt(ir.minRsi)],
-      ["rules.maxRsi", fmt(ir.maxRsi)],
-      ["rules.requireBbPosition", fmt(ir.requireBbPosition)],
-    ]),
-  ];
+  // rowMap: unique key → [displayLabel, valueString]. GMGN screening rows are
+  // namespaced "gmgn." so they don't collide with their screening twins; their
+  // visible label stays the short form (interval, minTvl, …) as before.
+  const rowMap = {
+    // ── Screening (dev) ──
+    timeframe: ["timeframe", fmt(c.screening.timeframe)],
+    category: ["category", fmt(c.screening.category)],
+    minTvl: ["minTvl", fmt(c.screening.minTvl)],
+    maxTvl: ["maxTvl", fmt(c.screening.maxTvl)],
+    minVolume: ["minVolume", fmt(c.screening.minVolume)],
+    minFeeActiveTvlRatio: ["minFeeActiveTvlRatio", fmt(c.screening.minFeeActiveTvlRatio)],
+    minTokenFeesSol: ["minTokenFeesSol", fmt(c.screening.minTokenFeesSol)],
+    minOrganic: ["minOrganic", fmt(c.screening.minOrganic)],
+    minQuoteOrganic: ["minQuoteOrganic", fmt(c.screening.minQuoteOrganic)],
+    minMcap: ["minMcap", fmt(c.screening.minMcap)],
+    maxMcap: ["maxMcap", fmt(c.screening.maxMcap)],
+    minHolders: ["minHolders", fmt(c.screening.minHolders)],
+    minTokenAgeHours: ["minTokenAgeHours", fmt(c.screening.minTokenAgeHours)],
+    maxTokenAgeHours: ["maxTokenAgeHours", fmt(c.screening.maxTokenAgeHours)],
+    minBinStep: ["minBinStep", fmt(c.screening.minBinStep)],
+    maxBinStep: ["maxBinStep", fmt(c.screening.maxBinStep)],
+    excludeHighSupplyConcentration: ["excludeHighSupplyConcentration", fmt(c.screening.excludeHighSupplyConcentration)],
+    maxBotHoldersPct: ["maxBotHoldersPct", fmt(c.screening.maxBotHoldersPct)],
+    maxTop10Pct: ["maxTop10Pct", fmt(c.screening.maxTop10Pct)],
+    avoidPvpSymbols: ["avoidPvpSymbols", fmt(c.screening.avoidPvpSymbols)],
+    blockPvpSymbols: ["blockPvpSymbols", fmt(c.screening.blockPvpSymbols)],
+    allowedLaunchpads: ["allowedLaunchpads", fmt(c.screening.allowedLaunchpads)],
+    blockedLaunchpads: ["blockedLaunchpads", fmt(c.screening.blockedLaunchpads)],
+    useDiscordSignals: ["useDiscordSignals", fmt(c.screening.useDiscordSignals)],
+    discordSignalMode: ["discordSignalMode", fmt(c.screening.discordSignalMode)],
 
-  return `⚙️ Config lengkap (semua grup)\n\n${formatIdentityLines()}\n\n${blocks.join("\n\n")}\n\nUbah lewat /settings (menu tombol) atau chat biasa. Detail tiap setting: SETTINGS-GUIDE.md`;
+    // ── Management & Risk (dev) ──
+    dryRun: ["dryRun", fmt(String(process.env.DRY_RUN || "").toLowerCase() === "true")],
+    maxPositions: ["maxPositions", fmt(c.risk.maxPositions)],
+    maxDeployAmount: ["maxDeployAmount", fmt(c.risk.maxDeployAmount)],
+    deployAmountSol: ["deployAmountSol", fmt(c.management.deployAmountSol)],
+    positionSizePct: ["positionSizePct", fmt(c.management.positionSizePct)],
+    minSolToOpen: ["minSolToOpen", fmt(c.management.minSolToOpen)],
+    gasReserve: ["gasReserve", `${fmt(c.management.gasReserve)}${c.management.gasReserveAutoTune ? " (auto-tune ON)" : " (manual)"}`],
+    stopLossPct: ["stopLossPct", fmt(c.management.stopLossPct)],
+    takeProfitPct: ["takeProfitPct", fmt(c.management.takeProfitPct)],
+    trailingTakeProfit: ["trailingTakeProfit", fmt(c.management.trailingTakeProfit)],
+    trailingTriggerPct: ["trailingTriggerPct", fmt(c.management.trailingTriggerPct)],
+    trailingDropPct: ["trailingDropPct", fmt(c.management.trailingDropPct)],
+    outOfRangeBinsToClose: ["outOfRangeBinsToClose", fmt(c.management.outOfRangeBinsToClose)],
+    outOfRangeWaitMinutes: ["outOfRangeWaitMinutes", fmt(c.management.outOfRangeWaitMinutes)],
+    oorCooldownTriggerCount: ["oorCooldownTriggerCount", fmt(c.management.oorCooldownTriggerCount)],
+    oorCooldownHours: ["oorCooldownHours", fmt(c.management.oorCooldownHours)],
+    minFeePerTvl24h: ["minFeePerTvl24h", fmt(c.management.minFeePerTvl24h)],
+    minAgeBeforeYieldCheck: ["minAgeBeforeYieldCheck", fmt(c.management.minAgeBeforeYieldCheck)],
+    minVolumeToRebalance: ["minVolumeToRebalance", fmt(c.management.minVolumeToRebalance)],
+    minClaimAmount: ["minClaimAmount", fmt(c.management.minClaimAmount)],
+    autoSwapAfterClaim: ["autoSwapAfterClaim", fmt(c.management.autoSwapAfterClaim)],
+    repeatDeployCooldownEnabled: ["repeatDeployCooldownEnabled", fmt(c.management.repeatDeployCooldownEnabled)],
+    repeatDeployCooldownTriggerCount: ["repeatDeployCooldownTriggerCount", fmt(c.management.repeatDeployCooldownTriggerCount)],
+    repeatDeployCooldownHours: ["repeatDeployCooldownHours", fmt(c.management.repeatDeployCooldownHours)],
+    repeatDeployCooldownScope: ["repeatDeployCooldownScope", fmt(c.management.repeatDeployCooldownScope)],
+    repeatDeployCooldownMinFeeEarnedPct: ["repeatDeployCooldownMinFeeEarnedPct", fmt(c.management.repeatDeployCooldownMinFeeEarnedPct)],
+    solMode: ["solMode", fmt(c.management.solMode)],
+
+    // ── Strategy & Bins (dev) ──
+    strategy: ["strategy", fmt(c.strategy.strategy)],
+    minBinsBelow: ["minBinsBelow", fmt(c.strategy.minBinsBelow)],
+    maxBinsBelow: ["maxBinsBelow", fmt(c.strategy.maxBinsBelow)],
+    defaultBinsBelow: ["defaultBinsBelow", fmt(c.strategy.defaultBinsBelow)],
+
+    // ── Schedule (dev) ──
+    managementIntervalMin: ["managementIntervalMin", fmt(c.schedule.managementIntervalMin)],
+    screeningIntervalMin: ["screeningIntervalMin", fmt(c.schedule.screeningIntervalMin)],
+    healthCheckIntervalMin: ["healthCheckIntervalMin", fmt(c.schedule.healthCheckIntervalMin)],
+
+    // ── LLM (dev) ──
+    managementModel: ["managementModel", fmt(c.llm.managementModel)],
+    screeningModel: ["screeningModel", fmt(c.llm.screeningModel)],
+    generalModel: ["generalModel", fmt(c.llm.generalModel)],
+    temperature: ["temperature", fmt(c.llm.temperature)],
+    maxTokens: ["maxTokens", fmt(c.llm.maxTokens)],
+    maxSteps: ["maxSteps", fmt(c.llm.maxSteps)],
+
+    // ── Darwin (dev) ──
+    darwinEnabled: ["darwinEnabled", fmt(c.darwin.enabled)],
+    darwinWindowDays: ["darwinWindowDays", fmt(c.darwin.windowDays)],
+    darwinRecalcEvery: ["darwinRecalcEvery", fmt(c.darwin.recalcEvery)],
+    darwinBoost: ["darwinBoost", fmt(c.darwin.boostFactor)],
+    darwinDecay: ["darwinDecay", fmt(c.darwin.decayFactor)],
+    darwinFloor: ["darwinFloor", fmt(c.darwin.weightFloor)],
+    darwinCeiling: ["darwinCeiling", fmt(c.darwin.weightCeiling)],
+    darwinMinSamples: ["darwinMinSamples", fmt(c.darwin.minSamples)],
+
+    // ── Indicators (dev) ──
+    enabled: ["enabled", fmt(c.indicators.enabled)],
+    entryPreset: ["entryPreset", fmt(c.indicators.entryPreset)],
+    exitPreset: ["exitPreset", fmt(c.indicators.exitPreset)],
+    rsiLength: ["rsiLength", fmt(c.indicators.rsiLength)],
+    intervals: ["intervals", fmt(c.indicators.intervals)],
+    candles: ["candles", fmt(c.indicators.candles)],
+    rsiOversold: ["rsiOversold", fmt(c.indicators.rsiOversold)],
+    rsiOverbought: ["rsiOverbought", fmt(c.indicators.rsiOverbought)],
+    requireAllIntervals: ["requireAllIntervals", fmt(c.indicators.requireAllIntervals)],
+
+    // ── Infra/Meridian (dev) ──
+    lpAgentRelayEnabled: ["lpAgentRelayEnabled", fmt(c.api.lpAgentRelayEnabled)],
+    agentId: ["agentId", fmt(c.hiveMind.agentId)],
+    publicApiKey: ["publicApiKey", secret(c.api.publicApiKey)],
+    pnlSource: ["pnlSource", fmt(c.pnl.source)],
+    pnlRpcUrl: ["pnlRpcUrl", fmt(c.pnl.rpcUrl)],
+    pnlPollIntervalSec: ["pnlPollIntervalSec", fmt(c.pnl.pollIntervalSec)],
+    pnlDepositCacheTtlSec: ["pnlDepositCacheTtlSec", fmt(c.pnl.depositCacheTtlSec)],
+    pnlSanityMaxDiffPct: ["pnlSanityMaxDiffPct", fmt(c.management.pnlSanityMaxDiffPct)],
+    gmgnFeeSource: ["gmgnFeeSource", fmt(c.gmgn.feeSource)],
+    hiveMindStatus: ["status", isHiveMindEnabled() ? "enabled" : "disabled"],
+    hiveMindPullMode: ["hiveMindPullMode", fmt(c.hiveMind.pullMode)],
+    hiveMindUrl: ["hiveMindUrl", fmt(c.hiveMind.url)],
+
+    // ── UNKNOWN (origin unconfirmed; undefined in config.js → render off) ──
+    athFilterPct: ["athFilterPct", fmt(c.screening.athFilterPct)],
+    maxBundlePct: ["maxBundlePct", fmt(c.screening.maxBundlePct)],
+
+    // ── Screening+ (zen) ──
+    screeningSource: ["screeningSource", fmt(c.screening.source)],
+    screeningCategories: ["screeningCategories", fmt(c.screening.categories)],
+
+    // ── Screening-GMGN (zen) ──
+    "gmgn.interval": ["interval", fmt(c.gmgn.interval)],
+    "gmgn.orderBy": ["orderBy", fmt(c.gmgn.orderBy)],
+    "gmgn.direction": ["direction", fmt(c.gmgn.direction)],
+    "gmgn.platforms": ["platforms", fmt(c.gmgn.platforms)],
+    "gmgn.filters": ["filters", fmt(c.gmgn.filters)],
+    "gmgn.minMcap": ["minMcap", fmt(c.gmgn.minMcap)],
+    "gmgn.maxMcap": ["maxMcap", fmt(c.gmgn.maxMcap)],
+    "gmgn.minTvl": ["minTvl", fmt(c.gmgn.minTvl)],
+    "gmgn.minVolume": ["minVolume", fmt(c.gmgn.minVolume)],
+    "gmgn.minHolders": ["minHolders", fmt(c.gmgn.minHolders)],
+    "gmgn.minTokenAgeHours": ["minTokenAgeHours", fmt(c.gmgn.minTokenAgeHours)],
+    "gmgn.maxTokenAgeHours": ["maxTokenAgeHours", fmt(c.gmgn.maxTokenAgeHours)],
+    "gmgn.athFilterPct": ["athFilterPct", fmt(c.gmgn.athFilterPct)],
+    "gmgn.minTotalFeeSol": ["minTotalFeeSol", fmt(c.gmgn.minTotalFeeSol)],
+    "gmgn.requireKol": ["requireKol", fmt(c.gmgn.requireKol)],
+    "gmgn.minKolCount": ["minKolCount", fmt(c.gmgn.minKolCount)],
+    "gmgn.minSmartDegenCount": ["minSmartDegenCount", fmt(c.gmgn.minSmartDegenCount)],
+    "gmgn.maxRugRatio": ["maxRugRatio", fmt(c.gmgn.maxRugRatio)],
+    "gmgn.maxBundlerRate": ["maxBundlerRate", fmt(c.gmgn.maxBundlerRate)],
+    "gmgn.maxRatTraderRate": ["maxRatTraderRate", fmt(c.gmgn.maxRatTraderRate)],
+    "gmgn.maxFreshWalletRate": ["maxFreshWalletRate", fmt(c.gmgn.maxFreshWalletRate)],
+    "gmgn.maxDevTeamHoldRate": ["maxDevTeamHoldRate", fmt(c.gmgn.maxDevTeamHoldRate)],
+    "gmgn.maxBotDegenRate": ["maxBotDegenRate", fmt(c.gmgn.maxBotDegenRate)],
+    "gmgn.maxSniperCount": ["maxSniperCount", fmt(c.gmgn.maxSniperCount)],
+    "gmgn.maxSniperHoldRate": ["maxSniperHoldRate", fmt(c.gmgn.maxSniperHoldRate)],
+    "gmgn.preferredKolNames": ["preferredKolNames", fmt(c.gmgn.preferredKolNames)],
+    "gmgn.preferredKolMinHoldPct": ["preferredKolMinHoldPct", fmt(c.gmgn.preferredKolMinHoldPct)],
+    "gmgn.dumpKolNames": ["dumpKolNames", fmt(c.gmgn.dumpKolNames)],
+    "gmgn.dumpKolMinHoldPct": ["dumpKolMinHoldPct", fmt(c.gmgn.dumpKolMinHoldPct)],
+    "gmgn.indicatorFilter": ["indicatorFilter", fmt(c.gmgn.indicatorFilter)],
+    "gmgn.indicatorInterval": ["indicatorInterval", fmt(c.gmgn.indicatorInterval)],
+    "gmgn.rules.requireBullishSupertrend": ["rules.requireBullishSupertrend", fmt(ir.requireBullishSupertrend)],
+    "gmgn.rules.rejectAlreadyAtBottom": ["rules.rejectAlreadyAtBottom", fmt(ir.rejectAlreadyAtBottom)],
+    "gmgn.rules.requireAboveSupertrend": ["rules.requireAboveSupertrend", fmt(ir.requireAboveSupertrend)],
+    "gmgn.rules.minRsi": ["rules.minRsi", fmt(ir.minRsi)],
+    "gmgn.rules.maxRsi": ["rules.maxRsi", fmt(ir.maxRsi)],
+    "gmgn.rules.requireBbPosition": ["rules.requireBbPosition", fmt(ir.requireBbPosition)],
+
+    // ── Management+ (zen) ──
+    gasReserveAutoTune: ["gasReserveAutoTune", fmt(c.management.gasReserveAutoTune)],
+    gasReserveBufferDays: ["gasReserveBufferDays", fmt(c.management.gasReserveBufferDays)],
+    gasReserveFloorSol: ["gasReserveFloorSol", fmt(c.management.gasReserveFloorSol)],
+
+    // ── Strategy+ (zen) ──
+    strategyLock: ["strategyLock", fmt(c.strategy.strategyLock ?? "default")],
+
+    // ── Schedule+ (zen) ──
+    adaptiveScreening: ["adaptiveScreening", fmt(c.schedule.adaptiveScreening)],
+    maxScreeningIntervalMin: ["maxScreeningIntervalMin", fmt(c.schedule.maxScreeningIntervalMin)],
+
+    // ── LLM+ (zen) ──
+    generalMaxTokens: ["generalMaxTokens", fmt(c.llm.generalMaxTokens)],
+
+    // ── Indicators+ (zen) ──
+    exitEnabled: ["exitEnabled", fmt(c.indicators.exitEnabled)],
+    rejectAlreadyAtBottom: ["rejectAlreadyAtBottom", fmt(c.indicators.rejectAlreadyAtBottom)],
+    smiPdLookback: ["smiPdLookback", fmt(c.indicators.smiPdLookback)],
+    smiPaLookback: ["smiPaLookback", fmt(c.indicators.smiPaLookback)],
+    smiCrossWindow: ["smiCrossWindow", fmt(c.indicators.smiCrossWindow)],
+
+    // ── Reports (zen) ──
+    learningReportEvery: ["learningReportEvery", `${fmt(c.reports?.learningReportEvery)}${c.reports?.learningReportEvery > 0 ? " (ON)" : " (OFF)"}`],
+    learningReportTrendN: ["learningReportTrendN", fmt(c.reports?.learningReportTrendN)],
+
+    // ── 🧪 Experiments (zen) ──
+    exitLiquidityCheck: ["exitLiquidityCheck", fmt(c.experiments?.exitLiquidityCheck)],
+    exitLiquidityMaxSlippagePct: ["exitLiquidityMaxSlippagePct", fmt(c.experiments?.exitLiquidityMaxSlippagePct)],
+    marketRegimeGate: ["marketRegimeGate", fmt(c.experiments?.marketRegimeGate)],
+    marketRegimeMaxDrop24hPct: ["marketRegimeMaxDrop24hPct", fmt(c.experiments?.marketRegimeMaxDrop24hPct)],
+    candidateMomentum: ["candidateMomentum", fmt(c.experiments?.candidateMomentum)],
+    narrativeProfileSignal: ["narrativeProfileSignal", fmt(c.experiments?.narrativeProfileSignal)],
+    expectedYieldSignal: ["expectedYieldSignal", fmt(c.experiments?.expectedYieldSignal)],
+    convictionSizing: ["convictionSizing", fmt(c.experiments?.convictionSizing)],
+    convictionSizingMaxAdjustPct: ["convictionSizingMaxAdjustPct", fmt(c.experiments?.convictionSizingMaxAdjustPct)],
+    counterfactualReview: ["counterfactualReview", fmt(c.experiments?.counterfactualReview)],
+    counterfactualMinMcapGainPct: ["counterfactualMinMcapGainPct", fmt(c.experiments?.counterfactualMinMcapGainPct)],
+    smartWalletMomentum: ["smartWalletMomentum", fmt(c.experiments?.smartWalletMomentum)],
+    idleScreeningCooldown: ["idleScreeningCooldown", fmt(c.experiments?.idleScreeningCooldown)],
+    idleScreeningCooldownMin: ["idleScreeningCooldownMin", fmt(c.experiments?.idleScreeningCooldownMin)],
+    paperTrading: ["paperTrading", `${fmt(c.experiments?.paperTrading)}${c.experiments?.paperTrading ? " (DRY-RUN sim)" : ""}`],
+    usePaperHistoryWhenLive: ["usePaperHistoryWhenLive", `${fmt(c.experiments?.usePaperHistoryWhenLive)}${c.experiments?.usePaperHistoryWhenLive ? " (live: paper=soft ref)" : ""}`],
+  };
+
+  const note = (k) => (ORIGIN_NOTES[k] ? ` ${ORIGIN_NOTES[k]}` : "");
+  const placed = new Set();
+
+  const sectionBlocks = ORIGIN_SECTIONS.map((sec) => {
+    const subBlocks = sec.subgroups.map((sg) => {
+      // Racikan/Identitas sub-group renders the identity banner, not key rows.
+      if (sg.identity) {
+        const body = formatIdentityLines().split("\n").map((l) => `  ${l}`).join("\n");
+        return `▸ ${sg.title} · ${sg.desc}\n${body}`;
+      }
+      // GMGN sub-group keeps its dynamic active/inactive description.
+      const desc = sg.id === "zen-gmgn"
+        ? (gmgnActive ? "Pipeline screening GMGN AKTIF (source=gmgn)." : `Pipeline screening GMGN tidak aktif (source=${c.screening.source}, blok ini diabaikan).`)
+        : sg.desc;
+      const rows = sg.keys.filter((k) => rowMap[k]).map((k) => {
+        placed.add(k);
+        const [label, value] = rowMap[k];
+        return `  ${label}: ${value}${note(k)}`;
+      });
+      return `▸ ${sg.title} · ${desc}\n${rows.join("\n")}`;
+    });
+    const bar = "━━━━━━━━━━━━━━━━━━━━━━";
+    return `${bar}\n${sec.title} — ${sec.blurb}\n${bar}\n\n${subBlocks.join("\n\n")}`;
+  });
+
+  // Safety net: any computed row the layout did not place is surfaced (never
+  // dropped) so old key count == new key count even if a key is mis-listed.
+  const orphans = Object.keys(rowMap).filter((k) => !placed.has(k));
+  if (orphans.length) {
+    const rows = orphans.map((k) => { const [label, value] = rowMap[k]; return `  ${label}: ${value}`; });
+    sectionBlocks.push(`▸ ❓ Belum terpetakan (auto — cek config-origin.js)\n${rows.join("\n")}`);
+  }
+
+  const intro = "⚙️ Config lengkap — dikelompokkan per ASAL (⚙️ Origin Dev vs 🧩 Add by zen)";
+  const outro = "Ubah lewat /settings (menu tombol) atau chat biasa. Detail tiap setting: SETTINGS-GUIDE.md";
+  return `${intro}\n\n${sectionBlocks.join("\n\n\n")}\n\n${outro}`;
 }
 
 function parseConfigValue(raw) {

@@ -2033,17 +2033,218 @@ function inputButton(key, label, { digits = 0 } = {}) {
 
 // Which settings page a given key lives on — used to return to the right page after
 // a toggle/step/set/input. Single source of truth (was duplicated in two callbacks).
+// ── /settings editable controls (config-origin key → existing menu control) ──
+// RENDER-ONLY placement registry. Maps each config-origin row key to the control
+// the /settings menu ALREADY exposes for it (same settingValue key + same
+// callback_data → identical edit mechanics/confirmation). config-origin keys
+// absent here are read-only in the menu (shown in the group body, no button) —
+// exactly as today. Editability is NOT changed; only WHERE a control renders.
+//   toggle: [settingKey, label]
+//   input:  [settingKey, label, opts?]
+//   build:  () => rows[]      (multi-option set / category — preserves the exact
+//                              callback_data the menu used before)
+//   pageKeys: settingValue keys whose callback should return to this group page
+//             (defaults to the toggle/input key; set/build list them explicitly)
+const MENU_CONTROLS = {
+  // ⚙️ dev-screening
+  blockPvpSymbols: { toggle: ["blockPvpSymbols", "PVP hard block"] },
+  useDiscordSignals: { toggle: ["useDiscordSignals", "Discord signals"] },
+  // ⚙️ dev-management
+  solMode: { toggle: ["solMode", "SOL mode"] },
+  maxPositions: { input: ["maxPositions", "Max positions"] },
+  maxDeployAmount: { input: ["maxDeployAmount", "Max SOL"] },
+  deployAmountSol: { input: ["deployAmountSol", "Deploy SOL", { digits: 2 }] },
+  gasReserve: { input: ["gasReserve", "Gas reserve", { digits: 2 }] },
+  stopLossPct: { input: ["stopLossPct", "SL %"] },
+  takeProfitPct: { input: ["takeProfitPct", "TP %"] },
+  trailingTakeProfit: { toggle: ["trailingTakeProfit", "Trailing TP"] },
+  trailingTriggerPct: { input: ["trailingTriggerPct", "Trail trigger", { digits: 1 }] },
+  trailingDropPct: { input: ["trailingDropPct", "Trail drop", { digits: 1 }] },
+  repeatDeployCooldownEnabled: { toggle: ["repeatDeployCooldownEnabled", "Repeat cooldown"] },
+  repeatDeployCooldownTriggerCount: { input: ["repeatDeployCooldownTriggerCount", "Repeat count"] },
+  repeatDeployCooldownHours: { input: ["repeatDeployCooldownHours", "Repeat hrs"] },
+  repeatDeployCooldownMinFeeEarnedPct: { input: ["repeatDeployCooldownMinFeeEarnedPct", "Min fee earned %", { digits: 1 }] },
+  // ⚙️ dev-strategy
+  strategy: {
+    pageKeys: ["strategy"],
+    build: () => [[
+      settingButton("spot", "cfg:set:strategy:spot"),
+      settingButton("bid_ask", "cfg:set:strategy:bid_ask"),
+    ]],
+  },
+  minBinsBelow: { input: ["minBinsBelow", "Min bins"] },
+  maxBinsBelow: { input: ["maxBinsBelow", "Max bins"] },
+  // ⚙️ dev-schedule
+  managementIntervalMin: { input: ["managementIntervalMin", "Manage interval (min)"] },
+  screeningIntervalMin: { input: ["screeningIntervalMin", "Screen interval — floor (min)"] },
+  // ⚙️ dev-indicators
+  enabled: { toggle: ["chartIndicatorsEnabled", "Chart indicators"] },
+  entryPreset: {
+    pageKeys: ["indicatorEntryPreset"],
+    build: () => [
+      [
+        settingButton("Entry: ST", "cfg:set:indicatorEntryPreset:supertrend_break"),
+        settingButton("Entry: RSI", "cfg:set:indicatorEntryPreset:rsi_reversal"),
+        settingButton("Entry: ST/RSI", "cfg:set:indicatorEntryPreset:supertrend_or_rsi"),
+      ],
+      [settingButton("Entry: ST+SMI", "cfg:set:indicatorEntryPreset:supertrend_plus_smi")],
+    ],
+  },
+  exitPreset: {
+    pageKeys: ["indicatorExitPreset"],
+    build: () => [[
+      settingButton("Exit: ST", "cfg:set:indicatorExitPreset:supertrend_break"),
+      settingButton("Exit: RSI", "cfg:set:indicatorExitPreset:rsi_reversal"),
+      settingButton("Exit: BB+RSI", "cfg:set:indicatorExitPreset:bb_plus_rsi"),
+    ]],
+  },
+  rsiLength: { input: ["rsiLength", "RSI length"] },
+  intervals: {
+    pageKeys: ["indicatorIntervals"],
+    build: () => [[
+      settingButton("TF: 5m", "cfg:set:indicatorIntervals:5_MINUTE"),
+      settingButton("TF: 15m", "cfg:set:indicatorIntervals:15_MINUTE"),
+      settingButton("TF: both", "cfg:set:indicatorIntervals:both"),
+    ]],
+  },
+  requireAllIntervals: { toggle: ["requireAllIntervals", "Require all TF"] },
+  // ⚙️ dev-infra
+  lpAgentRelayEnabled: { toggle: ["lpAgentRelayEnabled", "LPAgent relay"] },
+  pnlSource: {
+    pageKeys: ["pnlSource"],
+    build: () => [[
+      settingButton(`PnL src: ${fmtSettingValue(settingValue("pnlSource"))}`, "cfg:noop"),
+      settingButton("rpc", "cfg:set:pnlSource:rpc"),
+      settingButton("meteora", "cfg:set:pnlSource:meteora"),
+    ]],
+  },
+  pnlPollIntervalSec: { input: ["pnlPollIntervalSec", "PnL poll (sec)"] },
+  gmgnFeeSource: {
+    pageKeys: ["gmgnFeeSource"],
+    build: () => [[
+      settingButton(`Fee src: ${fmtSettingValue(settingValue("gmgnFeeSource"))}`, "cfg:noop"),
+      settingButton("gmgn", "cfg:set:gmgnFeeSource:gmgn"),
+      settingButton("jupiter", "cfg:set:gmgnFeeSource:jupiter"),
+    ]],
+  },
+  // 🧩 zen-screening
+  screeningSource: {
+    pageKeys: ["screeningSource"],
+    build: () => [[
+      settingButton("Source: Meteora", "cfg:set:screeningSource:meteora"),
+      settingButton("Source: GMGN", "cfg:set:screeningSource:gmgn"),
+    ]],
+  },
+  screeningCategories: {
+    pageKeys: ["screeningCategories"],
+    build: () => [[categoryButton("trending"), categoryButton("top"), categoryButton("new")]],
+  },
+  // 🧩 zen-gmgn
+  "gmgn.interval": {
+    pageKeys: ["gmgnInterval"],
+    build: () => [[
+      settingButton("5m", "cfg:set:gmgnInterval:5m"),
+      settingButton("1h", "cfg:set:gmgnInterval:1h"),
+      settingButton("6h", "cfg:set:gmgnInterval:6h"),
+      settingButton("24h", "cfg:set:gmgnInterval:24h"),
+    ]],
+  },
+  "gmgn.minVolume": { input: ["gmgnMinVolume", "Min volume"] },
+  "gmgn.minHolders": { input: ["gmgnMinHolders", "Min holders"] },
+  "gmgn.minTokenAgeHours": { input: ["gmgnMinTokenAgeHours", "Min token age (h)"] },
+  "gmgn.maxTokenAgeHours": { input: ["gmgnMaxTokenAgeHours", "Max token age (h)"] },
+  "gmgn.minTotalFeeSol": { input: ["gmgnMinTotalFeeSol", "Min fee SOL"] },
+  "gmgn.requireKol": { toggle: ["gmgnRequireKol", "Require KOL"] },
+  "gmgn.minKolCount": { input: ["gmgnMinKolCount", "Min KOL"] },
+  "gmgn.maxBundlerRate": { input: ["gmgnMaxBundlerRate", "Max bundler %"] },
+  "gmgn.preferredKolNames": { input: ["gmgnPreferredKolNames", "Preferred KOL (comma-sep)"] },
+  "gmgn.preferredKolMinHoldPct": { input: ["gmgnPreferredKolMinHoldPct", "Preferred KOL min hold %"] },
+  "gmgn.dumpKolNames": { input: ["gmgnDumpKolNames", "Dump KOL (comma-sep)"] },
+  "gmgn.dumpKolMinHoldPct": { input: ["gmgnDumpKolMinHoldPct", "Dump KOL min hold %"] },
+  "gmgn.indicatorFilter": { toggle: ["gmgnIndicatorFilter", "Indicator filter"] },
+  "gmgn.indicatorInterval": {
+    pageKeys: ["gmgnIndicatorInterval"],
+    build: () => [[
+      settingButton("TF: 5m", "cfg:set:gmgnIndicatorInterval:5_MINUTE"),
+      settingButton("TF: 15m", "cfg:set:gmgnIndicatorInterval:15_MINUTE"),
+      settingButton("TF: 1h", "cfg:set:gmgnIndicatorInterval:1h"),
+    ]],
+  },
+  "gmgn.rules.requireBullishSupertrend": { toggle: ["gmgnRequireBullishSt", "Bullish ST"] },
+  "gmgn.rules.rejectAlreadyAtBottom": { toggle: ["gmgnRejectAtBottom", "Reject at bottom"] },
+  "gmgn.rules.requireAboveSupertrend": { toggle: ["gmgnRequireAboveSt", "Above ST"] },
+  "gmgn.rules.minRsi": { input: ["gmgnMinRsi", "Min RSI"] },
+  "gmgn.rules.maxRsi": { input: ["gmgnMaxRsi", "Max RSI"] },
+  // 🧩 zen-management
+  gasReserveAutoTune: { toggle: ["gasReserveAutoTune", "Gas reserve auto-tune"] },
+  gasReserveBufferDays: { input: ["gasReserveBufferDays", "Gas buffer days"] },
+  gasReserveFloorSol: { input: ["gasReserveFloorSol", "Gas reserve floor SOL", { digits: 2 }] },
+  // 🧩 zen-strategy
+  strategyLock: {
+    pageKeys: ["strategyLock"],
+    build: () => [
+      [settingButton(`🔒 lock: ${fmtSettingValue(settingValue("strategyLock") ?? "default")}`, "cfg:noop")],
+      [
+        settingButton("default", "cfg:set:strategyLock:default"),
+        settingButton("lock spot", "cfg:set:strategyLock:spot"),
+        settingButton("lock bid_ask", "cfg:set:strategyLock:bid_ask"),
+      ],
+    ],
+  },
+  // 🧩 zen-schedule
+  adaptiveScreening: { toggle: ["adaptiveScreening", "Adaptive screening"] },
+  maxScreeningIntervalMin: { input: ["maxScreeningIntervalMin", "Screen interval — ceil (min)"] },
+  // 🧩 zen-indicators
+  exitEnabled: { toggle: ["indicatorExitEnabled", "Exit triggers close"] },
+  rejectAlreadyAtBottom: { toggle: ["indicatorRejectAtBottom", "Reject @ bottom"] },
+  smiPdLookback: { input: ["smiPdLookback", "SMI PD lookback"] },
+  smiPaLookback: { input: ["smiPaLookback", "SMI PA lookback"] },
+  smiCrossWindow: { input: ["smiCrossWindow", "SMI cross window"] },
+  // 🧩 zen-reports
+  learningReportEvery: { input: ["learningReportEvery", "Learning report every N (0=off)"] },
+  learningReportTrendN: { input: ["learningReportTrendN", "Trend window N"] },
+  // 🧪 zen-experiments
+  candidateMomentum: { toggle: ["candidateMomentum", "Candidate momentum"] },
+  smartWalletMomentum: { toggle: ["smartWalletMomentum", "Smart-wallet mom."] },
+  expectedYieldSignal: { toggle: ["expectedYieldSignal", "Expected yield"] },
+  narrativeProfileSignal: { toggle: ["narrativeProfileSignal", "Narrative profile"] },
+  counterfactualReview: { toggle: ["counterfactualReview", "Counterfactual review"] },
+  counterfactualMinMcapGainPct: { input: ["counterfactualMinMcapGainPct", "Counterfactual min mcap gain %"] },
+  exitLiquidityCheck: { toggle: ["exitLiquidityCheck", "Exit-liquidity GATE"] },
+  exitLiquidityMaxSlippagePct: { input: ["exitLiquidityMaxSlippagePct", "Exit max slippage %", { digits: 1 }] },
+  marketRegimeGate: { toggle: ["marketRegimeGate", "Market-regime GATE"] },
+  marketRegimeMaxDrop24hPct: { input: ["marketRegimeMaxDrop24hPct", "Regime max SOL drop 24h %", { digits: 1 }] },
+  convictionSizing: { toggle: ["convictionSizing", "Conviction sizing (moves capital)"] },
+  convictionSizingMaxAdjustPct: { input: ["convictionSizingMaxAdjustPct", "Conviction max adjust %"] },
+  idleScreeningCooldown: { toggle: ["idleScreeningCooldown", "Idle screening cooldown"] },
+  idleScreeningCooldownMin: { input: ["idleScreeningCooldownMin", "Idle cooldown minutes"] },
+  paperTrading: { toggle: ["paperTrading", "Paper trading (DRY-RUN sim)"] },
+  usePaperHistoryWhenLive: { toggle: ["usePaperHistoryWhenLive", "Use paper history when live"] },
+};
+
+// settingValue key (the callback's parts[2]) → group page id, so a toggle/step/
+// set/input returns to the group it lives on. Derived from MENU_CONTROLS +
+// config-origin so it can never drift from the layout.
+const MENU_KEY_TO_PAGE = (() => {
+  const m = {};
+  for (const sec of ORIGIN_SECTIONS) {
+    for (const sg of sec.subgroups) {
+      for (const k of sg.keys) {
+        const ctrl = MENU_CONTROLS[k];
+        if (!ctrl) continue;
+        const keys = ctrl.pageKeys || (ctrl.toggle ? [ctrl.toggle[0]] : ctrl.input ? [ctrl.input[0]] : []);
+        for (const sk of keys) m[sk] = sg.id;
+      }
+    }
+  }
+  return m;
+})();
+
+// Which group page a given settingValue key belongs to (return-to-page after an
+// edit, and the page stored for a pending text input). Falls back to the
+// management group for any unmapped key.
 function pageForKey(key) {
-  if (["gmgnPreferredKolNames", "gmgnPreferredKolMinHoldPct", "gmgnDumpKolNames", "gmgnDumpKolMinHoldPct"].includes(key)) return "kol";
-  if (["gmgnMinVolume", "gmgnMaxBundlerRate", "gmgnMinTokenAgeHours", "gmgnMaxTokenAgeHours", "gmgnFeeSource"].includes(key)) return "screen";
-  if (key.startsWith("pnl")) return "screen";
-  if (key.startsWith("gmgn") && key !== "gmgnRequireKol") return "gmgn";
-  if (key.startsWith("indicator") || key.startsWith("smi") || key === "chartIndicatorsEnabled" || key === "rsiLength" || key === "requireAllIntervals") return "indicators";
-  if (["minBinsBelow", "maxBinsBelow", "strategy", "strategyLock"].includes(key)) return "strategy";
-  if (["useDiscordSignals", "blockPvpSymbols", "managementIntervalMin", "screeningIntervalMin", "maxScreeningIntervalMin", "adaptiveScreening", "screeningSource", "screeningCategories", "gmgnRequireKol"].includes(key)) return "screen";
-  if (["candidateMomentum", "smartWalletMomentum", "expectedYieldSignal", "narrativeProfileSignal", "counterfactualReview", "counterfactualMinMcapGainPct", "exitLiquidityCheck", "exitLiquidityMaxSlippagePct", "marketRegimeGate", "marketRegimeMaxDrop24hPct", "convictionSizing", "convictionSizingMaxAdjustPct", "idleScreeningCooldown", "idleScreeningCooldownMin", "paperTrading", "usePaperHistoryWhenLive"].includes(key)) return "experiments";
-  if (["learningReportEvery", "learningReportTrendN", "gasReserveAutoTune", "gasReserveBufferDays", "gasReserveFloorSol"].includes(key)) return "reports";
-  return "risk";
+  return MENU_KEY_TO_PAGE[key] || "dev-management";
 }
 
 function renderSettingsMenu(page = "main") {

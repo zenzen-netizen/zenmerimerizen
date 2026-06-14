@@ -97,12 +97,6 @@ export const ORIGIN_SECTIONS = [
           "hiveMindStatus", "hiveMindPullMode", "hiveMindUrl",
         ],
       },
-      {
-        id: "dev-unknown",
-        title: "❓ UNKNOWN (perlu review)",
-        desc: "Asal belum tercantum di peta divergensi — sementara ditaruh di Dev, butuh konfirmasi (keduanya tak terdaftar di CONFIG_MAP & undefined di config.js → render off).",
-        keys: ["athFilterPct", "maxBundlePct"],
-      },
     ],
   },
   {
@@ -200,4 +194,213 @@ export const ORIGIN_NOTES = {
   useDiscordSignals: "(tidak terpasang / OFF)",
   discordSignalMode: "(tidak terpasang / OFF)",
   gmgnRequestDelayMs: "(default diubah zen: 2500→350)",
+  // Warisan dev: key tampil tapi pemicunya konstanta/tercakup key lain (audit
+  // notes/config-review.md §3A). Ditandai di /config, tetap dirender.
+  healthCheckIntervalMin: "(warisan dev — cron per jam)",
+  minSolToOpen: "(warisan dev — tercakup deployAmountSol+gasReserve)",
+  darwinRecalcEvery: "(warisan dev — pemicu dipatok konstanta 5)",
 };
+
+// ── L3 SUB-CLUSTER + L4 MINI-GRUP + CORE TAG (render-only) ────────────────────
+// Source: notes/config-review.md Bagian 1 (kolom sub-cluster / beranak / core?).
+// formatFullConfig() (index.js) groups each L2 subgroup's rows into these
+// sub-clusters (L3) and indents the "beranak" children (L4). Pure data.
+
+// L3: sub-cluster id → { emoji, label }. One neutral emoji per cluster.
+export const SUB_CLUSTER_META = {
+  // Screening (dev)
+  source: { emoji: "🔎", label: "Sumber" },
+  window: { emoji: "🪟", label: "Jendela & Kategori" },
+  size: { emoji: "📏", label: "Ukuran Pool" },
+  quality: { emoji: "⭐", label: "Kualitas" },
+  bin: { emoji: "🪜", label: "Bin-step" },
+  age: { emoji: "⏳", label: "Usia Token" },
+  safety: { emoji: "🛡", label: "Keamanan Token" },
+  discord: { emoji: "💬", label: "Discord" },
+  // Management & Risk (dev)
+  risk: { emoji: "⚖️", label: "Risiko" },
+  sizing: { emoji: "💰", label: "Sizing (modal)" },
+  gas: { emoji: "⛽", label: "Gas" },
+  exit: { emoji: "🛡", label: "Exit (SL/TP)" },
+  "exit-trail": { emoji: "📉", label: "Trailing" },
+  oor: { emoji: "📤", label: "Out-of-Range" },
+  "oor-cooldown": { emoji: "❄️", label: "OOR Cooldown" },
+  yield: { emoji: "🌾", label: "Yield" },
+  claim: { emoji: "🧾", label: "Claim" },
+  "redeploy-cd": { emoji: "🔁", label: "Re-deploy Cooldown" },
+  display: { emoji: "🖥", label: "Display" },
+  // Strategy & Bins (dev)
+  strategy: { emoji: "📐", label: "Strategi" },
+  bins: { emoji: "🪜", label: "Lebar Range (bins)" },
+  // Schedule (dev)
+  schedule: { emoji: "⏱", label: "Jadwal" },
+  // LLM (dev)
+  model: { emoji: "🧠", label: "Model" },
+  gen: { emoji: "🎛", label: "Parameter Generasi" },
+  // Darwin (dev)
+  darwin: { emoji: "🧬", label: "Darwin" },
+  // Indicators (dev/zen)
+  "ind-core": { emoji: "📊", label: "Inti Indikator" },
+  "ind-rsi": { emoji: "📈", label: "RSI" },
+  "ind-exit": { emoji: "🚪", label: "Gerbang Exit" },
+  "ind-entry": { emoji: "🚧", label: "Veto Entry" },
+  "ind-smi": { emoji: "〰️", label: "SMI" },
+  // Infra/Meridian (dev)
+  meridian: { emoji: "🌐", label: "Meridian/API" },
+  hive: { emoji: "🐝", label: "HiveMind" },
+  pnl: { emoji: "📡", label: "PnL Poller" },
+  fee: { emoji: "💵", label: "Fee Source" },
+  // GMGN (zen)
+  "gmgn-disc": { emoji: "🔍", label: "Discovery" },
+  "gmgn-size": { emoji: "📏", label: "Ukuran" },
+  "gmgn-age": { emoji: "⏳", label: "Usia" },
+  "gmgn-fee": { emoji: "💵", label: "Fee" },
+  "gmgn-kol": { emoji: "👑", label: "KOL" },
+  "gmgn-safety": { emoji: "🛡", label: "Keamanan" },
+  "gmgn-ind": { emoji: "📊", label: "Indikator" },
+  "gmgn-ind-rules": { emoji: "📐", label: "Aturan Indikator" },
+  // Reports (zen)
+  reports: { emoji: "📑", label: "Reports" },
+  // Experiments (zen)
+  experiments: { emoji: "🧪", label: "Experiments" },
+};
+
+// L3: display key → sub-cluster id. Keys absent here fall back to the subgroup
+// itself (single cluster → no L3 header). GMGN keys keep their "gmgn." prefix.
+export const KEY_SUBCLUSTER = {
+  // dev-screening
+  timeframe: "window", category: "window",
+  minTvl: "size", maxTvl: "size", minVolume: "size", minMcap: "size", maxMcap: "size", minHolders: "size",
+  minFeeActiveTvlRatio: "quality", minTokenFeesSol: "quality", minOrganic: "quality", minQuoteOrganic: "quality",
+  minBinStep: "bin", maxBinStep: "bin",
+  minTokenAgeHours: "age", maxTokenAgeHours: "age",
+  excludeHighSupplyConcentration: "safety", maxBotHoldersPct: "safety", maxTop10Pct: "safety",
+  avoidPvpSymbols: "safety", blockPvpSymbols: "safety", allowedLaunchpads: "safety", blockedLaunchpads: "safety",
+  useDiscordSignals: "discord", discordSignalMode: "discord",
+  // dev-management
+  dryRun: "risk", maxPositions: "risk", maxDeployAmount: "risk",
+  deployAmountSol: "sizing", positionSizePct: "sizing", minSolToOpen: "sizing",
+  gasReserve: "gas",
+  stopLossPct: "exit", takeProfitPct: "exit",
+  trailingTakeProfit: "exit-trail", trailingTriggerPct: "exit-trail", trailingDropPct: "exit-trail",
+  outOfRangeBinsToClose: "oor", outOfRangeWaitMinutes: "oor",
+  oorCooldownTriggerCount: "oor-cooldown", oorCooldownHours: "oor-cooldown",
+  minFeePerTvl24h: "yield", minAgeBeforeYieldCheck: "yield", minVolumeToRebalance: "yield",
+  minClaimAmount: "claim", autoSwapAfterClaim: "claim",
+  repeatDeployCooldownEnabled: "redeploy-cd", repeatDeployCooldownTriggerCount: "redeploy-cd",
+  repeatDeployCooldownHours: "redeploy-cd", repeatDeployCooldownScope: "redeploy-cd",
+  repeatDeployCooldownMinFeeEarnedPct: "redeploy-cd",
+  solMode: "display",
+  // dev-strategy
+  strategy: "strategy", minBinsBelow: "bins", maxBinsBelow: "bins", defaultBinsBelow: "bins",
+  // dev-schedule
+  managementIntervalMin: "schedule", screeningIntervalMin: "schedule", healthCheckIntervalMin: "schedule",
+  // dev-llm
+  managementModel: "model", screeningModel: "model", generalModel: "model",
+  temperature: "gen", maxTokens: "gen", maxSteps: "gen",
+  // dev-darwin
+  darwinEnabled: "darwin", darwinWindowDays: "darwin", darwinRecalcEvery: "darwin", darwinBoost: "darwin",
+  darwinDecay: "darwin", darwinFloor: "darwin", darwinCeiling: "darwin", darwinMinSamples: "darwin",
+  // dev-indicators
+  enabled: "ind-core", entryPreset: "ind-core", exitPreset: "ind-core",
+  intervals: "ind-core", candles: "ind-core", requireAllIntervals: "ind-core",
+  rsiLength: "ind-rsi", rsiOversold: "ind-rsi", rsiOverbought: "ind-rsi",
+  // dev-infra
+  lpAgentRelayEnabled: "meridian", publicApiKey: "meridian",
+  agentId: "hive", hiveMindStatus: "hive", hiveMindPullMode: "hive", hiveMindUrl: "hive",
+  pnlSource: "pnl", pnlRpcUrl: "pnl", pnlPollIntervalSec: "pnl", pnlDepositCacheTtlSec: "pnl", pnlSanityMaxDiffPct: "pnl",
+  gmgnFeeSource: "fee",
+  // zen-screening
+  screeningSource: "source", screeningCategories: "window",
+  // zen-gmgn
+  "gmgn.interval": "gmgn-disc", "gmgn.orderBy": "gmgn-disc", "gmgn.direction": "gmgn-disc",
+  "gmgn.platforms": "gmgn-disc", "gmgn.filters": "gmgn-disc",
+  "gmgn.minMcap": "gmgn-size", "gmgn.maxMcap": "gmgn-size", "gmgn.minTvl": "gmgn-size",
+  "gmgn.minVolume": "gmgn-size", "gmgn.minHolders": "gmgn-size", "gmgn.athFilterPct": "gmgn-size",
+  "gmgn.minTokenAgeHours": "gmgn-age", "gmgn.maxTokenAgeHours": "gmgn-age",
+  "gmgn.minTotalFeeSol": "gmgn-fee",
+  "gmgn.requireKol": "gmgn-kol", "gmgn.minKolCount": "gmgn-kol", "gmgn.minSmartDegenCount": "gmgn-kol",
+  "gmgn.preferredKolNames": "gmgn-kol", "gmgn.preferredKolMinHoldPct": "gmgn-kol",
+  "gmgn.dumpKolNames": "gmgn-kol", "gmgn.dumpKolMinHoldPct": "gmgn-kol",
+  "gmgn.maxRugRatio": "gmgn-safety", "gmgn.maxBundlerRate": "gmgn-safety", "gmgn.maxRatTraderRate": "gmgn-safety",
+  "gmgn.maxFreshWalletRate": "gmgn-safety", "gmgn.maxDevTeamHoldRate": "gmgn-safety", "gmgn.maxBotDegenRate": "gmgn-safety",
+  "gmgn.maxSniperCount": "gmgn-safety", "gmgn.maxSniperHoldRate": "gmgn-safety",
+  "gmgn.indicatorFilter": "gmgn-ind", "gmgn.indicatorInterval": "gmgn-ind",
+  "gmgn.rules.requireBullishSupertrend": "gmgn-ind-rules", "gmgn.rules.rejectAlreadyAtBottom": "gmgn-ind-rules",
+  "gmgn.rules.requireAboveSupertrend": "gmgn-ind-rules", "gmgn.rules.minRsi": "gmgn-ind-rules",
+  "gmgn.rules.maxRsi": "gmgn-ind-rules", "gmgn.rules.requireBbPosition": "gmgn-ind-rules",
+  // zen-management
+  gasReserveAutoTune: "gas", gasReserveBufferDays: "gas", gasReserveFloorSol: "gas",
+  // zen-strategy
+  strategyLock: "strategy",
+  // zen-schedule
+  adaptiveScreening: "schedule", maxScreeningIntervalMin: "schedule",
+  // zen-llm
+  generalMaxTokens: "gen",
+  // zen-indicators
+  exitEnabled: "ind-exit", rejectAlreadyAtBottom: "ind-entry",
+  smiPdLookback: "ind-smi", smiPaLookback: "ind-smi", smiCrossWindow: "ind-smi",
+  // zen-reports
+  learningReportEvery: "reports", learningReportTrendN: "reports",
+  // zen-experiments (single cluster)
+  exitLiquidityCheck: "experiments", exitLiquidityMaxSlippagePct: "experiments",
+  marketRegimeGate: "experiments", marketRegimeMaxDrop24hPct: "experiments",
+  candidateMomentum: "experiments", narrativeProfileSignal: "experiments", expectedYieldSignal: "experiments",
+  convictionSizing: "experiments", convictionSizingMaxAdjustPct: "experiments",
+  counterfactualReview: "experiments", counterfactualMinMcapGainPct: "experiments",
+  smartWalletMomentum: "experiments", idleScreeningCooldown: "experiments", idleScreeningCooldownMin: "experiments",
+  paperTrading: "experiments", usePaperHistoryWhenLive: "experiments",
+};
+
+// L4: "anak" (child) keys of the four beranak families that get indented under
+// their induk (parent). Only these four families per task spec; other induk/anak
+// pairs render flat inside their sub-cluster.
+export const L4_CHILDREN = new Set([
+  "trailingTriggerPct", "trailingDropPct",
+  "oorCooldownHours",
+  "repeatDeployCooldownTriggerCount", "repeatDeployCooldownHours",
+  "repeatDeployCooldownScope", "repeatDeployCooldownMinFeeEarnedPct",
+  "darwinWindowDays", "darwinRecalcEvery", "darwinBoost", "darwinDecay",
+  "darwinFloor", "darwinCeiling", "darwinMinSamples",
+]);
+
+// /config core — only the "core?" ✅-tagged keys (config-review.md), full key
+// names, compact. Each entry: [rowMapKey, displayName]. displayName differs from
+// rowMapKey only where the canonical settable name differs (indicators).
+export const CORE_GROUPS = [
+  {
+    emoji: "💰", title: "Sizing / Risk / Exit",
+    keys: [
+      ["maxPositions", "maxPositions"], ["maxDeployAmount", "maxDeployAmount"],
+      ["deployAmountSol", "deployAmountSol"], ["positionSizePct", "positionSizePct"],
+      ["minSolToOpen", "minSolToOpen"], ["gasReserve", "gasReserve"],
+      ["stopLossPct", "stopLossPct"], ["takeProfitPct", "takeProfitPct"],
+      ["trailingTakeProfit", "trailingTakeProfit"], ["trailingTriggerPct", "trailingTriggerPct"],
+      ["trailingDropPct", "trailingDropPct"], ["outOfRangeWaitMinutes", "outOfRangeWaitMinutes"],
+      ["minFeePerTvl24h", "minFeePerTvl24h"], ["strategy", "strategy"], ["strategyLock", "strategyLock"],
+      ["minBinsBelow", "minBinsBelow"], ["maxBinsBelow", "maxBinsBelow"],
+    ],
+  },
+  {
+    emoji: "🔎", title: "Screening",
+    keys: [
+      ["screeningSource", "screeningSource"], ["timeframe", "timeframe"], ["category", "category"],
+      ["screeningCategories", "screeningCategories"], ["minTvl", "minTvl"], ["maxTvl", "maxTvl"],
+      ["minVolume", "minVolume"], ["minMcap", "minMcap"], ["maxMcap", "maxMcap"], ["minHolders", "minHolders"],
+      ["minOrganic", "minOrganic"], ["minFeeActiveTvlRatio", "minFeeActiveTvlRatio"],
+      ["minBinStep", "minBinStep"], ["maxBinStep", "maxBinStep"],
+    ],
+  },
+  {
+    emoji: "⏱", title: "Jadwal",
+    keys: [["managementIntervalMin", "managementIntervalMin"], ["screeningIntervalMin", "screeningIntervalMin"]],
+  },
+  {
+    emoji: "🧠", title: "LLM",
+    keys: [["managementModel", "managementModel"], ["screeningModel", "screeningModel"]],
+  },
+  {
+    emoji: "📊", title: "Indikator",
+    keys: [["enabled", "chartIndicatorsEnabled"], ["entryPreset", "indicatorEntryPreset"]],
+  },
+];

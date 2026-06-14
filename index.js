@@ -2247,11 +2247,35 @@ function pageForKey(key) {
   return MENU_KEY_TO_PAGE[key] || "dev-management";
 }
 
-function renderSettingsMenu(page = "main") {
-  const title = page === "main" ? "Settings menu" : `Settings: ${page}`;
+// ── /settings navigation (selaras /config: ASAL seksi → grup → sub-cluster) ──
+// L1 main = two ASAL section buttons; L2 = relevance groups (same names as
+// /config); L3 group page = read-only /config body + the editable controls for
+// that group, bucketed under the same sub-clusters. RENDER-ONLY: every control
+// is the SAME one MENU_CONTROLS already wired (unchanged callback_data/mechanics).
+
+function findSubgroup(groupId) {
+  for (const sec of ORIGIN_SECTIONS) {
+    const sg = sec.subgroups.find((g) => g.id === groupId);
+    if (sg) return { sec, sg };
+  }
+  return null;
+}
+
+// How many keys in a subgroup are editable from the menu (section-list hint).
+function editableCountFor(sg) {
+  return sg.keys.filter((k) => MENU_CONTROLS[k]).length;
+}
+
+const settingsFooter = (page) => [
+  settingButton("🔄 Refresh", `cfg:page:${page}`),
+  settingButton("❌ Close", "cfg:close"),
+];
+
+// L1 — landing: identity + live summary + the two ASAL section buttons.
+function renderSettingsMain() {
   const identityLine = (() => { try { return formatIdentity({ compact: true }); } catch { return "🧬 Profil: — · 🗂️ Racikan: —"; } })();
-  const summary = [
-    title,
+  const bodyText = [
+    "⚙️ Settings — per ASAL (selaras /config)",
     "",
     identityLine,
     `Mode: ${config.management.solMode ? "SOL" : "USD"} | Relay: ${fmtSettingValue(config.api.lpAgentRelayEnabled)}`,
@@ -2260,239 +2284,138 @@ function renderSettingsMenu(page = "main") {
     `TP/SL: ${config.management.takeProfitPct}% / ${config.management.stopLossPct}% | trailing ${fmtSettingValue(config.management.trailingTakeProfit)}`,
     `Indicators: ${fmtSettingValue(config.indicators.enabled)} | entry ${config.indicators.entryPreset} | ${fmtSettingValue(config.indicators.intervals)}`,
     `🧪 Experiments ON: ${Object.entries(config.experiments).filter(([, v]) => v === true).map(([k]) => k).join(", ") || "none"}`,
+    "",
+    "Pilih seksi asal setelan ⤵️  ( ⚙️ = bawaan dev · 🧩 = tambahan zen )",
   ].join("\n");
-  let bodyText = summary;
-
-  const nav = [
-    [
-      settingButton("Main", "cfg:page:main"),
-      settingButton("Risk", "cfg:page:risk"),
-      settingButton("Strategy", "cfg:page:strategy"),
-    ],
-    [
-      settingButton("Screen", "cfg:page:screen"),
-      settingButton("Indicators", "cfg:page:indicators"),
-      settingButton("GMGN", "cfg:page:gmgn"),
-      settingButton("KOL", "cfg:page:kol"),
-    ],
-    [
-      settingButton("🧪 Experiments", "cfg:page:experiments"),
-      settingButton("📊 Reports", "cfg:page:reports"),
-      settingButton("🗂️ Racikan", "cfg:page:presets"),
-    ],
+  const keyboard = [
+    ORIGIN_SECTIONS.map((sec) => settingButton(sec.title, `cfg:page:${sec.id}`)),
+    [settingButton("🗂️ Racikan", "cfg:page:presets"), settingButton("📋 Show config", "cfg:show")],
+    settingsFooter("main"),
   ];
+  return { text: bodyText, keyboard };
+}
 
-  const footer = [
-    [
-      settingButton("Refresh", `cfg:page:${page}`),
-      settingButton("Close", "cfg:close"),
-    ],
+// L2 — section: list the relevance groups (same names as /config) for one ASAL.
+function renderSettingsSection(sectionId) {
+  const sec = ORIGIN_SECTIONS.find((s) => s.id === sectionId);
+  if (!sec) return renderSettingsMain();
+  const bodyText = [
+    `${sec.title} — ${sec.blurb}`,
+    "",
+    "Pilih grup setelan ⤵️  ( ✏️N = N setelan bisa diedit di sini · 👁 = lihat-saja )",
+  ].join("\n");
+  const groupRows = sec.subgroups.map((sg) => {
+    if (sg.identity) return [settingButton(`${sg.title} · 🗂️`, "cfg:page:presets")];
+    const n = editableCountFor(sg);
+    return [settingButton(`${sg.title}${n > 0 ? ` · ✏️${n}` : " · 👁"}`, `cfg:page:${sg.id}`)];
+  });
+  const keyboard = [
+    [settingButton("⬅️ Kembali", "cfg:page:main")],
+    ...groupRows,
+    settingsFooter(sectionId),
   ];
+  return { text: bodyText, keyboard };
+}
 
-  let rows;
-  if (page === "risk") {
-    rows = [
-      inputButton("deployAmountSol", "Deploy SOL", { digits: 2 }),
-      inputButton("gasReserve", "Gas reserve", { digits: 2 }),
-      inputButton("maxPositions", "Max positions"),
-      inputButton("maxDeployAmount", "Max SOL"),
-      inputButton("takeProfitPct", "TP %"),
-      inputButton("stopLossPct", "SL %"),
-      [toggleButton("trailingTakeProfit", "Trailing TP")],
-      inputButton("trailingTriggerPct", "Trail trigger", { digits: 1 }),
-      inputButton("trailingDropPct", "Trail drop", { digits: 1 }),
-      [toggleButton("repeatDeployCooldownEnabled", "Repeat cooldown")],
-      inputButton("repeatDeployCooldownTriggerCount", "Repeat count"),
-      inputButton("repeatDeployCooldownHours", "Repeat hrs"),
-      inputButton("repeatDeployCooldownMinFeeEarnedPct", "Min fee earned %", { digits: 1 }),
-    ];
-  } else if (page === "screen") {
-    rows = [
-      [
-        settingButton("Source: Meteora", "cfg:set:screeningSource:meteora"),
-        settingButton("Source: GMGN", "cfg:set:screeningSource:gmgn"),
-      ],
-      [
-        categoryButton("trending"),
-        categoryButton("top"),
-        categoryButton("new"),
-      ],
-      [toggleButton("gmgnRequireKol", "GMGN require KOL")],
-      [toggleButton("useDiscordSignals", "Discord signals"), toggleButton("blockPvpSymbols", "PVP hard block")],
-      [
-        settingButton("5m", "cfg:set:gmgnInterval:5m"),
-        settingButton("1h", "cfg:set:gmgnInterval:1h"),
-        settingButton("6h", "cfg:set:gmgnInterval:6h"),
-        settingButton("24h", "cfg:set:gmgnInterval:24h"),
-      ],
-      [
-        inputButton("gmgnMinVolume", "Min volume")[0],
-        inputButton("gmgnMinTokenAgeHours", "Min token age (h)")[0],
-      ],
-      [
-        inputButton("gmgnMaxTokenAgeHours", "Max token age (h)")[0],
-        inputButton("gmgnMaxBundlerRate", "Max bundler %")[0],
-      ],
-      [settingButton("KOL settings", "cfg:page:kol")],
-      inputButton("managementIntervalMin", "Manage interval (min)"),
-      inputButton("screeningIntervalMin", "Screen interval — min/floor (min)"),
-      [toggleButton("adaptiveScreening", "Adaptive screening")],
-      inputButton("maxScreeningIntervalMin", "Screen interval — max/ceil (min)"),
-      // PnL data source + poller (public infra; meteora = fallback-only path)
-      [
-        settingButton(`PnL src: ${fmtSettingValue(settingValue("pnlSource"))}`, "cfg:noop"),
-        settingButton("rpc", "cfg:set:pnlSource:rpc"),
-        settingButton("meteora", "cfg:set:pnlSource:meteora"),
-      ],
-      inputButton("pnlPollIntervalSec", "PnL poll (sec)"),
-      // Fee gate (global_fees_sol) source: gmgn total_fee vs jupiter — works in BOTH screening sources
-      [
-        settingButton(`Fee src: ${fmtSettingValue(settingValue("gmgnFeeSource"))}`, "cfg:noop"),
-        settingButton("gmgn", "cfg:set:gmgnFeeSource:gmgn"),
-        settingButton("jupiter", "cfg:set:gmgnFeeSource:jupiter"),
-      ],
-    ];
-  } else if (page === "strategy") {
-    rows = [
-      [
-        settingButton("spot", "cfg:set:strategy:spot"),
-        settingButton("bid_ask", "cfg:set:strategy:bid_ask"),
-      ],
-      // strategyLock: default = flexible (factory), spot/bid_ask = mechanical lock
-      // enforced in executor on every deploy (like mainzen_v2's bid_ask lock).
-      [
-        settingButton(`🔒 lock: ${fmtSettingValue(settingValue("strategyLock") ?? "default")}`, "cfg:page:strategy"),
-      ],
-      [
-        settingButton("default", "cfg:set:strategyLock:default"),
-        settingButton("lock spot", "cfg:set:strategyLock:spot"),
-        settingButton("lock bid_ask", "cfg:set:strategyLock:bid_ask"),
-      ],
-      inputButton("minBinsBelow", "Min bins"),
-      inputButton("maxBinsBelow", "Max bins"),
-    ];
-  } else if (page === "gmgn") {
-    rows = [
-      [toggleButton("gmgnIndicatorFilter", "Indicator filter"), toggleButton("gmgnRequireKol", "Require KOL")],
-      [
-        settingButton("TF: 5m", "cfg:set:gmgnIndicatorInterval:5_MINUTE"),
-        settingButton("TF: 15m", "cfg:set:gmgnIndicatorInterval:15_MINUTE"),
-        settingButton("TF: 1h", "cfg:set:gmgnIndicatorInterval:1h"),
-      ],
-      [toggleButton("gmgnRequireBullishSt", "Bullish ST"), toggleButton("gmgnRejectAtBottom", "Reject at bottom"), toggleButton("gmgnRequireAboveSt", "Above ST")],
-      inputButton("gmgnMinRsi", "Min RSI"),
-      inputButton("gmgnMaxRsi", "Max RSI"),
-      inputButton("gmgnMinKolCount", "Min KOL"),
-      inputButton("gmgnMinTotalFeeSol", "Min fee SOL"),
-      inputButton("gmgnMinHolders", "Min holders"),
-      [settingButton("KOL settings", "cfg:page:kol")],
-    ];
-  } else if (page === "kol") {
-    rows = [
-      inputButton("gmgnPreferredKolNames", "Preferred KOL (comma-sep)"),
-      inputButton("gmgnPreferredKolMinHoldPct", "Preferred KOL min hold %"),
-      inputButton("gmgnDumpKolNames", "Dump KOL (comma-sep)"),
-      inputButton("gmgnDumpKolMinHoldPct", "Dump KOL min hold %"),
-    ];
-  } else if (page === "indicators") {
-    rows = [
-      [toggleButton("chartIndicatorsEnabled", "Chart indicators"), toggleButton("requireAllIntervals", "Require all TF")],
-      [
-        settingButton("TF: 5m", "cfg:set:indicatorIntervals:5_MINUTE"),
-        settingButton("TF: 15m", "cfg:set:indicatorIntervals:15_MINUTE"),
-        settingButton("TF: both", "cfg:set:indicatorIntervals:both"),
-      ],
-      [toggleButton("indicatorExitEnabled", "Exit triggers close"), toggleButton("indicatorRejectAtBottom", "Reject @ bottom")],
-      [
-        settingButton("Entry: ST", "cfg:set:indicatorEntryPreset:supertrend_break"),
-        settingButton("Entry: RSI", "cfg:set:indicatorEntryPreset:rsi_reversal"),
-        settingButton("Entry: ST/RSI", "cfg:set:indicatorEntryPreset:supertrend_or_rsi"),
-      ],
-      [settingButton("Entry: ST+SMI", "cfg:set:indicatorEntryPreset:supertrend_plus_smi")],
-      [
-        settingButton("Exit: ST", "cfg:set:indicatorExitPreset:supertrend_break"),
-        settingButton("Exit: RSI", "cfg:set:indicatorExitPreset:rsi_reversal"),
-        settingButton("Exit: BB+RSI", "cfg:set:indicatorExitPreset:bb_plus_rsi"),
-      ],
-      inputButton("rsiLength", "RSI length"),
-      inputButton("smiPdLookback", "SMI PD lookback"),
-      inputButton("smiPaLookback", "SMI PA lookback"),
-      inputButton("smiCrossWindow", "SMI cross window"),
-    ];
-  } else if (page === "experiments") {
-    // 🧪 GRUP 16 — semua default OFF = perilaku pabrik. Soft signals dulu, lalu gate, lalu sizing.
-    rows = [
-      [toggleButton("candidateMomentum", "Candidate momentum"), toggleButton("smartWalletMomentum", "Smart-wallet mom.")],
-      [toggleButton("expectedYieldSignal", "Expected yield"), toggleButton("narrativeProfileSignal", "Narrative profile")],
-      [toggleButton("counterfactualReview", "Counterfactual review")],
-      inputButton("counterfactualMinMcapGainPct", "Counterfactual min mcap gain %"),
-      [toggleButton("exitLiquidityCheck", "Exit-liquidity GATE")],
-      inputButton("exitLiquidityMaxSlippagePct", "Exit max slippage %", { digits: 1 }),
-      [toggleButton("marketRegimeGate", "Market-regime GATE")],
-      inputButton("marketRegimeMaxDrop24hPct", "Regime max SOL drop 24h %", { digits: 1 }),
-      [toggleButton("convictionSizing", "Conviction sizing (moves capital)")],
-      inputButton("convictionSizingMaxAdjustPct", "Conviction max adjust %"),
-      [toggleButton("idleScreeningCooldown", "Idle screening cooldown")],
-      inputButton("idleScreeningCooldownMin", "Idle cooldown minutes"),
-      [toggleButton("paperTrading", "Paper trading (DRY-RUN sim)")],
-      [toggleButton("usePaperHistoryWhenLive", "Use paper history when live (soft ref)")],
-    ];
-  } else if (page === "reports") {
-    // 📊 GRUP 17 — laporan & gas reserve auto-tune
-    rows = [
-      inputButton("learningReportEvery", "Learning report every N closes (0=off)"),
-      inputButton("learningReportTrendN", "Trend window N"),
-      [toggleButton("gasReserveAutoTune", "Gas reserve auto-tune")],
-      inputButton("gasReserveBufferDays", "Gas buffer days"),
-      inputButton("gasReserveFloorSol", "Gas reserve floor SOL", { digits: 2 }),
-    ];
-  } else if (page === "presets") {
-    // 🗂️ Config presets — per row: ▶ load · 🔍 diff · 🗑️ delete. Plus 💾 save current.
-    const presets = listPresets();
-    const lines = presets.length
-      ? presets.map((p) => p.error
-          ? `⚠ ${p.name}`
-          : `${p.isCurrent ? "●" : "○"} ${p.name} — ${p.dryRun ? "🧪 dry-run" : "live"} · ${p.keys} keys${p.isCurrent ? " (current)" : ""}`)
-      : ["(belum ada preset)"];
-    const setupStatus = (() => {
-      try { const s = getActiveSetupStatus(); return s.name ? `${s.name}${s.edited ? " ✎ (ada edit manual)" : ""}` : "— (belum load)"; } catch { return "—"; }
-    })();
-    bodyText = ["🗂️ Racikan (setup tersimpan)", "",
-      `Aktif: ${setupStatus}`,
-      "(Racikan = snapshot config penuh. Beda dari 🧬 Profil = arketipe wizard.)", "",
-      ...lines, "",
-      "● = sama dgn config live · 🧪 = isi file dryRun (bukan berarti jalan)",
-      "Per baris: ▶ load · 🔍 lihat beda · 🗑️ hapus.",
-      "💾 = simpan config sekarang jadi racikan baru.",
-    ].join("\n");
-    rows = presets.map((p) => p.error
-      ? [settingButton(`⚠ ${p.name}`, "cfg:noop")]
-      : [
-          settingButton(`${p.isCurrent ? "●" : "▶"} ${p.name}${p.dryRun ? " 🧪" : ""}`, `cfg:preset:ask:${p.name}`),
-          settingButton("🔍", `cfg:preset:diff:${p.name}`),
-          settingButton("🗑️", `cfg:preset:rmask:${p.name}`),
-        ]);
-    rows.push([settingButton("💾 Simpan config sekarang", "cfg:preset:save")]);
-  } else {
-    rows = [
-      [
-        settingButton("Source: Meteora", "cfg:set:screeningSource:meteora"),
-        settingButton("Source: GMGN", "cfg:set:screeningSource:gmgn"),
-      ],
-      [toggleButton("solMode", "SOL mode"), toggleButton("lpAgentRelayEnabled", "LPAgent relay")],
-      [toggleButton("chartIndicatorsEnabled", "Chart indicators"), toggleButton("trailingTakeProfit", "Trailing TP")],
-      [
-        settingButton("Risk / deploy", "cfg:page:risk"),
-        settingButton("Screening", "cfg:page:screen"),
-      ],
-      [
-        settingButton("Indicators", "cfg:page:indicators"),
-        settingButton("Show config", "cfg:show"),
-      ],
-    ];
+// L3 — group page: read-only /config body (sub-clusters, 🟢/⚪, legacy notes) +
+// the editable controls for this group, grouped under the same sub-clusters. A
+// noop header per cluster when the group spans >1 editable cluster; single-button
+// controls pair two-per-row to keep the keyboard compact.
+function renderSettingsGroup(groupId) {
+  const found = findSubgroup(groupId);
+  if (!found) return renderSettingsMain();
+  const { sec, sg } = found;
+  if (sg.identity) return renderSettingsPresets();
+
+  const rowMap = buildConfigRowMap();
+  const { text: body } = renderSubclusterRows(sg.keys, rowMap);
+  const bodyText = [
+    `${sec.title} › ${sg.title}`,
+    `📝 ${subgroupDesc(sg)}`,
+    "",
+    body || "  (tak ada setelan)",
+    "",
+    "Tombol = yang bisa diubah dari sini. Sisanya lihat-saja (ubah via /setcfg / file).",
+  ].join("\n");
+
+  const order = [];
+  const members = {};
+  for (const k of sg.keys) {
+    if (!MENU_CONTROLS[k]) continue;
+    const cl = KEY_SUBCLUSTER[k] || "_misc";
+    if (!members[cl]) { members[cl] = []; order.push(cl); }
+    members[cl].push(k);
   }
+  const controlRows = [];
+  const showHdr = order.length > 1;
+  for (const cl of order) {
+    const meta = SUB_CLUSTER_META[cl];
+    if (showHdr && meta) controlRows.push([settingButton(`· ${meta.emoji} ${meta.label} ·`, "cfg:noop")]);
+    let buffered = null; // hold one single-button control to pair with the next
+    const flush = () => { if (buffered) { controlRows.push(buffered); buffered = null; } };
+    for (const k of members[cl]) {
+      const ctrl = MENU_CONTROLS[k];
+      if (ctrl.build) { flush(); controlRows.push(...ctrl.build()); continue; }
+      const row = ctrl.toggle
+        ? [toggleButton(ctrl.toggle[0], ctrl.toggle[1])]
+        : inputButton(ctrl.input[0], ctrl.input[1], ctrl.input[2] || {});
+      if (row.length === 1) {
+        if (buffered) { controlRows.push([buffered[0], row[0]]); buffered = null; }
+        else buffered = row;
+      } else { flush(); controlRows.push(row); }
+    }
+    flush();
+  }
+  if (controlRows.length === 0) controlRows.push([settingButton("👁 Lihat-saja — ubah via /setcfg atau file", "cfg:noop")]);
 
-  return { text: bodyText, keyboard: [...nav, ...rows, ...footer] };
+  const keyboard = [
+    [settingButton(`⬅️ ${sec.title}`, `cfg:page:${sec.id}`), settingButton("🏠 Main", "cfg:page:main")],
+    ...controlRows,
+    settingsFooter(groupId),
+  ];
+  return { text: bodyText, keyboard };
+}
+
+// 🗂️ Racikan/Identitas — kept as the dedicated presets page (load/diff/del/save).
+function renderSettingsPresets() {
+  const presets = listPresets();
+  const lines = presets.length
+    ? presets.map((p) => p.error
+        ? `⚠ ${p.name}`
+        : `${p.isCurrent ? "●" : "○"} ${p.name} — ${p.dryRun ? "🧪 dry-run" : "live"} · ${p.keys} keys${p.isCurrent ? " (current)" : ""}`)
+    : ["(belum ada preset)"];
+  const setupStatus = (() => {
+    try { const s = getActiveSetupStatus(); return s.name ? `${s.name}${s.edited ? " ✎ (ada edit manual)" : ""}` : "— (belum load)"; } catch { return "—"; }
+  })();
+  const bodyText = ["🧩 ADD BY ZEN › 🗂️ Racikan/Identitas", "",
+    `Aktif: ${setupStatus}`,
+    "(Racikan = snapshot config penuh. Beda dari 🧬 Profil = arketipe wizard.)", "",
+    ...lines, "",
+    "● = sama dgn config live · 🧪 = isi file dryRun (bukan berarti jalan)",
+    "Per baris: ▶ load · 🔍 lihat beda · 🗑️ hapus.",
+    "💾 = simpan config sekarang jadi racikan baru.",
+  ].join("\n");
+  const rows = presets.map((p) => p.error
+    ? [settingButton(`⚠ ${p.name}`, "cfg:noop")]
+    : [
+        settingButton(`${p.isCurrent ? "●" : "▶"} ${p.name}${p.dryRun ? " 🧪" : ""}`, `cfg:preset:ask:${p.name}`),
+        settingButton("🔍", `cfg:preset:diff:${p.name}`),
+        settingButton("🗑️", `cfg:preset:rmask:${p.name}`),
+      ]);
+  rows.push([settingButton("💾 Simpan config sekarang", "cfg:preset:save")]);
+  const keyboard = [
+    [settingButton("⬅️ 🧩 Add by zen", "cfg:page:zen"), settingButton("🏠 Main", "cfg:page:main")],
+    ...rows,
+    settingsFooter("presets"),
+  ];
+  return { text: bodyText, keyboard };
+}
+
+function renderSettingsMenu(page = "main") {
+  if (page === "main") return renderSettingsMain();
+  if (page === "dev" || page === "zen") return renderSettingsSection(page);
+  if (page === "presets") return renderSettingsPresets();
+  return renderSettingsGroup(page); // group id (e.g. "dev-management"); unknown → main
 }
 
 async function showSettingsMenu({ messageId = null, page = "main" } = {}) {
@@ -2639,7 +2562,7 @@ async function applySettingsMenuCallback(msg) {
       return;
     }
     await answerCallbackQuery(msg.callbackQueryId, `categories: ${value ? value.join(",") : "off (factory)"}`);
-    await showSettingsMenu({ messageId: msg.messageId, page: "screen" });
+    await showSettingsMenu({ messageId: msg.messageId, page: "zen-screening" });
     return;
   }
 

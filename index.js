@@ -1765,9 +1765,27 @@ export function formatFullConfig() {
     sectionBlocks.push(`▸ ❓ Belum terpetakan (auto — cek config-origin.js)\n${rows.join("\n")}`);
   }
 
-  const intro = "⚙️ Config lengkap — per ASAL (⚙️ Origin Dev vs 🧩 Add by zen)\nLegenda: 🟢 on · ⚪ off · ↳ anak setelan";
+  const intro = "⚙️ Config lengkap — per ASAL (⚙️ Origin Dev vs 🧩 Add by zen)\nLegenda: 🟢 on · ⚪ off · ↳ anak setelan · ringkas → /config core";
   const outro = "Ubah lewat /settings (menu tombol) atau chat biasa. Detail tiap setting: ketik /guide";
   return `${intro}\n\n${sectionBlocks.join("\n\n\n")}\n\n${outro}`;
+}
+
+// /config core — compact view: only the core-tagged keys (full key names), 2 per
+// line joined with " · ", grouped, plus the active racikan banner. Registered as
+// an explicit sub-command so it never falls through to the casual-chat LLM.
+export function formatCoreConfig() {
+  const rowMap = buildConfigRowMap();
+  const blocks = CORE_GROUPS.map((g) => {
+    const items = g.keys.filter(([k]) => rowMap[k]).map(([k, name]) => `${name}: ${rowMap[k][1]}`);
+    const lines = [];
+    for (let i = 0; i < items.length; i += 2) lines.push("  " + items.slice(i, i + 2).join("  ·  "));
+    return `${g.emoji} ${g.title}\n${lines.join("\n")}`;
+  });
+  let racikan;
+  try { racikan = formatIdentityLines(); } catch { racikan = "🧬 Profil: —\n🗂️ Racikan: —"; }
+  const head = "⚙️ Config inti (core) · 🟢 on · ⚪ off";
+  const tail = "(ketik /config buat lihat semua)";
+  return `${head}\n\n${racikan}\n\n${blocks.join("\n\n")}\n\n${tail}`;
 }
 
 function parseConfigValue(raw) {
@@ -2476,6 +2494,7 @@ function formatHelpText() {
     "",
     "⚙️ KONFIGURASI",
     "/config — show full runtime config (grouped)",
+    "/config core — ringkasan key inti saja",
     "/settings — button menu for common config",
     "/setcfg <key> <value> — update persisted config",
     "/preset [list|save|use|show <nama>] — simpan/ganti profil config",
@@ -2839,8 +2858,8 @@ async function telegramHandler(msg) {
     return;
   }
 
-  if (text === "/config") {
-    await sendMessage(formatFullConfig()).catch(() => {});
+  if (text === "/config" || text === "/config core") {
+    await sendMessage(text === "/config core" ? formatCoreConfig() : formatFullConfig()).catch(() => {});
     return;
   }
 

@@ -1383,6 +1383,7 @@ let _latestCandidates = [];
 let _latestCandidatesAt = null;
 let _pendingInput = null; // { key, page, menuMsgId }
 let _pendingConfirmation = null; // { promise, resolve, timer, messageId, signature }
+let _settingsView = "main"; // last-rendered /settings page token (e.g. "main" | "dev" | "zen-gmgn~2"), so edits re-render the SAME state
 
 function setLatestCandidates(candidates = []) {
   _latestCandidates = Array.isArray(candidates) ? candidates : [];
@@ -2012,6 +2013,46 @@ function inputButton(key, label, { digits = 0 } = {}) {
   return [settingButton(`${label}: ${shown} ✏`, `cfg:input:${key}`)];
 }
 
+// ── Cascade /settings (breadcrumb) display data ──────────────────────────────
+// Short T1 section labels + T2 group names so all three levels (header → group →
+// settings) fit on screen at once. RENDER-ONLY metadata; the canonical grouping
+// stays in config-origin.js. Falls back to the full title when a short is missing.
+const MENU_SECTION_LABEL = { dev: "⚙️ Origin Dev", zen: "🧩 Add by Zen" };
+const MENU_GROUP_SHORT = {
+  "dev-screening": "Screen", "dev-management": "Risk", "dev-strategy": "Strat",
+  "dev-schedule": "Jadwal", "dev-llm": "LLM", "dev-darwin": "Darwin",
+  "dev-indicators": "Indik", "dev-infra": "Infra",
+  "zen-screening": "Screen+", "zen-gmgn": "GMGN", "zen-management": "Mgmt+",
+  "zen-strategy": "Strat+", "zen-schedule": "Jadwal+", "zen-llm": "LLM+",
+  "zen-indicators": "Indik+", "zen-reports": "Report", "zen-experiments": "🧪Exp",
+  "zen-racikan": "Racikan",
+};
+// Max editable T3 rows per page; groups with more paginate (T1+T2 stay visible).
+const MAX_T3_ROWS = 8;
+const chunkRows = (arr, n) => {
+  const out = [];
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+};
+
+// Build a MENU_CONTROLS "cycle" entry for a small, KNOWN enum: a noop showing the
+// current value + one `cfg:set` button per option (reuses the existing set
+// mechanic + callback_data — no new edit mechanic). `opts` are the literal valid
+// config values; perRow controls wrapping.
+function cycleControl(settingKey, label, opts, perRow = 3) {
+  return {
+    pageKeys: [settingKey],
+    build: () => {
+      const cur = fmtSettingValue(settingValue(settingKey));
+      const rows = [[settingButton(`${label}: ${cur}`, "cfg:noop")]];
+      for (let i = 0; i < opts.length; i += perRow) {
+        rows.push(opts.slice(i, i + perRow).map((o) => settingButton(String(o), `cfg:set:${settingKey}:${o}`)));
+      }
+      return rows;
+    },
+  };
+}
+
 // Which settings page a given key lives on — used to return to the right page after
 // a toggle/step/set/input. Single source of truth (was duplicated in two callbacks).
 // ── /settings editable controls (config-origin key → existing menu control) ──
@@ -2228,6 +2269,15 @@ function pageForKey(key) {
   return MENU_KEY_TO_PAGE[key] || "dev-management";
 }
 
+// Page token to re-render after editing `key`: the key's group, preserving the
+// current T3 page suffix when we're already viewing that group (so an edit on
+// GMGN page 2 re-renders page 2, not page 1).
+function returnTokenForKey(key) {
+  const gid = pageForKey(key);
+  const [curBase, curPage] = String(_settingsView).split("~");
+  return curBase === gid && curPage ? `${gid}~${curPage}` : gid;
+}
+
 // ── /settings navigation (selaras /config: ASAL seksi → grup → sub-cluster) ──
 // L1 main = two ASAL section buttons; L2 = relevance groups (same names as
 // /config); L3 group page = read-only /config body + the editable controls for
@@ -2247,10 +2297,73 @@ function editableCountFor(sg) {
   return sg.keys.filter((k) => MENU_CONTROLS[k]).length;
 }
 
-const settingsFooter = (page) => [
-  settingButton("🔄 Refresh", `cfg:page:${page}`),
-  settingButton("❌ Close", "cfg:close"),
-];
+// TINGKAT 1 — header rows, ALWAYS shown. The two ASAL sections + Racikan + Config
+// penuh + Refresh/Close. The active section (and Racikan on the presets page) is
+// marked with ▸. `token` is the current page token so Refresh re-renders it.
+function settingsHeaderRows(activeSection, token) {
+  const secRow = ORIGIN_SECTIONS.map((sec) => {
+    const lbl = MENU_SECTION_LABEL[sec.id] || sec.title;
+    return settingButton(`${sec.id === activeSection ? "▸ " : ""}${lbl}`, `cfg:page:${sec.id}`);
+  });
+  const racikanActive = String(token).split("~")[0] === "presets";
+  return [
+    secRow,
+    [
+      settingButton(`${racikanActive ? "▸ " : ""}🗂️ Racikan`, "cfg:page:presets"),
+      settingButton("📋 Config penuh", "cfg:show"),
+    ],
+    [settingButton("🔄 Refresh", `cfg:page:${token}`), settingButton("❌ Close", "cfg:close")],
+  ];
+}
+
+// TINGKAT 2 — group rows for one ASAL section, shown whenever a section is active
+// and STAY visible when a group is open. Short names, 2/row, each tagged ✏N
+// (editable count) or 👁 (view-only). The active group is marked with ▸.
+function settingsGroupRows(sec, activeGroupId) {
+  const btns = sec.subgroups.map((sg) => {
+    const short = MENU_GROUP_SHORT[sg.id] || sg.title;
+    const mark = sg.id === activeGroupId ? "▸ " : "";
+    if (sg.identity) return settingButton(`${mark}${short} 🗂️`, "cfg:page:presets");
+    const n = editableCountFor(sg);
+    return settingButton(`${mark}${short} ${n > 0 ? `✏${n}` : "👁"}`, `cfg:page:${sg.id}`);
+  });
+  return chunkRows(btns, 2);
+}
+
+// TINGKAT 3 — flat list of editable control rows for one group, bucketed by
+// sub-cluster (a noop header per cluster when the group spans >1). Single-button
+// controls pair two-per-row. Returns rows (incl. cluster headers) for pagination.
+function settingsControlRows(sg) {
+  const order = [];
+  const members = {};
+  for (const k of sg.keys) {
+    if (!MENU_CONTROLS[k]) continue;
+    const cl = KEY_SUBCLUSTER[k] || "_misc";
+    if (!members[cl]) { members[cl] = []; order.push(cl); }
+    members[cl].push(k);
+  }
+  const rows = [];
+  const showHdr = order.length > 1;
+  for (const cl of order) {
+    const meta = SUB_CLUSTER_META[cl];
+    if (showHdr && meta) rows.push([settingButton(`· ${meta.emoji} ${meta.label} ·`, "cfg:noop")]);
+    let buffered = null; // hold one single-button control to pair with the next
+    const flush = () => { if (buffered) { rows.push(buffered); buffered = null; } };
+    for (const k of members[cl]) {
+      const ctrl = MENU_CONTROLS[k];
+      if (ctrl.build) { flush(); rows.push(...ctrl.build()); continue; }
+      const row = ctrl.toggle
+        ? [toggleButton(ctrl.toggle[0], ctrl.toggle[1])]
+        : inputButton(ctrl.input[0], ctrl.input[1], ctrl.input[2] || {});
+      if (row.length === 1) {
+        if (buffered) { rows.push([buffered[0], row[0]]); buffered = null; }
+        else buffered = row;
+      } else { flush(); rows.push(row); }
+    }
+    flush();
+  }
+  return rows;
+}
 
 // Compact "config inti" summary for the /settings landing. Values come from the
 // SAME source as /config + /config core (buildConfigRowMap → already 🟢/⚪-tagged),
@@ -2276,48 +2389,39 @@ function formatSettingsLandingSummary() {
   ].join("\n");
 }
 
-// L1 — landing: lead with the compact config-inti summary, then the menu buttons.
+// LANDING — no section chosen: message = config-inti summary, buttons = TINGKAT 1.
 function renderSettingsMain() {
   const bodyText = [
     formatSettingsLandingSummary(),
     "",
-    "Atur lebih detail ⤵️  ( ⚙️ dev · 🧩 zen )",
+    "Pilih seksi ⤵️  ( ⚙️ dev · 🧩 zen )",
   ].join("\n");
-  const keyboard = [
-    ORIGIN_SECTIONS.map((sec) => settingButton(sec.title, `cfg:page:${sec.id}`)),
-    [settingButton("🗂️ Racikan", "cfg:page:presets"), settingButton("📋 Config penuh", "cfg:show")],
-    settingsFooter("main"),
-  ];
-  return { text: bodyText, keyboard };
+  return { text: bodyText, keyboard: settingsHeaderRows(null, "main") };
 }
 
-// L2 — section: list the relevance groups (same names as /config) for one ASAL.
+// SECTION — a section is active: TINGKAT 1 (active ▸) + TINGKAT 2 groups (none ▸).
 function renderSettingsSection(sectionId) {
   const sec = ORIGIN_SECTIONS.find((s) => s.id === sectionId);
   if (!sec) return renderSettingsMain();
   const bodyText = [
-    `${sec.title} — ${sec.blurb}`,
+    `${MENU_SECTION_LABEL[sec.id] || sec.title} — ${sec.blurb}`,
     "",
-    "Pilih grup setelan ⤵️  ( ✏️N = N setelan bisa diedit di sini · 👁 = lihat-saja )",
+    "Pilih grup ⤵️  ( ✏N = N setelan editable · 👁 = lihat-saja )",
   ].join("\n");
-  const groupRows = sec.subgroups.map((sg) => {
-    if (sg.identity) return [settingButton(`${sg.title} · 🗂️`, "cfg:page:presets")];
-    const n = editableCountFor(sg);
-    return [settingButton(`${sg.title}${n > 0 ? ` · ✏️${n}` : " · 👁"}`, `cfg:page:${sg.id}`)];
-  });
   const keyboard = [
-    [settingButton("⬅️ Kembali", "cfg:page:main")],
-    ...groupRows,
-    settingsFooter(sectionId),
+    ...settingsHeaderRows(sec.id, sec.id),
+    ...settingsGroupRows(sec, null),
   ];
   return { text: bodyText, keyboard };
 }
 
-// L3 — group page: read-only /config body (sub-clusters, 🟢/⚪, legacy notes) +
-// the editable controls for this group, grouped under the same sub-clusters. A
-// noop header per cluster when the group spans >1 editable cluster; single-button
-// controls pair two-per-row to keep the keyboard compact.
-function renderSettingsGroup(groupId) {
+// GROUP — a group is open: TINGKAT 1 (active section ▸) + TINGKAT 2 (active group
+// ▸, STAYS visible) + TINGKAT 3 editable controls (paginated when many). Body text
+// = the same read-only /config rows (sub-clusters, 🟢/⚪, legacy notes). `token`
+// may carry a T3 page suffix ("dev-management~2"); switching group/section swaps
+// the lower levels without any "back" button.
+function renderSettingsGroup(token) {
+  const [groupId, pageStr] = String(token).split("~");
   const found = findSubgroup(groupId);
   if (!found) return renderSettingsMain();
   const { sec, sg } = found;
@@ -2325,49 +2429,41 @@ function renderSettingsGroup(groupId) {
 
   const rowMap = buildConfigRowMap();
   const { text: body } = renderSubclusterRows(sg.keys, rowMap);
+
+  let controlRows = settingsControlRows(sg);
+  if (controlRows.length === 0) controlRows = [[settingButton("👁 Lihat-saja — ubah via /setcfg atau file", "cfg:noop")]];
+
+  // T3 pagination: chunk control rows; T1 + T2 stay visible across pages.
+  const totalPages = Math.max(1, Math.ceil(controlRows.length / MAX_T3_ROWS));
+  const page = Math.min(Math.max(1, parseInt(pageStr, 10) || 1), totalPages);
+  const controlsThisPage = totalPages > 1
+    ? controlRows.slice((page - 1) * MAX_T3_ROWS, page * MAX_T3_ROWS)
+    : controlRows;
+  const pagerRows = totalPages > 1
+    ? [[
+        settingButton("‹", `cfg:page:${groupId}~${page > 1 ? page - 1 : totalPages}`),
+        settingButton(`Hal ${page}/${totalPages}`, "cfg:noop"),
+        settingButton("›", `cfg:page:${groupId}~${page < totalPages ? page + 1 : 1}`),
+      ]]
+    : [];
+  const currentToken = totalPages > 1 ? `${groupId}~${page}` : groupId;
+
   const bodyText = [
-    `${sec.title} › ${sg.title}`,
+    `${MENU_SECTION_LABEL[sec.id] || sec.title} › ${sg.title}`,
     `📝 ${subgroupDesc(sg)}`,
     "",
     body || "  (tak ada setelan)",
     "",
-    "Tombol = yang bisa diubah dari sini. Sisanya lihat-saja (ubah via /setcfg / file).",
+    totalPages > 1
+      ? `Tombol edit (hal ${page}/${totalPages}). Sisanya lihat-saja (via /setcfg / file).`
+      : "Tombol = bisa diubah. Sisanya lihat-saja (via /setcfg / file).",
   ].join("\n");
 
-  const order = [];
-  const members = {};
-  for (const k of sg.keys) {
-    if (!MENU_CONTROLS[k]) continue;
-    const cl = KEY_SUBCLUSTER[k] || "_misc";
-    if (!members[cl]) { members[cl] = []; order.push(cl); }
-    members[cl].push(k);
-  }
-  const controlRows = [];
-  const showHdr = order.length > 1;
-  for (const cl of order) {
-    const meta = SUB_CLUSTER_META[cl];
-    if (showHdr && meta) controlRows.push([settingButton(`· ${meta.emoji} ${meta.label} ·`, "cfg:noop")]);
-    let buffered = null; // hold one single-button control to pair with the next
-    const flush = () => { if (buffered) { controlRows.push(buffered); buffered = null; } };
-    for (const k of members[cl]) {
-      const ctrl = MENU_CONTROLS[k];
-      if (ctrl.build) { flush(); controlRows.push(...ctrl.build()); continue; }
-      const row = ctrl.toggle
-        ? [toggleButton(ctrl.toggle[0], ctrl.toggle[1])]
-        : inputButton(ctrl.input[0], ctrl.input[1], ctrl.input[2] || {});
-      if (row.length === 1) {
-        if (buffered) { controlRows.push([buffered[0], row[0]]); buffered = null; }
-        else buffered = row;
-      } else { flush(); controlRows.push(row); }
-    }
-    flush();
-  }
-  if (controlRows.length === 0) controlRows.push([settingButton("👁 Lihat-saja — ubah via /setcfg atau file", "cfg:noop")]);
-
   const keyboard = [
-    [settingButton(`⬅️ ${sec.title}`, `cfg:page:${sec.id}`), settingButton("🏠 Main", "cfg:page:main")],
-    ...controlRows,
-    settingsFooter(groupId),
+    ...settingsHeaderRows(sec.id, currentToken),
+    ...settingsGroupRows(sec, groupId),
+    ...pagerRows,
+    ...controlsThisPage,
   ];
   return { text: bodyText, keyboard };
 }
@@ -2399,22 +2495,27 @@ function renderSettingsPresets() {
         settingButton("🗑️", `cfg:preset:rmask:${p.name}`),
       ]);
   rows.push([settingButton("💾 Simpan config sekarang", "cfg:preset:save")]);
+  // Keep TINGKAT 1 + the Zen TINGKAT 2 groups visible (Racikan marked ▸) so the
+  // user can jump straight to another section/group without a back button.
+  const zenSec = ORIGIN_SECTIONS.find((s) => s.id === "zen");
   const keyboard = [
-    [settingButton("⬅️ 🧩 Add by zen", "cfg:page:zen"), settingButton("🏠 Main", "cfg:page:main")],
+    ...settingsHeaderRows("zen", "presets"),
+    ...settingsGroupRows(zenSec, "zen-racikan"),
     ...rows,
-    settingsFooter("presets"),
   ];
   return { text: bodyText, keyboard };
 }
 
 function renderSettingsMenu(page = "main") {
-  if (page === "main") return renderSettingsMain();
-  if (page === "dev" || page === "zen") return renderSettingsSection(page);
-  if (page === "presets") return renderSettingsPresets();
-  return renderSettingsGroup(page); // group id (e.g. "dev-management"); unknown → main
+  const base = String(page).split("~")[0];
+  if (base === "main") return renderSettingsMain();
+  if (base === "dev" || base === "zen") return renderSettingsSection(base);
+  if (base === "presets") return renderSettingsPresets();
+  return renderSettingsGroup(page); // group token (e.g. "dev-management" / "zen-gmgn~2"); unknown → main
 }
 
 async function showSettingsMenu({ messageId = null, page = "main" } = {}) {
+  _settingsView = page; // remember the live view so post-edit re-renders stay put
   const menu = renderSettingsMenu(page);
   if (messageId) {
     await editMessageWithButtons(menu.text, messageId, menu.keyboard);
@@ -2447,7 +2548,7 @@ async function applySettingsMenuCallback(msg) {
   if (action === "input") {
     const inputKey = parts[2];
     const currentVal = settingValue(inputKey);
-    const inputPage = pageForKey(inputKey);
+    const inputPage = returnTokenForKey(inputKey);
     _pendingInput = { key: inputKey, page: inputPage, menuMsgId: msg.messageId };
     await answerCallbackQuery(msg.callbackQueryId);
     await sendMessage(`Enter new value for ${inputKey} (current: ${currentVal ?? "off"}):\nSend a number, or "off" to clear.`);
@@ -2597,7 +2698,7 @@ async function applySettingsMenuCallback(msg) {
     await answerCallbackQuery(msg.callbackQueryId, "Config update failed");
     return;
   }
-  page = pageForKey(key);
+  page = returnTokenForKey(key);
   await answerCallbackQuery(msg.callbackQueryId, `Updated ${key}`);
   await showSettingsMenu({ messageId: msg.messageId, page });
 }

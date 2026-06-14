@@ -499,6 +499,7 @@ const toolMap = {
 
     const applied = {};
     const unknown = [];
+    const invalid = [];
 
     // Build case-insensitive lookup
     const CONFIG_MAP_LOWER = Object.fromEntries(
@@ -513,6 +514,45 @@ const toolMap = {
     const ARRAY_KEYS = new Set([
       "screeningCategories", "allowedLaunchpads", "blockedLaunchpads", "indicatorIntervals",
     ]);
+
+    // Per-key format/range validation (keyed by the destination FIELD name, so aliases
+    // like takeProfitFeePct→takeProfitPct are covered too). Returns an error string to
+    // REJECT the value, or null to accept. Only sensitive keys are guarded; everything
+    // else stays unvalidated (factory behavior). Fail-closed: a rejected value is never
+    // written. Rationale + table: notes/update-config-paths.md §5.
+    //   - *Model: kills the LLM "slugify" garble (e.g. screeningModel=minimax_m2_5 instead
+    //     of minimax/minimax-m2.5) — the bug that motivated this whole layer.
+    //   - SL/TP/sizing: reject text / wrong-sign / absurd magnitude.
+    const MODEL_ID_RE = /^[a-z0-9-]+\/[a-z0-9._-]+(:[a-z0-9-]+)?$/i;
+    const modelIdError = (v) => {
+      if (v == null) return null; // null / "off" clears to default — allowed
+      if (typeof v !== "string" || !MODEL_ID_RE.test(v.trim())) {
+        return `model id harus format "provider/slug" (mis. "minimax/minimax-m2.5", "openrouter/healer-alpha") — bukan "${v}"`;
+      }
+      return null;
+    };
+    const numError = (v, { min, max, integer = false, label } = {}) => {
+      const n = typeof v === "number" ? v : Number(v);
+      if (!Number.isFinite(n)) return `${label} harus angka — bukan "${v}"`;
+      if (integer && !Number.isInteger(n)) return `${label} harus bilangan bulat — bukan ${n}`;
+      if (min != null && n < min) return `${label} minimal ${min} — bukan ${n}`;
+      if (max != null && n > max) return `${label} maksimal ${max} — bukan ${n}`;
+      return null;
+    };
+    const CONFIG_VALIDATORS = {
+      managementModel: modelIdError,
+      screeningModel: modelIdError,
+      generalModel: modelIdError,
+      stopLossPct: (v) => numError(v, { min: -100, max: 0, label: "stopLossPct (ambang rugi, negatif)" }),
+      takeProfitPct: (v) => numError(v, { min: 0, max: 500, label: "takeProfitPct" }),
+      trailingTriggerPct: (v) => numError(v, { min: 0, max: 500, label: "trailingTriggerPct" }),
+      trailingDropPct: (v) => numError(v, { min: 0, max: 500, label: "trailingDropPct" }),
+      positionSizePct: (v) => numError(v, { min: 0, max: 1, label: "positionSizePct (fraksi 0–1)" }),
+      deployAmountSol: (v) => numError(v, { min: 0, label: "deployAmountSol" }),
+      maxDeployAmount: (v) => numError(v, { min: 0, label: "maxDeployAmount" }),
+      gasReserve: (v) => numError(v, { min: 0, label: "gasReserve" }),
+      maxPositions: (v) => numError(v, { min: 1, max: 50, integer: true, label: "maxPositions" }),
+    };
 
     // Robust arg recovery — weak models invent shapes instead of changes/key+value:
     //   { path: "management.gasReserveAutoTune", value: true }
@@ -550,6 +590,12 @@ const toolMap = {
         }
         normalizedVal = Math.max(MIN_SAFE_BINS_BELOW, Math.round(numericVal));
       }
+      // Format/range gate for sensitive keys — reject garbage before it lands in config.
+      const validate = CONFIG_VALIDATORS[match[1][1]];
+      if (validate) {
+        const verr = validate(normalizedVal);
+        if (verr) { invalid.push({ key: match[0], value: val, error: verr }); continue; }
+      }
       applied[match[0]] = normalizedVal;
     }
 
@@ -574,6 +620,10 @@ const toolMap = {
     }
 
     if (Object.keys(applied).length === 0) {
+      if (invalid.length > 0) {
+        log("config", `update_config rejected invalid values: ${invalid.map((i) => `${i.key}=${JSON.stringify(i.value)} (${i.error})`).join("; ")}`);
+        return { success: false, invalid, unknown, reason };
+      }
       if (unchanged.length > 0) {
         log("config", `update_config no-op — already at requested values: ${unchanged.join(", ")}`);
         return { success: true, applied: {}, unchanged, noop: true, reason };
@@ -707,8 +757,11 @@ const toolMap = {
       addLesson(`[SELF-TUNED] Changed ${summary} — ${reason}`, ["self_tune", "config_change"]);
     }
 
+    if (invalid.length > 0) {
+      log("config", `update_config rejected invalid values (applied the rest): ${invalid.map((i) => `${i.key}=${JSON.stringify(i.value)} (${i.error})`).join("; ")}`);
+    }
     log("config", `Agent self-tuned: ${JSON.stringify(redactAppliedConfig(applied))} — ${reason}`);
-    return { success: true, applied: redactAppliedConfig(applied), unknown, unchanged, reason };
+    return { success: true, applied: redactAppliedConfig(applied), unknown, unchanged, invalid, reason };
   },
 };
 

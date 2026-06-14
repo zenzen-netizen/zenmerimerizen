@@ -1585,7 +1585,7 @@ function buildConfigRowMap() {
     // ── Indicators (dev) ──
     enabled: ["enabled", fmt(c.indicators.enabled)],
     entryPreset: ["entryPreset", fmt(c.indicators.entryPreset)],
-    exitPreset: ["exitPreset", fmt(c.indicators.exitPreset)],
+    exitPreset: ["exitPreset", `${fmt(c.indicators.exitPreset)}${c.indicators.exitEnabled ? "" : " (gerbang exit ⚪ off — preset ini belum aktif)"}`],
     rsiLength: ["rsiLength", fmt(c.indicators.rsiLength)],
     intervals: ["intervals", fmt(c.indicators.intervals)],
     candles: ["candles", fmt(c.indicators.candles)],
@@ -1673,7 +1673,7 @@ function buildConfigRowMap() {
     smiCrossWindow: ["smiCrossWindow", fmt(c.indicators.smiCrossWindow)],
 
     // ── Reports (zen) ──
-    learningReportEvery: ["learningReportEvery", `${fmt(c.reports?.learningReportEvery)}${c.reports?.learningReportEvery > 0 ? " (ON)" : " (OFF)"}`],
+    learningReportEvery: ["learningReportEvery", `${fmt(c.reports?.learningReportEvery)}${c.reports?.learningReportEvery > 0 ? " 🟢 (ON)" : " ⚪ (OFF)"}`],
     learningReportTrendN: ["learningReportTrendN", fmt(c.reports?.learningReportTrendN)],
 
     // ── 🧪 Experiments (zen) ──

@@ -1698,47 +1698,57 @@ function buildConfigRowMap() {
   return rowMap;
 }
 
+// Render one subgroup's rows: bucket keys by sub-cluster (first-seen order), emit
+// an L3 header per cluster when the subgroup spans >1, and indent the L4 children
+// (beranak anak) under their induk. SHARED by /config (formatFullConfig) and the
+// /settings group pages so both group identical keys the same way — single source
+// of truth for the sub-cluster layout. Returns the text + the keys it placed (the
+// caller uses `placed` for /config's orphan safety net).
+function renderSubclusterRows(keys, rowMap) {
+  const note = (k) => (ORIGIN_NOTES[k] ? ` ${ORIGIN_NOTES[k]}` : "");
+  const dash = "┈┈┈┈┈┈┈┈┈┈";
+  const order = [];
+  const members = {};
+  for (const k of keys) {
+    if (!rowMap[k]) continue;
+    const cl = KEY_SUBCLUSTER[k] || "_misc";
+    if (!members[cl]) { members[cl] = []; order.push(cl); }
+    members[cl].push(k);
+  }
+  const showL3 = order.length > 1;
+  const out = [];
+  const placed = [];
+  for (const cl of order) {
+    const meta = SUB_CLUSTER_META[cl];
+    if (showL3 && meta) {
+      out.push(`  ${meta.emoji} ${meta.label}`);
+      out.push(`  ${dash}`);
+    }
+    for (const k of members[cl]) {
+      placed.push(k);
+      const [label, value] = rowMap[k];
+      const indent = L4_CHILDREN.has(k) ? "      ↳ " : "    ";
+      out.push(`${indent}${label}: ${value}${note(k)}`);
+    }
+  }
+  return { text: out.join("\n"), placed };
+}
+
+// Dynamic per-subgroup description (GMGN block flips with screeningSource).
+function subgroupDesc(sg) {
+  if (sg.id !== "zen-gmgn") return sg.desc;
+  return String(config.screening.source).toLowerCase() === "gmgn"
+    ? "Pipeline screening GMGN AKTIF (source=gmgn)."
+    : `Pipeline screening GMGN tidak aktif (source=${config.screening.source}, blok ini diabaikan).`;
+}
+
 // RENDER-ONLY 4-layer /config: L1 origin section (⚙️ Origin Dev / 🧩 Add by zen)
 // → L2 grup (▸) → L3 sub-cluster (emoji + ┈ line, shown when a grup has >1
 // cluster) → L4 mini-grup (the four beranak families indent their anak under the
 // induk via ↳). Layout/placement lives in config-origin.js; this owns no values.
 export function formatFullConfig() {
-  const c = config;
   const rowMap = buildConfigRowMap();
-  const gmgnActive = String(c.screening.source).toLowerCase() === "gmgn";
-  const note = (k) => (ORIGIN_NOTES[k] ? ` ${ORIGIN_NOTES[k]}` : "");
-  const dash = "┈┈┈┈┈┈┈┈┈┈";
   const placed = new Set();
-
-  // Render one subgroup's rows: bucket keys by sub-cluster (first-seen order),
-  // emit an L3 header per cluster when the subgroup spans >1, and indent the L4
-  // children (beranak anak) under their induk.
-  const renderRows = (keys) => {
-    const order = [];
-    const members = {};
-    for (const k of keys) {
-      if (!rowMap[k]) continue;
-      const cl = KEY_SUBCLUSTER[k] || "_misc";
-      if (!members[cl]) { members[cl] = []; order.push(cl); }
-      members[cl].push(k);
-    }
-    const showL3 = order.length > 1;
-    const out = [];
-    for (const cl of order) {
-      const meta = SUB_CLUSTER_META[cl];
-      if (showL3 && meta) {
-        out.push(`  ${meta.emoji} ${meta.label}`);
-        out.push(`  ${dash}`);
-      }
-      for (const k of members[cl]) {
-        placed.add(k);
-        const [label, value] = rowMap[k];
-        const indent = L4_CHILDREN.has(k) ? "      ↳ " : "    ";
-        out.push(`${indent}${label}: ${value}${note(k)}`);
-      }
-    }
-    return out.join("\n");
-  };
 
   const sectionBlocks = ORIGIN_SECTIONS.map((sec) => {
     const subBlocks = sec.subgroups.map((sg) => {
@@ -1747,11 +1757,9 @@ export function formatFullConfig() {
         const body = formatIdentityLines().split("\n").map((l) => `    ${l}`).join("\n");
         return `▸ ${sg.title} · ${sg.desc}\n${body}`;
       }
-      // GMGN sub-group keeps its dynamic active/inactive description.
-      const desc = sg.id === "zen-gmgn"
-        ? (gmgnActive ? "Pipeline screening GMGN AKTIF (source=gmgn)." : `Pipeline screening GMGN tidak aktif (source=${c.screening.source}, blok ini diabaikan).`)
-        : sg.desc;
-      return `▸ ${sg.title} · ${desc}\n${renderRows(sg.keys)}`;
+      const { text, placed: pl } = renderSubclusterRows(sg.keys, rowMap);
+      pl.forEach((k) => placed.add(k));
+      return `▸ ${sg.title} · ${subgroupDesc(sg)}\n${text}`;
     });
     const bar = "━━━━━━━━━━━━━━━━━━━━━━";
     return `${bar}\n${sec.title} — ${sec.blurb}\n${bar}\n\n${subBlocks.join("\n\n")}`;

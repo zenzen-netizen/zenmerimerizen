@@ -1987,7 +1987,7 @@ async function requestConfirmation(toolName, args) {
 
 function fmtSettingValue(value) {
   if (Array.isArray(value)) return value.join(",");
-  if (typeof value === "boolean") return value ? "on" : "off";
+  if (typeof value === "boolean") return value ? "🟢 on" : "⚪ off";
   return String(value);
 }
 
@@ -2045,11 +2045,11 @@ function renderSettingsMenu(page = "main") {
     title,
     "",
     identityLine,
-    `Mode: ${config.management.solMode ? "SOL" : "USD"} | Relay: ${config.api.lpAgentRelayEnabled ? "on" : "off"}`,
+    `Mode: ${config.management.solMode ? "SOL" : "USD"} | Relay: ${fmtSettingValue(config.api.lpAgentRelayEnabled)}`,
     `Screening: ${config.screening.source} | cats ${Array.isArray(config.screening.categories) && config.screening.categories.length ? config.screening.categories.join(",") : `single (${config.screening.category})`} | GMGN KOL ${config.gmgn.requireKol ? "required" : "preferred"}`,
     `Strategy: ${config.strategy.strategy}${(config.strategy.strategyLock ?? "default") !== "default" ? ` 🔒${config.strategy.strategyLock}` : ""} | deploy ${config.management.deployAmountSol} SOL | max pos ${config.risk.maxPositions}`,
-    `TP/SL: ${config.management.takeProfitPct}% / ${config.management.stopLossPct}% | trailing ${config.management.trailingTakeProfit ? "on" : "off"}`,
-    `Indicators: ${config.indicators.enabled ? "on" : "off"} | entry ${config.indicators.entryPreset} | ${fmtSettingValue(config.indicators.intervals)}`,
+    `TP/SL: ${config.management.takeProfitPct}% / ${config.management.stopLossPct}% | trailing ${fmtSettingValue(config.management.trailingTakeProfit)}`,
+    `Indicators: ${fmtSettingValue(config.indicators.enabled)} | entry ${config.indicators.entryPreset} | ${fmtSettingValue(config.indicators.intervals)}`,
     `🧪 Experiments ON: ${Object.entries(config.experiments).filter(([, v]) => v === true).map(([k]) => k).join(", ") || "none"}`,
   ].join("\n");
   let bodyText = summary;

@@ -1445,25 +1445,6 @@ function condenseRule(rule) {
   return s;
 }
 
-function formatConfigSnapshot() {
-  return [
-    "Config snapshot",
-    "",
-    `Screening source: ${config.screening.source}`,
-    `Strategy: ${config.strategy.strategy}${(config.strategy.strategyLock ?? "default") !== "default" ? ` 🔒(lock: ${config.strategy.strategyLock})` : ""} | bins: [${config.strategy.minBinsBelow}–${config.strategy.maxBinsBelow}] (volatility-scaled)`,
-    `Deploy: ${config.management.deployAmountSol} SOL | gasReserve: ${config.management.gasReserve} | maxPositions: ${config.risk.maxPositions}`,
-    `Stop loss: ${config.management.stopLossPct}% | take profit: ${config.management.takeProfitPct}%`,
-    `Trailing: ${config.management.trailingTakeProfit ? "on" : "off"} | trigger ${config.management.trailingTriggerPct}% | drop ${config.management.trailingDropPct}%`,
-    `OOR: ${config.management.outOfRangeWaitMinutes}m | cooldown ${config.management.oorCooldownTriggerCount}x / ${config.management.oorCooldownHours}h`,
-    `Repeat deploy cooldown: ${config.management.repeatDeployCooldownEnabled ? "on" : "off"} | ${config.management.repeatDeployCooldownTriggerCount}x / ${config.management.repeatDeployCooldownHours}h | min fee earned ${config.management.repeatDeployCooldownMinFeeEarnedPct}% | ${config.management.repeatDeployCooldownScope}`,
-    `Yield floor: ${config.management.minFeePerTvl24h}% | min age ${config.management.minAgeBeforeYieldCheck}m`,
-    `Screening: ${config.screening.category} / ${config.screening.timeframe} | TVL ${config.screening.minTvl}-${config.screening.maxTvl}`,
-    `GMGN interval: ${config.gmgn.interval} | OrderBy: ${config.gmgn.orderBy} | Dir: ${config.gmgn.direction}`,
-    `Intervals: manage ${config.schedule.managementIntervalMin}m | screen ${config.schedule.screeningIntervalMin}m`,
-    `HiveMind: ${isHiveMindEnabled() ? "enabled" : "disabled"}${config.hiveMind.agentId ? ` | ${config.hiveMind.agentId}` : ""}`,
-  ].join("\n");
-}
-
 // Full runtime config, grouped to match SETTINGS-GUIDE.md (GRUP 1–15) + GMGN.
 // /config shows the complete surface; long output is auto-split by sendMessage.
 // 🧬 Profil + 🗂️ Racikan identity — canonical formatter lives in preset-manager
@@ -2271,25 +2252,40 @@ const settingsFooter = (page) => [
   settingButton("❌ Close", "cfg:close"),
 ];
 
-// L1 — landing: identity + live summary + the two ASAL section buttons.
+// Compact "config inti" summary for the /settings landing. Values come from the
+// SAME source as /config + /config core (buildConfigRowMap → already 🟢/⚪-tagged),
+// so the landing can never drift from /config. The keys shown are the core set
+// (mirrors config-origin CORE_GROUPS); they're just regrouped one line/kategori.
+function formatSettingsLandingSummary() {
+  const rowMap = buildConfigRowMap();
+  const v = (k) => (rowMap[k] ? rowMap[k][1] : "—");
+  const setup = (() => {
+    try { const s = getActiveSetupStatus(); return s.name ? `${s.name}${s.edited ? " ✎" : ""}` : "—"; }
+    catch { return "—"; }
+  })();
+  const lock = (config.strategy.strategyLock ?? "default") !== "default" ? ` 🔒${v("strategyLock")}` : "";
+  const expOn = Object.entries(config.experiments).filter(([, x]) => x === true).map(([k]) => k).join(", ") || "none";
+  return [
+    `⚙️ SETTINGS · racikan ${setup}`,
+    `💰 pos ${v("maxPositions")} · deploy ${v("deployAmountSol")} · SL ${v("stopLossPct")} · TP ${v("takeProfitPct")} · trail ${v("trailingTakeProfit")}`,
+    `🔎 mcap ${v("minMcap")}–${v("maxMcap")} · TVL ${v("minTvl")}–${v("maxTvl")} · vol ${v("minVolume")} · holders ${v("minHolders")} · organic ${v("minOrganic")}`,
+    `🎯 ${v("strategy")}${lock} · bins ${v("minBinsBelow")}–${v("maxBinsBelow")}`,
+    `🧠 ${v("managementModel")} · ⏱ manage ${v("managementIntervalMin")}m / screen ${v("screeningIntervalMin")}m`,
+    `📊 indikator ${v("enabled")} (${v("entryPreset")}) · exit ${v("exitEnabled")}`,
+    `🧪 experiments ON: ${expOn}`,
+  ].join("\n");
+}
+
+// L1 — landing: lead with the compact config-inti summary, then the menu buttons.
 function renderSettingsMain() {
-  const identityLine = (() => { try { return formatIdentity({ compact: true }); } catch { return "🧬 Profil: — · 🗂️ Racikan: —"; } })();
   const bodyText = [
-    "⚙️ Settings — per ASAL (selaras /config)",
+    formatSettingsLandingSummary(),
     "",
-    identityLine,
-    `Mode: ${config.management.solMode ? "SOL" : "USD"} | Relay: ${fmtSettingValue(config.api.lpAgentRelayEnabled)}`,
-    `Screening: ${config.screening.source} | cats ${Array.isArray(config.screening.categories) && config.screening.categories.length ? config.screening.categories.join(",") : `single (${config.screening.category})`} | GMGN KOL ${config.gmgn.requireKol ? "required" : "preferred"}`,
-    `Strategy: ${config.strategy.strategy}${(config.strategy.strategyLock ?? "default") !== "default" ? ` 🔒${config.strategy.strategyLock}` : ""} | deploy ${config.management.deployAmountSol} SOL | max pos ${config.risk.maxPositions}`,
-    `TP/SL: ${config.management.takeProfitPct}% / ${config.management.stopLossPct}% | trailing ${fmtSettingValue(config.management.trailingTakeProfit)}`,
-    `Indicators: ${fmtSettingValue(config.indicators.enabled)} | entry ${config.indicators.entryPreset} | ${fmtSettingValue(config.indicators.intervals)}`,
-    `🧪 Experiments ON: ${Object.entries(config.experiments).filter(([, v]) => v === true).map(([k]) => k).join(", ") || "none"}`,
-    "",
-    "Pilih seksi asal setelan ⤵️  ( ⚙️ = bawaan dev · 🧩 = tambahan zen )",
+    "Atur lebih detail ⤵️  ( ⚙️ dev · 🧩 zen )",
   ].join("\n");
   const keyboard = [
     ORIGIN_SECTIONS.map((sec) => settingButton(sec.title, `cfg:page:${sec.id}`)),
-    [settingButton("🗂️ Racikan", "cfg:page:presets"), settingButton("📋 Show config", "cfg:show")],
+    [settingButton("🗂️ Racikan", "cfg:page:presets"), settingButton("📋 Config penuh", "cfg:show")],
     settingsFooter("main"),
   ];
   return { text: bodyText, keyboard };
@@ -2463,8 +2459,10 @@ async function applySettingsMenuCallback(msg) {
     return;
   }
   if (action === "show") {
+    // "📋 Config penuh" → the full /config (same as the /config command, auto-split).
+    // sendMessage drops it below the menu so the keyboard stays usable.
     await answerCallbackQuery(msg.callbackQueryId);
-    await editMessageWithButtons(formatConfigSnapshot(), msg.messageId, [[settingButton("Back", "cfg:page:main")]]);
+    await sendMessage(formatFullConfig());
     return;
   }
   if (action === "page") {

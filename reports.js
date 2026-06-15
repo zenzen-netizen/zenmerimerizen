@@ -54,9 +54,17 @@ export function computeTradeStats(records = []) {
     ? { name: byPct[byPct.length - 1].pool_name || "?", pnl_pct: r2(byPct[byPct.length - 1].pnl_pct), pnl_usd: r2(byPct[byPct.length - 1].pnl_usd) } : null;
 
   // Max drawdown over the equity curve (cumulative pnl_usd, chronological).
+  // peakAtMaxDD = the equity-curve peak at the moment of the worst drawdown, so we
+  // can express the DD as a % of that peak (recovery_needed = 1/(1−DD%)−1).
   const chron = [...perf].sort((a, b) => new Date(a.closed_at || a.recorded_at || 0) - new Date(b.closed_at || b.recorded_at || 0));
-  let cum = 0, peak = 0, maxDD = 0;
-  for (const p of chron) { cum += p.pnl_usd; if (cum > peak) peak = cum; const dd = peak - cum; if (dd > maxDD) maxDD = dd; }
+  let cum = 0, peak = 0, maxDD = 0, peakAtMaxDD = 0;
+  for (const p of chron) { cum += p.pnl_usd; if (cum > peak) peak = cum; const dd = peak - cum; if (dd > maxDD) { maxDD = dd; peakAtMaxDD = peak; } }
+  // DD relative to the peak equity it ate into (only meaningful when peak > 0).
+  const maxDDPct = peakAtMaxDD > 0 ? r2((maxDD / peakAtMaxDD) * 100) : null;
+
+  // Worst single trade by $ (the tail) + what net would be without it — surfaces
+  // how much one loser dominates the book (a render of the existing data).
+  const worstUsdRow = [...losses].sort((a, b) => a.pnl_usd - b.pnl_usd)[0] || null;
 
   // Max consecutive losses (tail-risk awareness).
   let curLossStreak = 0, maxLossStreak = 0;
@@ -135,10 +143,15 @@ export function computeTradeStats(records = []) {
     expectancy_pct: r2(mean(fin(perf.map((p) => p.pnl_pct)))),
     biggest_win: biggestWin,
     biggest_loss: biggestLoss,
+    worst_trade_usd: worstUsdRow ? r2(worstUsdRow.pnl_usd) : null,
+    worst_trade_name: worstUsdRow ? (worstUsdRow.pool_name || "?") : null,
+    // Net the book would show WITHOUT the single worst loser — exposes tail dominance.
+    net_excl_worst_usd: worstUsdRow ? r2(netUsd - worstUsdRow.pnl_usd) : r2(netUsd),
     fees_usd: r2(feesUsd),
     avg_hold_min: r2(mean(fin(perf.map((p) => p.minutes_held)))),
     avg_range_efficiency: r2(mean(fin(perf.map((p) => p.range_efficiency)))),
     max_drawdown_usd: r2(maxDD),
+    max_drawdown_pct: maxDDPct,
     max_consecutive_losses: maxLossStreak,
     movement,
     price_movement: priceMovement,
@@ -239,20 +252,104 @@ const pf = (v) => (v === Infinity ? "∞" : v == null ? "?" : v.toFixed(2));
  */
 export function formatStatsBlock(st, label) {
   if (!st || st.count === 0) return `<b>📊 ${esc(label)}:</b> no closed positions yet`;
+  const expPct = st.expectancy_pct != null ? ` (${pct(st.expectancy_pct)})` : "";
+  // DD% is relative to the peak cumulative profit it ate into; only meaningful as
+  // a percentage while ≤100% (a drawdown that exceeds the prior peak makes the
+  // ratio explode — show the solid $ figure alone in that case).
+  const ddPct = (st.max_drawdown_pct != null && st.max_drawdown_pct > 0 && st.max_drawdown_pct <= 100)
+    ? ` (${pct(-st.max_drawdown_pct)} dari puncak)` : "";
   const lines = [
     `<b>📊 ${esc(label)} — ${st.count} closed</b>`,
     `💰 Net: ${money(st.net_pnl_usd)}${st.roi_pct != null ? ` (${pct(st.roi_pct)} ROI)` : ""} | 💎 fees $${st.fees_usd.toFixed(2)}`,
-    `🎯 Win ${st.win_rate_pct}% (${st.wins}W/${st.losses}L) | profit factor ${pf(st.profit_factor)} | expectancy ${money(st.expectancy_usd)}/trade`,
+    `🎯 Win ${st.win_rate_pct}% (${st.wins}W/${st.losses}L) | profit factor ${pf(st.profit_factor)} | expectancy ${money(st.expectancy_usd)}${expPct}/trade`,
     `⚖️ Avg win ${pct(st.avg_win_pct)} vs avg loss ${pct(st.avg_loss_pct)}${st.payoff_ratio != null ? ` (payoff ${st.payoff_ratio.toFixed(2)}×)` : ""}`,
-    `📉 Max drawdown -$${(st.max_drawdown_usd ?? 0).toFixed(2)} | worst streak ${st.max_consecutive_losses}L | avg hold ${fmtHold(st.avg_hold_min)} | in-range ${st.avg_range_efficiency ?? "?"}%`,
+    `📉 Max drawdown -$${(st.max_drawdown_usd ?? 0).toFixed(2)}${ddPct} | worst streak ${st.max_consecutive_losses}L | avg hold ${fmtHold(st.avg_hold_min)} | in-range ${st.avg_range_efficiency ?? "?"}%`,
   ];
   if (st.biggest_win) lines.push(`🏆 Best: ${esc(st.biggest_win.name)} ${pct(st.biggest_win.pnl_pct)} | 💀 Worst: ${st.biggest_loss ? `${esc(st.biggest_loss.name)} ${pct(st.biggest_loss.pnl_pct)}` : "—"}`);
+  // Tail dominance: the single worst loser in $ and what net would be without it.
+  if (st.worst_trade_usd != null && st.worst_trade_usd < 0) {
+    lines.push(`🩸 Tail: trade terburuk ${esc(st.worst_trade_name)} ${money(st.worst_trade_usd)} → tanpa itu net ${money(st.net_excl_worst_usd)}`);
+  }
   return lines.join("\n");
 }
 
 function fmtHold(m) {
   if (m == null) return "?";
   return m >= 60 ? `${(m / 60).toFixed(1)}h` : `${Math.round(m)}m`;
+}
+
+/**
+ * Quant edge block (HTML) — all derived from the stats already computed, no new
+ * data. Surfaces the "is the edge real, and what's the cost drag" lens:
+ *   • RR            = avg_win% / |avg_loss%| (reward-to-risk per trade)
+ *   • break-even WR = 1/(RR+1) → "WR aktual X% vs impas Y% (±Zpp)"
+ *   • EV/trade (R)  = WR·RR − (1−WR)  (>0 = positive expectancy)
+ *   • cost-drag %/yr = annualized (gas+LLM) / modal × 100  — passed in by caller
+ *     (reports.js stays config/cost-fetch free); healthy < `costDragHealthyMax`%
+ *   • recovery_needed% from max drawdown = 1/(1−DD%)−1
+ *   • SAMPLE FLAG: n < `noisyBelow` → "noisy ±10%, directional, jangan overfit"
+ * Returns an HTML block or null on empty stats.
+ */
+export function formatQuantBlock(st, { costDragPct = null, costDragHealthyMax = 20, noisyBelow = 100 } = {}) {
+  if (!st || st.count === 0) return null;
+  const n = st.count;
+  const noisy = n < noisyBelow;
+  const header = `<b>🧮 Quant Edge${noisy ? ` — n=${n}` : ""}:</b>`;
+  const lines = [header];
+
+  // RR + break-even WR. No losses yet → RR effectively ∞, break-even 0%.
+  const aw = st.avg_win_pct, al = st.avg_loss_pct;
+  let rrStr = "?", beStr = "";
+  if (al != null && al !== 0 && aw != null) {
+    const rr = aw / Math.abs(al);
+    const beWr = (1 / (rr + 1)) * 100;        // break-even win-rate, %
+    const diff = st.win_rate_pct - beWr;       // actual minus break-even, pp
+    const mark = diff >= 0 ? "✅" : "⚠️";
+    rrStr = rr.toFixed(2);
+    beStr = `break-even WR ${beWr.toFixed(0)}% vs aktual ${st.win_rate_pct}% (${diff >= 0 ? "+" : ""}${diff.toFixed(0)}pp ${mark})`;
+  } else if (al == null || al === 0) {
+    rrStr = "∞"; // no losing trades in window
+    beStr = `break-even WR 0% vs aktual ${st.win_rate_pct}% (belum ada trade rugi)`;
+  }
+  lines.push(`  RR (avg win/loss) ${rrStr}${beStr ? ` | ${beStr}` : ""}`);
+
+  // EV per trade in R units. WR·RR − (1−WR), with WR as a fraction.
+  if (aw != null && al != null && al !== 0) {
+    const wr = st.win_rate_pct / 100;
+    const rr = aw / Math.abs(al);
+    const evR = wr * rr - (1 - wr);
+    const evMark = evR > 0 ? "✅ positif" : evR < 0 ? "🔴 negatif" : "⚪ impas";
+    lines.push(`  EV/trade ${evR >= 0 ? "+" : ""}${evR.toFixed(2)}R (${evMark})`);
+  }
+
+  // Recovery needed from the max drawdown (gain required on current equity to
+  // climb back to the prior peak): 1/(1−DD%)−1.
+  if (st.max_drawdown_pct != null && st.max_drawdown_pct > 0 && st.max_drawdown_pct < 100) {
+    const dd = st.max_drawdown_pct / 100;
+    const recov = (1 / (1 - dd) - 1) * 100;
+    lines.push(`  Max DD -$${(st.max_drawdown_usd ?? 0).toFixed(2)} (−${st.max_drawdown_pct.toFixed(0)}% dari puncak) → butuh +${recov.toFixed(0)}% buat pulih`);
+  }
+
+  // Cost drag — only when the caller supplied it (it owns cost/wallet fetch).
+  if (Number.isFinite(costDragPct)) {
+    const ok = costDragPct < costDragHealthyMax;
+    lines.push(`  Cost-drag ~${costDragPct.toFixed(0)}%/th biaya:modal (sehat <${costDragHealthyMax}% ${ok ? "✅" : "⚠️ berat"})`);
+  }
+
+  if (noisy) lines.push(`  <i>⚠️ n=${n} (<${noisyBelow}) — noisy ±10%, baca arah saja, jangan overfit angka.</i>`);
+  return lines.join("\n");
+}
+
+/**
+ * Annualized cost-drag %: (cost over window, scaled to a year) / capital × 100.
+ * Pure helper so callers (briefing, /report) compute it from data they already
+ * fetch (gas+LLM USD, window days, wallet USD). Returns null on bad inputs.
+ */
+export function computeCostDragPct({ costUsd, windowDays, modalUsd }) {
+  if (!Number.isFinite(costUsd) || !Number.isFinite(modalUsd) || modalUsd <= 0) return null;
+  if (!Number.isFinite(windowDays) || windowDays <= 0) return null;
+  const annualCost = (costUsd / windowDays) * 365;
+  return (annualCost / modalUsd) * 100;
 }
 
 /** Per-bucket breakdown block (strategy / session / narrative). */
@@ -314,6 +411,15 @@ export function buildRecommendations(allPerf, st = null, opts = {}) {
   const weakPF = stats.profit_factor !== Infinity && stats.profit_factor != null && stats.profit_factor < 1.2;
   const lopsided = stats.payoff_ratio != null && stats.payoff_ratio < 1; // avg loss bigger than avg win
 
+  // ── Anti-naive guard: would tightening the price stop CUT WINNERS? ──
+  // If winners routinely survive deeper price dips than the average loser, a
+  // tighter stopLossPct would stop out the eventual winners. In that regime we
+  // must NOT recommend "tighten stopLoss / shorten OOR" — the leak is entry
+  // quality (rug/dump screening), not the exit stop. winnersDipDeep encodes that.
+  const pm = stats.price_movement;
+  const winnersDipDeep = !!(pm && pm.win_worst_trough_pct != null && pm.loss_avg_trough_pct != null
+    && pm.win_worst_trough_pct < pm.loss_avg_trough_pct); // winners' deepest dip is below losers' avg dip
+
   // ── Risk posture first — the lens the old briefing was missing ──
   if (netNeg || weakPF) {
     recs.push(`⚠️ Net ${money(stats.net_pnl_usd)} with profit factor ${pf(stats.profit_factor)} — book is not profitable yet. <b>Do NOT scale up</b>; fix the leak before sizing up.`);
@@ -321,10 +427,21 @@ export function buildRecommendations(allPerf, st = null, opts = {}) {
     if (curSize > 0.25) recs.push(`Lower <code>positionSizePct</code> ${curSize} → ${(curSize * 0.8).toFixed(2)} until profit factor &gt; 1.5`);
   }
   if (lopsided) {
-    recs.push(`Avg loss (${pct(stats.avg_loss_pct)}) bigger than avg win (${pct(stats.avg_win_pct)}) — cut losers faster: tighten <code>stopLossPct</code> (now ${m.stopLossPct ?? "off"}) or shorten <code>outOfRangeWaitMinutes</code> (now ${m.outOfRangeWaitMinutes ?? 30})`);
+    if (winnersDipDeep) {
+      // Cutting losers faster via a tighter price stop would also cut winners here.
+      recs.push(`Avg loss (${pct(stats.avg_loss_pct)}) > avg win (${pct(stats.avg_win_pct)}). TAPI winners justru tahan dip lebih dalam (${pct(pm.win_worst_trough_pct)}) dari rata-rata loser (${pct(pm.loss_avg_trough_pct)}) — <b>jangan perketat stopLoss/OOR</b> (bakal motong pemenang). Bocornya di kualitas entry: perketat <b>screening rug/dump</b> (holder/bundler/likuiditas exit).`);
+    } else {
+      recs.push(`Avg loss (${pct(stats.avg_loss_pct)}) bigger than avg win (${pct(stats.avg_win_pct)}) — cut losers faster: tighten <code>stopLossPct</code> (now ${m.stopLossPct ?? "off"}) or shorten <code>outOfRangeWaitMinutes</code> (now ${m.outOfRangeWaitMinutes ?? 30})`);
+    }
   }
   if (stats.biggest_loss && stats.biggest_loss.pnl_pct <= -30) {
-    recs.push(`Tail risk: worst trade ${esc(stats.biggest_loss.name)} ${pct(stats.biggest_loss.pnl_pct)} — a hard <code>stopLossPct</code> would have capped it`);
+    // A −50%+ single loss is almost always a rug/dump — a price stop fires too
+    // late to help, so point at the rug screen, not the stop.
+    if (stats.biggest_loss.pnl_pct <= -50 || winnersDipDeep) {
+      recs.push(`Tail risk: trade terburuk ${esc(stats.biggest_loss.name)} ${pct(stats.biggest_loss.pnl_pct)} — sedalam ini biasanya rug/dump, <b>stop harga telat</b>. Perketat <b>screening rug</b> (holder/bundler/likuiditas exit), bukan stopLoss.`);
+    } else {
+      recs.push(`Tail risk: worst trade ${esc(stats.biggest_loss.name)} ${pct(stats.biggest_loss.pnl_pct)} — a hard <code>stopLossPct</code> would have capped it`);
+    }
   }
 
   // ── Dimension tweaks (same data the auto-evolver doesn't fully cover) ──
@@ -368,11 +485,26 @@ export function buildRecommendations(allPerf, st = null, opts = {}) {
   // ── PnL movement → take-profit / trailing / stop tuning ──
   const mv = stats.movement;
   if (mv && mv.giveback_pct >= 3) {
-    const tp = m.trailingTakeProfit ? "tighten" : "enable";
-    recs.push(`Leaving ~${pct(mv.giveback_pct)} on the table (avg peak ${pct(mv.avg_peak_pct)} → exit ${pct(mv.avg_exit_pct)}) — ${tp} trailing TP (<code>trailingTriggerPct</code>/<code>trailingDropPct</code>) or raise <code>takeProfitPct</code> to lock gains nearer the peak`);
+    // Give-back = peak run-up not captured at exit. If avg peak never even reaches
+    // the trailing TRIGGER, trailing never arms → the fix is LOWERING the trigger,
+    // not the drop. Otherwise nudge trailing/TP generally.
+    const trig = m.trailingTriggerPct;
+    const peakBelowTrigger = m.trailingTakeProfit && trig != null && mv.avg_peak_pct != null && mv.avg_peak_pct < trig;
+    if (peakBelowTrigger) {
+      const target = Math.max(1, Math.floor(mv.avg_peak_pct));
+      recs.push(`Give-back ~${pct(mv.giveback_pct)}: avg peak ${pct(mv.avg_peak_pct)} TAK pernah capai <code>trailingTriggerPct</code> ${trig}% → trailing tak pernah aktif. Turunkan trigger ke ~${target}% biar ngunci sebelum harga balik (jangan sentuh stop harga).`);
+    } else {
+      const tp = m.trailingTakeProfit ? "rapatkan" : "nyalakan";
+      recs.push(`Tinggalin ~${pct(mv.giveback_pct)} di meja (avg peak ${pct(mv.avg_peak_pct)} → exit ${pct(mv.avg_exit_pct)}) — ${tp} trailing TP (<code>trailingTriggerPct</code>/<code>trailingDropPct</code>) atau naikin <code>takeProfitPct</code> biar ngunci dekat puncak`);
+    }
   }
   if (mv && mv.avg_trough_pct != null && mv.avg_trough_pct <= -10) {
-    recs.push(`Trades dip to avg trough ${pct(mv.avg_trough_pct)} before exit — a tighter <code>stopLossPct</code> would cap the deep drawdowns`);
+    // Only suggest a tighter stop when winners DON'T need the room — else it cuts them.
+    if (winnersDipDeep) {
+      recs.push(`Trades dip avg ${pct(mv.avg_trough_pct)} sebelum exit, tapi winners pulih dari dip lebih dalam (${pct(pm.win_worst_trough_pct)}) — <b>jangan</b> perketat <code>stopLossPct</code>, itu motong pemenang. Tail dalam = kasus rug → perketat screening.`);
+    } else {
+      recs.push(`Trades dip avg ${pct(mv.avg_trough_pct)} sebelum exit & winners pulih dari dip lebih dangkal — <code>stopLossPct</code> lebih ketat bisa nutup drawdown dalam tanpa motong banyak pemenang`);
+    }
   }
 
   // ── Gas efficiency — fixed gas vs %-based profit (only meaningful if gas is real & material) ──
@@ -417,13 +549,14 @@ export function buildVerdict(st) {
  * weekly/monthly digests — they differ only in which records they pass in and
  * the title/labels. Returns null when there's nothing to say.
  */
-export function buildTradeReport(perf, { title, statsLabel = "Summary", trendN = 10, includeBreakdown = true, includeTrend = true, identity = null } = {}) {
+export function buildTradeReport(perf, { title, subtitle = null, statsLabel = "Summary", trendN = 10, includeBreakdown = true, includeTrend = true, identity = null, quant = null } = {}) {
   const records = (perf || []).filter((p) => p && Number.isFinite(p.pnl_usd));
   const idLine = identity ? `${identity}\n` : ""; // 🧬 Profil + 🗂️ Racikan, passed by caller (keeps this module config-free)
-  if (records.length === 0) return `<b>${esc(title || "Trade Report")}</b>\n${idLine}No closed positions in this window yet.`;
+  if (records.length === 0) return `<b>${esc(title || "Trade Report")}</b>\n${subtitle ? `<i>${esc(subtitle)}</i>\n` : ""}${idLine}No closed positions in this window yet.`;
   const st = computeTradeStats(records);
-  const parts = [`<b>${esc(title)}</b>`, ...(identity ? [identity] : []), "────────────────", formatStatsBlock(st, statsLabel)];
+  const parts = [`<b>${esc(title)}</b>`, ...(subtitle ? [`<i>${esc(subtitle)}</i>`] : []), ...(identity ? [identity] : []), "────────────────", formatStatsBlock(st, statsLabel)];
   const verdict = buildVerdict(st); if (verdict) parts.push(verdict);
+  const quantBlock = formatQuantBlock(st, quant || {}); if (quantBlock) parts.push("", quantBlock);
   if (includeTrend) { const t = formatTrend(records, trendN); if (t) parts.push("", t); }
   const mv = formatMovement(st); if (mv) parts.push("", mv);
   if (includeBreakdown) { const b = formatBreakdown(st); if (b) parts.push("", b); }

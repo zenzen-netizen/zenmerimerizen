@@ -3821,6 +3821,7 @@ Commands:
   /learn <addr>  Study top LPers from a specific pool address
   /thresholds    Show current screening thresholds + performance stats
   /evolve        Manually trigger threshold evolution from performance data
+  /evolve force  Run evolve once even when frozen (evolveEnabled=false) — manual override
   /stop          Shut down
 `);
 
@@ -3998,8 +3999,24 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
       return;
     }
 
-    if (input === "/evolve") {
+    if (input === "/evolve" || input === "/evolve force") {
       await runBusy(async () => {
+        // FREEZE gate: when evolveEnabled=false the AUTO loop is frozen. The manual
+        // /evolve stays available to the operator, but plain `/evolve` refuses and
+        // explains — running it anyway requires the explicit `/evolve force` override,
+        // which writes thresholds despite the freeze (operator's deliberate choice).
+        const frozen = config.learning?.evolveEnabled === false;
+        const forced = input === "/evolve force";
+        if (frozen && !forced) {
+          console.log("\n🧊 Auto-evolve DIBEKUKAN (evolveEnabled=false) — threshold tidak akan diubah.");
+          console.log("   minFeeActiveTvlRatio & minOrganic tetap manual.");
+          console.log("   Untuk override manual SEKALI JALAN: ketik  /evolve force\n");
+          return;
+        }
+        if (frozen && forced) {
+          console.log("\n⚠️  OVERRIDE MANUAL — evolve dibekukan (evolveEnabled=false) tapi dipaksa jalan.");
+          console.log("   Ini akan MENULIS threshold sekali ini. Toggle tetap false setelahnya.\n");
+        }
         const perf = getPerformanceSummary();
         if (!perf || perf.total_positions_closed < 5) {
           const needed = 5 - (perf?.total_positions_closed || 0);

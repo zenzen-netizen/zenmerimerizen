@@ -254,11 +254,20 @@ export async function recordPerformance(perf) {
   // (keepActiveRacikan) so each racikan evolves on its own trades.
   const livePerf = data.performance.filter((p) => !p.paper && keepActiveRacikan(p));
   if (livePerf.length > 0 && livePerf.length % MIN_EVOLVE_POSITIONS === 0) {
-    const { reloadScreeningThresholds } = await import("./config.js");
-    const result = evolveThresholds(livePerf, config);
-    if (result?.changes && Object.keys(result.changes).length > 0) {
-      reloadScreeningThresholds();
-      log("evolve", `Auto-evolved thresholds: ${JSON.stringify(result.changes)}`);
+    // Auto-evolve threshold writer — gated by config.learning.evolveEnabled (FREEZE
+    // baseline). false = FROZEN: skip the auto-write entirely (no user-config write, no
+    // threshold change). Only the AUTO trigger is gated here — the manual /evolve
+    // (index.js REPL) stays callable so the operator can still override on demand.
+    // Darwin (signal weights, below) is INDEPENDENT — it keeps its own darwinEnabled toggle.
+    if (config.learning?.evolveEnabled === false) {
+      log("evolve", `Auto-evolve frozen (evolveEnabled=false) at ${livePerf.length} closes — thresholds unchanged`);
+    } else {
+      const { reloadScreeningThresholds } = await import("./config.js");
+      const result = evolveThresholds(livePerf, config);
+      if (result?.changes && Object.keys(result.changes).length > 0) {
+        reloadScreeningThresholds();
+        log("evolve", `Auto-evolved thresholds: ${JSON.stringify(result.changes)}`);
+      }
     }
 
     // Darwinian signal weight recalculation

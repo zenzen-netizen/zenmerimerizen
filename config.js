@@ -285,6 +285,15 @@ export const config = {
     generalModel:    u.generalModel    ?? process.env.LLM_MODEL ?? "openrouter/healer-alpha",
   },
 
+  // ─── Learning / Auto-Evolve ───────────
+  // Gate for evolveThresholds (the auto-writer of minFeeActiveTvlRatio + minOrganic,
+  // fired every 5 closes). true (default) = factory behavior unchanged. false = FROZEN:
+  // the auto-write is skipped so a baseline racikan never drifts while it's being tuned.
+  // Reversible (flip back to true). Darwin (signal weights) has its OWN toggle below.
+  learning: {
+    evolveEnabled:  u.evolveEnabled     ?? true,
+  },
+
   // ─── Darwinian Signal Weighting ───────
   darwin: {
     enabled:        u.darwinEnabled     ?? true,

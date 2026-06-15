@@ -174,3 +174,43 @@ function round(v, d = 4) {
   const f = 10 ** d;
   return Math.round(n * f) / f;
 }
+
+/**
+ * FASE 4 — classify the SOURCE of a paper position's edge: did it earn from
+ * harvesting fees, or from price luck (IL/price moving favorably)? Looks at the
+ * pre-cost split (fee vs IL/price). Answers "racikan untung dari panen-fee atau
+ * hoki-harga?". Pure read of a metrics object.
+ */
+export function classifyPaperEdge(m) {
+  const fee = Number(m?.fees_usd) || 0;
+  const il = Number(m?.il_usd) || 0;
+  const before = Number(m?.pnl_before_costs_usd ?? fee + il);
+  if (before <= 0) {
+    return il < 0 ? "rugi — fee tak nutup drag IL/harga" : "rugi — kalah di ongkos";
+  }
+  if (il >= 0) return fee >= il ? "panen-fee (fee > efek harga)" : "hoki-harga (efek harga > fee)";
+  return "panen-fee (fee menutup drag IL/harga)"; // il<0 tapi net positif → fee yang menanggung
+}
+
+/**
+ * FASE 4 — human-readable PnL decomposition for a paper close. Splits PnL into
+ * fee / IL-price / slippage / gas, and shows "edge sebelum ongkos" vs "sesudah
+ * ongkos" so the bench separates real LP edge from frictions. USD-denominated.
+ */
+export function formatPaperDecomposition(m) {
+  if (!m) return "";
+  const usd = (x) => { const n = Number(x) || 0; return `${n >= 0 ? "+" : "−"}$${Math.abs(n).toFixed(4)}`; };
+  const init = Number(m.initial_value_usd) || 0;
+  const pct = (x) => (init > 0 ? ` (${((Number(x) || 0) / init * 100).toFixed(2)}%)` : "");
+  return [
+    "🧪 Dekomposisi PnL (simulasi):",
+    `  Fee (panen):       ${usd(m.fees_usd)}`,
+    `  IL / harga:        ${usd(m.il_usd)}`,
+    `  ── Edge sblm ongkos: ${usd(m.pnl_before_costs_usd)}${pct(m.pnl_before_costs_usd)}`,
+    `  Slippage exit:     ${usd(-Math.abs(Number(m.slippage_usd) || 0))}`,
+    `  Gas round-trip:    ${usd(-Math.abs(Number(m.gas_drag_usd) || 0))}`,
+    `  ── Edge stlh ongkos: ${usd(m.pnl_usd)}${pct(m.pnl_usd)}`,
+    `  Sumber: ${classifyPaperEdge(m)}`,
+    "  (LLM = ongkos global, lihat /briefing — bukan per-trade)",
+  ].join("\n");
+}

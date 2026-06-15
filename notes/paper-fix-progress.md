@@ -6,7 +6,7 @@ Acuan: `notes/paper-recon.md`. Branch: `experimental`.
 TIDAK ke-sentuh. JANGAN sentuh `recordPerformance` bersama (bug Q4 = brief lain). Jangan sentuh
 logika trade/exit/screening live. Verifikasi = smoke-test level kode.
 
-> Status: F1 ✅ · F2 ✅ · F3 ✅ · F4 ⬜ · F5 (opsional) ⬜
+> Status: F1 ✅ · F2 ✅ · F3 ✅ · F4 ✅ · F5 (opsional, SKIP) ⬜
 
 ---
 
@@ -74,6 +74,27 @@ Smoke-test pure `simulatePaperMetrics` (deposit 0.5 SOL, in-range, harga flat �
 - Smoke: in-range → slippage 0 (tak ada base); drift-bawah fill_frac 0.5 → slippage 0.002333 (1% base 0.2333);
   costs==gas+slip ✓, net==before−costs ✓. Paper TIDAK lagi frictionless.
 
-## FASE 4 — DEKOMPOSISI PnL ⬜
-## FASE 5 (opsional) — perhalus IL ⬜
-## VERIFIKASI ⬜
+## FASE 4 — DEKOMPOSISI PnL ✅
+- `paper-trading.js`: `classifyPaperEdge(m)` (panen-fee / hoki-harga / rugi) + `formatPaperDecomposition(m)`
+  (fee / IL-harga / slippage / gas + "edge sblm vs stlh ongkos" + sumber). Pure.
+- `tools/dlmm.js` `closePaperPosition`: return tambah `decomposition{}` + `breakdown` (string), di-log saat close.
+- **BONUS FIX (paper-only, double-count fee):** `recordPerformance` hitung `pnl=(final+fees)-initial`, tapi
+  paper kirim `final_value_usd=position_value_usd` yg SUDAH termasuk fees → fee dihitung 2×. Diperbaiki di
+  ARGUMEN closePaperPosition: `final_value_usd = position_value_usd − fees_usd − costs_usd` → recorded pnl =
+  net after-cost = `m.pnl_usd`. Fungsi `recordPerformance` TIDAK disentuh (sesuai batasan brief).
+- Smoke: in-range → "panen-fee" net +$0.46 (recorded==net ✓); drift-bawah → "rugi — fee tak nutup drag IL/harga"
+  net −$2.39 (recorded==net ✓). `npm test` PASS.
+
+## FASE 5 (opsional) — perhalus IL ⬜ SKIP (sesuai brief: "Boleh skip"). IL tetap orde-pertama
+  (`paper-trading.js` blok fill). Bisa diperhalus belakangan (mis. quote Jupiter buat impact nyata).
+
+## VERIFIKASI ✅
+- **Fee realistis (tak cap):** smoke F1(d) — NEW 0.16–3.83% vs OLD pinned 50%.
+- **Gas kepotong:** round-trip 0.0001 SOL via estimateGasSol (estimator briefing) → net = before − costs.
+- **Slippage kena:** in-range 0; drift-bawah 1% × base value; di costs.
+- **Dekomposisi muncul:** fee/IL/slippage/gas + edge sblm/stlh ongkos + sumber (panen-fee vs hoki-harga).
+- **Recorded == net after-cost** (double-count fee fixed).
+- `git branch`=experimental · log 4 commit (F1–F4) · `npm test` (syntax) EXIT 0.
+- **Live UTUH:** `recordPerformance` TIDAK disentuh; semua perubahan di gate `isPaperMode()`/`paper_`
+  (paper deploy branch, computePaperMetrics, closePaperPosition) + fungsi pure paper-trading.js.
+  Tak ada sentuhan logika trade/exit/screening live. Bot live (id 0) tak di-restart oleh tugas ini.

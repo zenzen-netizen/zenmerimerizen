@@ -34,6 +34,8 @@ import {
   makePaperPositionId,
   simulatePaperMetrics,
   timeframeMinutes,
+  classifyPaperEdge,
+  formatPaperDecomposition,
 } from "../paper-trading.js";
 import { appendDecision } from "../decision-log.js";
 import { getAndClearStagedSignals } from "../signal-tracker.js";
@@ -1606,7 +1608,12 @@ async function closePaperPosition(position_address, reason) {
       price_peak_pct: tracked.price_peak_pct ?? null,
       price_trough_pct: tracked.price_trough_pct ?? null,
       fees_earned_usd: m?.fees_usd ?? 0,
-      final_value_usd: m?.position_value_usd ?? 0,
+      // recordPerformance computes pnl = (final_value_usd + fees_earned_usd) - initial.
+      // position_value_usd ALREADY includes fees, so pass PRINCIPAL ONLY (minus fees)
+      // and ALSO net out costs (gas + slippage) → recorded pnl = after-cost net,
+      // matching m.pnl_usd + the decomposition. (Fixes a paper-only fee double-count;
+      // recordPerformance itself is untouched.)
+      final_value_usd: (m?.position_value_usd ?? 0) - (m?.fees_usd ?? 0) - (m?.costs_usd ?? 0),
       initial_value_usd: m?.initial_value_usd ?? 0,
       minutes_in_range: Math.max(0, minutesHeld - minutesOOR),
       minutes_held: minutesHeld,
@@ -1622,7 +1629,20 @@ async function closePaperPosition(position_address, reason) {
     log("paper_warn", `paper recordPerformance failed: ${e.message}`);
   }
   recordClose(position_address, reason || "paper close");
-  log("close", `[PAPER] closed ${String(position_address).slice(0, 14)} @ ${pnlPct.toFixed(2)}% (simulated)`);
+  // FASE 4: PnL decomposition (fee / IL-price / slippage / gas; edge before vs after costs).
+  const decomposition = {
+    fees_usd: m?.fees_usd ?? 0,
+    il_usd: m?.il_usd ?? 0,
+    slippage_usd: m?.slippage_usd ?? 0,
+    gas_drag_usd: m?.gas_drag_usd ?? 0,
+    costs_usd: m?.costs_usd ?? 0,
+    edge_before_costs_usd: m?.pnl_before_costs_usd ?? 0,
+    edge_after_costs_usd: m?.pnl_usd ?? 0,
+    source: classifyPaperEdge(m),
+  };
+  const breakdown = formatPaperDecomposition(m);
+  log("close", `[PAPER] closed ${String(position_address).slice(0, 14)} @ ${pnlPct.toFixed(2)}% net (simulated) — ${decomposition.source}`);
+  if (breakdown) log("close", breakdown);
   return {
     success: true,
     dry_run: true,
@@ -1634,9 +1654,11 @@ async function closePaperPosition(position_address, reason) {
     pnl_usd: pnlUsd,
     pnl_pct: pnlPct,
     fees_earned_usd: m?.fees_usd ?? 0,
+    decomposition,
+    breakdown,
     close_reason: reason || "paper close",
     derived_lesson: derivedLesson,
-    message: "PAPER close — simulated PnL recorded",
+    message: `PAPER close — simulated net PnL recorded (${decomposition.source})`,
   };
 }
 

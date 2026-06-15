@@ -1821,6 +1821,51 @@ export async function getMyPositions({ force = false, silent = false, wallet_add
   return loadPositions();
 }
 
+// Empirical rent of a Meteora positionV2 account, used only when the on-chain
+// lamport read fails (or under paper/dry-run with synthetic ids). Refundable on
+// close. Measured ~0.05–0.06 SOL/position.
+export const POSITION_RENT_ESTIMATE_SOL = 0.057;
+
+/**
+ * Held (rent-exempt) SOL locked inside each position account — capital parked
+ * outside the deploy amount, REFUNDED on close. RENDER-ONLY: reads the real
+ * account lamports on-chain (batched, chunked ≤100); falls back to the empirical
+ * estimate for any account that can't be read or isn't a valid pubkey (paper
+ * ids). Never touches deploy/close logic. Returns { [position]: { sol, estimated } }.
+ */
+export async function getPositionsRentSol(positionAddresses = []) {
+  const out = {};
+  const addrs = (positionAddresses || []).filter(Boolean);
+  if (!addrs.length) return out;
+
+  // Split valid base58 pubkeys (readable on-chain) from synthetic ids (paper).
+  const valid = [];
+  for (const a of addrs) {
+    try { valid.push({ a, key: new PublicKey(a) }); }
+    catch { out[a] = { sol: POSITION_RENT_ESTIMATE_SOL, estimated: true }; }
+  }
+  if (!valid.length) return out;
+
+  try {
+    const infos = [];
+    for (let i = 0; i < valid.length; i += 100) {
+      const chunk = valid.slice(i, i + 100).map((v) => v.key);
+      const res = await getConnection().getMultipleAccountsInfo(chunk, "confirmed");
+      infos.push(...res);
+    }
+    valid.forEach((v, i) => {
+      const info = infos[i];
+      out[v.a] = (info && Number.isFinite(info.lamports))
+        ? { sol: Math.round((info.lamports / 1e9) * 1e6) / 1e6, estimated: false }
+        : { sol: POSITION_RENT_ESTIMATE_SOL, estimated: true };
+    });
+  } catch (e) {
+    log("positions_warn", `rent read failed (fallback est): ${e.message}`);
+    for (const v of valid) out[v.a] = { sol: POSITION_RENT_ESTIMATE_SOL, estimated: true };
+  }
+  return out;
+}
+
 // ─── Get Positions for Any Wallet ─────────────────────────────
 export async function getWalletPositions({ wallet_address }) {
   try {

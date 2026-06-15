@@ -5,7 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { agentLoop } from "./agent.js";
 import { log } from "./logger.js";
-import { getMyPositions, closePosition, getActiveBin } from "./tools/dlmm.js";
+import { getMyPositions, closePosition, getActiveBin, getPositionsRentSol } from "./tools/dlmm.js";
 import { getWalletBalances, getSolMarketRegime } from "./tools/wallet.js";
 import { getTopCandidates, formatYieldToMe } from "./tools/screening.js";
 import { confirmIndicatorPreset } from "./tools/chart-indicators.js";
@@ -1495,17 +1495,73 @@ function describeLatestCandidates(limit = 5) {
   return `Latest candidates (${_latestCandidates.length}) — updated ${age}\n\n${lines.join("\n")}`;
 }
 
-function formatWalletStatus(wallet, positions) {
+// Compact age label from minutes: <60 → "Xm", else "Y.yh".
+function fmtAgeMin(m) {
+  if (m == null || !Number.isFinite(m)) return "?";
+  return m >= 60 ? `${(m / 60).toFixed(1)}h` : `${m}m`;
+}
+
+/**
+ * RENDER-ONLY range-efficiency lines for /pool, derived from live position data
+ * (lower/upper/active bin, in_range, age, current OOR spell) + the tracked record
+ * (bin_step). Shows the bin range + width, where active sits within it (a bar +
+ * distance to each edge), the live in/OOR state, and a live in-range estimate.
+ * NOTE: minutes_out_of_range is the CURRENT OOR spell only (state resets it on
+ * re-entry), so the live in-range % is labelled an approximation (see
+ * notes/routput-progress.md RECON range-tracking).
+ */
+function buildRangeEfficiencyLines(pos, tracked) {
+  const out = [];
+  const lo = pos.lower_bin, hi = pos.upper_bin, act = pos.active_bin;
+  const binStep = tracked?.bin_step ?? null;
+  if (Number.isFinite(lo) && Number.isFinite(hi)) {
+    const width = hi - lo + 1;
+    const stepStr = binStep != null ? ` · bin_step ${binStep}` : "";
+    out.push(`Range bins: ${lo} → ${hi} (${width} bins${stepStr})`);
+    if (Number.isFinite(act)) {
+      // Position of active bin within the range (0% = lower edge, 100% = upper).
+      const span = hi - lo;
+      const posPct = span > 0 ? Math.max(0, Math.min(100, ((act - lo) / span) * 100)) : (act >= hi ? 100 : 0);
+      const filled = Math.round((posPct / 100) * 20);
+      const bar = "█".repeat(Math.max(0, Math.min(20, filled))) + "░".repeat(Math.max(0, 20 - filled));
+      out.push(`Active bin ${act}: [${bar}] ${posPct.toFixed(0)}% (${act - lo} dari bawah / ${hi - act} ke atas)`);
+    }
+  } else {
+    out.push(`Range bins: ${lo ?? "?"} → ${hi ?? "?"} | active ${act ?? "?"}`);
+  }
+  // Live state (exact) + a live in-range estimate from age & current OOR spell.
+  const state = pos.in_range ? "✅ IN RANGE" : `⚠️ OOR ${pos.minutes_out_of_range ?? 0}m`;
+  out.push(`State: ${state}`);
+  const age = pos.age_minutes, oor = pos.minutes_out_of_range ?? 0;
+  if (Number.isFinite(age) && age > 0) {
+    const inRangePct = Math.max(0, Math.min(100, ((age - oor) / age) * 100));
+    out.push(`In-range (approx): ~${inRangePct.toFixed(0)}% · in ~${fmtAgeMin(Math.max(0, age - oor))} / OOR-spell ${fmtAgeMin(oor)}`);
+  }
+  return out;
+}
+
+function formatWalletStatus(wallet, positions, rent = null) {
   const deployAmount = computeDeployAmount(wallet.sol);
   const hive = isHiveMindEnabled() ? "on" : "off";
-  return [
+  const gasReserve = config.management?.gasReserve ?? 0;
+  const lines = [
     `Wallet: ${wallet.sol} SOL ($${wallet.sol_usd})`,
     `SOL price: $${wallet.sol_price}`,
     `Open positions: ${positions.total_positions}/${config.risk.maxPositions}`,
     `Next deploy amount: ${deployAmount} SOL`,
+  ];
+  // Held rent (refundable on close) + the SOL that's actually free to deploy.
+  const held = rent?.totalRentSol ?? 0;
+  if (held > 0) {
+    lines.push(`🔒 Tertahan (rent ${positions.total_positions} posisi): ~${held.toFixed(3)} SOL${rent?.estimated ? " (sebagian est)" : ""} — refund saat close`);
+  }
+  const free = wallet.sol - held - gasReserve;
+  lines.push(`🟢 SOL bebas efektif: ~${free.toFixed(3)} SOL  (wallet − ${held > 0 ? "tertahan − " : ""}gasReserve ${gasReserve})`);
+  lines.push(
     `Dry run: ${process.env.DRY_RUN === "true" ? "yes" : "no"}`,
     `HiveMind: ${hive}`,
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 // Condense a learning rule into a short, COMPLETE one-liner for /status.
@@ -3308,7 +3364,17 @@ async function telegramHandler(msg) {
         getOpenRouterBalance(),
         getOpenRouterCredits(),
       ]);
-      let msg = formatWalletStatus(wallet, positions);
+      // Held rent across open positions → total tertahan + SOL bebas efektif.
+      let rentInfo = null;
+      if (positions.total_positions > 0) {
+        const rentMap = await getPositionsRentSol(positions.positions.map((p) => p.position)).catch(() => ({}));
+        const vals = Object.values(rentMap);
+        rentInfo = {
+          totalRentSol: vals.reduce((s, r) => s + (r?.sol ?? 0), 0),
+          estimated: vals.some((r) => r?.estimated),
+        };
+      }
+      let msg = formatWalletStatus(wallet, positions, rentInfo);
       if (orCredits?.balance != null) {
         // Actual purchased-credit balance — the number to watch for top-ups.
         msg += `\n💳 OpenRouter saldo: $${orCredits.balance.toFixed(2)}`;
@@ -3373,13 +3439,30 @@ async function telegramHandler(msg) {
       const { positions, total_positions } = await getMyPositions({ force: true });
       if (total_positions === 0) { await sendMessage("No open positions."); return; }
       const cur = config.management.solMode ? "◎" : "$";
-      const lines = positions.map((p, i) => {
-        const pnl = p.pnl_usd >= 0 ? `+${cur}${p.pnl_usd}` : `-${cur}${Math.abs(p.pnl_usd)}`;
-        const age = p.age_minutes != null ? `${p.age_minutes}m` : "?";
-        const oor = !p.in_range ? " ⚠️OOR" : "";
-        return `${i + 1}. ${p.pair} | ${cur}${p.total_value_usd} | PnL: ${pnl} | fees: ${cur}${p.unclaimed_fees_usd} | ${age}${oor}`;
+      const rentMap = await getPositionsRentSol(positions.map((p) => p.position)).catch(() => ({}));
+      const lines = [];
+      let totalRent = 0, anyRentEst = false;
+      positions.forEach((p, i) => {
+        const pnlVal = p.pnl_usd ?? 0;
+        const pnl = `${pnlVal >= 0 ? "+" : "-"}${cur}${Math.abs(pnlVal)}${p.pnl_pct != null ? ` (${p.pnl_pct >= 0 ? "+" : ""}${p.pnl_pct}%)` : ""}`;
+        const age = fmtAgeMin(p.age_minutes);
+        const state = p.in_range ? "✅ in-range" : `⚠️ OOR ${p.minutes_out_of_range ?? 0}m`;
+        const width = (Number.isFinite(p.lower_bin) && Number.isFinite(p.upper_bin)) ? `${p.upper_bin - p.lower_bin + 1} bins` : "? bins";
+        const rent = rentMap[p.position];
+        if (rent) { totalRent += rent.sol; if (rent.estimated) anyRentEst = true; }
+        const rentStr = rent ? ` · 🔒 ${rent.sol.toFixed(3)}◎${rent.estimated ? " (est)" : ""}` : "";
+        lines.push(
+          `${i + 1}. ${p.pair}  ${state}`,
+          `   value ${cur}${p.total_value_usd ?? "?"} · PnL ${pnl} · fees ${cur}${p.unclaimed_fees_usd ?? "?"}`,
+          `   age ${age} · range ${width}${rentStr}`,
+        );
       });
-      await sendMessage(`📊 Open Positions (${total_positions}):\n\n${lines.join("\n")}\n\n/close <n> to close | /set <n> <note> to set instruction`);
+      const footer = [
+        "━━━━━━━━━━━━━━━━━",
+        `🔒 Total tertahan ~${totalRent.toFixed(3)} SOL${anyRentEst ? " (sebagian est)" : ""} — refund saat close`,
+        "/close <n> · /pool <n> · /set <n> <note>",
+      ].join("\n");
+      await sendMessage(`📊 Open Positions (${total_positions})\n━━━━━━━━━━━━━━━━━\n${lines.join("\n")}\n${footer}`);
     } catch (e) { await sendMessage(`Error: ${e.message}`).catch(() => {}); }
     return;
   }
@@ -3391,16 +3474,23 @@ async function telegramHandler(msg) {
       const { positions } = await getMyPositions({ force: true });
       if (idx < 0 || idx >= positions.length) { await sendMessage("Invalid number. Use /positions first."); return; }
       const pos = positions[idx];
-      await sendMessage([
+      const cur = config.management.solMode ? "◎" : "$";
+      const tracked = (() => { try { return getTrackedPosition(pos.position); } catch { return null; } })();
+      const rent = (await getPositionsRentSol([pos.position]).catch(() => ({})))[pos.position];
+
+      const lines = [
         `${idx + 1}. ${pos.pair}`,
         `Pool: ${pos.pool}`,
         `Position: ${pos.position}`,
-        `Range: ${pos.lower_bin} → ${pos.upper_bin} | active ${pos.active_bin}`,
-        `PnL: ${pos.pnl_pct ?? "?"}% | fees: ${config.management.solMode ? "◎" : "$"}${pos.unclaimed_fees_usd ?? "?"}`,
-        `Value: ${config.management.solMode ? "◎" : "$"}${pos.total_value_usd ?? "?"}`,
-        `Age: ${pos.age_minutes ?? "?"}m | ${pos.in_range ? "IN RANGE" : `OOR ${pos.minutes_out_of_range ?? 0}m`}`,
-        pos.instruction ? `Note: ${pos.instruction}` : null,
-      ].filter(Boolean).join("\n"));
+        "── Range efficiency ──",
+        ...buildRangeEfficiencyLines(pos, tracked),
+        "── Value ──",
+        `PnL: ${pos.pnl_pct ?? "?"}% | fees: ${cur}${pos.unclaimed_fees_usd ?? "?"} | value ${cur}${pos.total_value_usd ?? "?"}`,
+        `Age: ${fmtAgeMin(pos.age_minutes)}`,
+      ];
+      if (rent) lines.push(`🔒 Tertahan (rent): ${rent.sol.toFixed(4)} SOL${rent.estimated ? " (estimasi)" : ""} — refund saat close`);
+      if (pos.instruction) lines.push(`Note: ${pos.instruction}`);
+      await sendMessage(lines.join("\n"));
     } catch (e) {
       await sendMessage(`Error: ${e.message}`).catch(() => {});
     }

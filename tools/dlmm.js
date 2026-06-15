@@ -32,6 +32,7 @@ import {
   isPaperMode,
   makePaperPositionId,
   simulatePaperMetrics,
+  timeframeMinutes,
 } from "../paper-trading.js";
 import { appendDecision } from "../decision-log.js";
 import { getAndClearStagedSignals } from "../signal-tracker.js";
@@ -787,6 +788,27 @@ export async function deployPosition({
         const displayName = pool_name || `${baseMint.slice(0, 6)}/SOL`;
         const paperId = makePaperPositionId(pool_address);
 
+        // 🧪 Paper fee model (FASE 1): capture RAW fee + active_tvl so the sim can use
+        // the TRUE per-window yield fee = fee/active_tvl (NOT the ×100 percentage that
+        // fee_active_tvl_ratio actually is — see notes/paper-recon.md + paper-fix-progress.md).
+        // Fetched at the 24h window: active_tvl is window-invariant and the daily fee rate is
+        // far more stable/predictive than a 5m/30m snapshot. Stashed INSIDE signal_snapshot
+        // (already stored verbatim) so this stays 100% paper-only — no change to the shared
+        // state.js record shape. Fail-open: any error leaves these absent and
+        // computePaperMetrics falls back to fee_tvl_ratio/100.
+        const paperSig = { base_mint: baseMint, entry_fee_window: "24h" };
+        try {
+          const f = encodeURIComponent(`pool_address=${pool_address}`);
+          const detail = await fetch(`https://pool-discovery-api.datapi.meteora.ag/pools?page_size=1&filter_by=${f}&timeframe=24h`).then((r) => r.json()).catch(() => null);
+          const row = detail?.data?.[0];
+          if (row) {
+            const rf = Number(row.fee);
+            const rt = Number(row.active_tvl ?? row.tvl);
+            if (Number.isFinite(rf)) paperSig.entry_fee = rf;
+            if (Number.isFinite(rt) && rt > 0) paperSig.entry_active_tvl = rt;
+          }
+        } catch { /* fail-open: fall back to stored fee_tvl_ratio */ }
+
         trackPosition({
           position: paperId,
           pool: pool_address,
@@ -801,7 +823,7 @@ export async function deployPosition({
           fee_tvl_ratio: fee_tvl_ratio ?? null,
           organic_score: organic_score ?? null,
           narrative_category: narrative_category ?? null,
-          signal_snapshot: { base_mint: baseMint },
+          signal_snapshot: paperSig,
           entry_mcap: entry_mcap ?? null,
           entry_tvl: entry_tvl ?? null,
           entry_volume: entry_volume ?? null,
@@ -1457,15 +1479,29 @@ async function computePaperMetrics(tracked) {
       : 0;
     const minutesOOR = minutesOutOfRange(tracked.position) || 0;
 
+    // Fee yield per window (FASE 1): prefer RAW fee/active_tvl captured at entry (24h
+    // window, stashed in signal_snapshot). Fallback for positions without it (older /
+    // fetch failed): the stored fee_tvl_ratio is a ×100 percentage over the SCREENING
+    // timeframe → /100 to get the fraction, with that timeframe as the window.
+    const sig = tracked.signal_snapshot || {};
+    let feeYieldPerWindow, feeWindowMin;
+    if (Number.isFinite(sig.entry_fee) && Number.isFinite(sig.entry_active_tvl) && sig.entry_active_tvl > 0) {
+      feeYieldPerWindow = sig.entry_fee / sig.entry_active_tvl;
+      feeWindowMin = timeframeMinutes(sig.entry_fee_window || "24h");
+    } else {
+      feeYieldPerWindow = Math.max(0, Number(tracked.fee_tvl_ratio) || 0) / 100;
+      feeWindowMin = timeframeMinutes(config.screening?.timeframe);
+    }
+
     const m = simulatePaperMetrics({
       entryPrice, currentPrice, lowerPrice,
       lowerBin, upperBin, currentBin,
       amountSol: tracked.amount_sol,
       solPrice: await getPaperSolPriceUsd(),
-      feeTvlRatio: tracked.fee_tvl_ratio,
+      feeYieldPerWindow,
       minutesInRange: Math.max(0, minutesHeld - minutesOOR),
       minutesHeld,
-      windowMinutes: 24 * 60, // fee_active_tvl_ratio behaves as a ~24h rate
+      windowMinutes: feeWindowMin,
     });
     return { ...m, currentBin, lowerBin, upperBin, entryPrice, currentPrice };
   } catch (e) {

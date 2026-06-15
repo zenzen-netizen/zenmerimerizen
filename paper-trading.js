@@ -50,9 +50,11 @@ const fin = (x, d = 0) => (Number.isFinite(Number(x)) ? Number(x) : d);
  *   lowerBin/upperBin/currentBin   bin ids (upperBin = entry active bin)
  *   amountSol     deposit (quote) size
  *   solPrice      USD per SOL (for USD fields)
- *   feeTvlRatio   pool fee / active-TVL over the screening window
+ *   feeYieldPerWindow  TRUE per-window fee yield = fee/active_tvl (a FRACTION, not the
+ *                      ×100 fee_active_tvl_ratio percentage). Caller supplies the matching
+ *                      windowMinutes. See paper-fix-progress.md FASE 1.
  *   minutesInRange / minutesHeld
- *   windowMinutes screening timeframe in minutes
+ *   windowMinutes the window feeYieldPerWindow was measured over, in minutes
  *
  * Returns a normalized metrics object consumed by dlmm.js. Fees only accrue while
  * in range; IL comes from SOL converted to base as price fell through the range.
@@ -66,7 +68,7 @@ export function simulatePaperMetrics({
   currentBin,
   amountSol,
   solPrice,
-  feeTvlRatio,
+  feeYieldPerWindow,
   minutesInRange,
   minutesHeld,
   windowMinutes,
@@ -100,18 +102,18 @@ export function simulatePaperMetrics({
   const positionValueSol = remainingSol + baseValueSol;
   const ilSol = positionValueSol - deposit;
 
-  // ── Fees: proxy = deposit × fee/TVL ratio × (in-range time / window) ──
-  // fee_active_tvl_ratio from the Meteora feed behaves as a ~24h fee/TVL rate
-  // (e.g. 0.19 on a $277K pool = ~$52K/day in fees, plausible for a hot pool —
-  // NOT per-screening-window, which would be absurd). So the window is 24h and
-  // fees accrue pro-rata to in-range minutes. Capped so a coarse proxy can't
-  // mint runaway fees on a long hold.
-  const ftr = Math.max(0, fin(feeTvlRatio));
+  // ── Fees: deposit × per-window fee yield × (in-range time / window) ──────
+  // feeYieldPerWindow is the TRUE fraction fee/active_tvl (caller already converted
+  // the ×100 fee_active_tvl_ratio, or used raw fee/active_tvl). An LP earns ≈ its
+  // pro-rata share of pool fees = deposit × (fee/active_tvl) over that window; we
+  // accrue pro-rata to in-range minutes. windowMinutes must match the window the
+  // yield was measured over (caller passes 24h→1440 by default). See FASE 1.
+  const fy = Math.max(0, fin(feeYieldPerWindow));
   const win = Math.max(1, fin(windowMinutes, 1440));
   const mir = Math.max(0, fin(minutesInRange));
-  // Cap the time multiplier so a long-held position can't accrue absurd fees
-  // from a coarse proxy; 0.5 = at most half the deposit in simulated fees.
-  const feesSol = clamp(deposit * ftr * (mir / win), 0, deposit * 0.5);
+  // Defensive cap only — with correct scaling this should never bind (a daily fee
+  // yield > 50% of deposit would be a data anomaly, not a real pool).
+  const feesSol = clamp(deposit * fy * (mir / win), 0, deposit * 0.5);
 
   const pnlSol = ilSol + feesSol;
   const pnlPct = deposit > 0 ? (pnlSol / deposit) * 100 : 0;

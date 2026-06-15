@@ -26,6 +26,7 @@ import {
   ensureDeployedAt,
 } from "../state.js";
 import { recordPerformance } from "../lessons.js";
+import { estimateGasSol } from "../reports.js";
 import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
 import { normalizeMint, getWalletBalances } from "./wallet.js";
 import {
@@ -1493,6 +1494,11 @@ async function computePaperMetrics(tracked) {
       feeWindowMin = timeframeMinutes(config.screening?.timeframe);
     }
 
+    // FASE 2: gas-drag of the full live-equivalent round-trip (deploy + close, where
+    // a real close also claims fees and auto-swaps base→SOL). Same estimator the
+    // briefing uses (reports.js GAS_EST_SOL) so paper and live cost lines agree.
+    const gasDragSol = estimateGasSol({ deploy_position: 1, close_position: 1, claim_fees: 1, swap_token: 1 });
+
     const m = simulatePaperMetrics({
       entryPrice, currentPrice, lowerPrice,
       lowerBin, upperBin, currentBin,
@@ -1502,6 +1508,7 @@ async function computePaperMetrics(tracked) {
       minutesInRange: Math.max(0, minutesHeld - minutesOOR),
       minutesHeld,
       windowMinutes: feeWindowMin,
+      gasDragSol,
     });
     return { ...m, currentBin, lowerBin, upperBin, entryPrice, currentPrice };
   } catch (e) {

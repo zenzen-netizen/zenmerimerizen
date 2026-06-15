@@ -6,7 +6,7 @@ Acuan: `notes/paper-recon.md`. Branch: `experimental`.
 TIDAK ke-sentuh. JANGAN sentuh `recordPerformance` bersama (bug Q4 = brief lain). Jangan sentuh
 logika trade/exit/screening live. Verifikasi = smoke-test level kode.
 
-> Status: F1 ✅ · F2 ⬜ · F3 ⬜ · F4 ⬜ · F5 (opsional) ⬜
+> Status: F1 ✅ · F2 ✅ · F3 ⬜ · F4 ⬜ · F5 (opsional) ⬜
 
 ---
 
@@ -56,7 +56,15 @@ Smoke-test pure `simulatePaperMetrics` (deposit 0.5 SOL, in-range, harga flat �
 
 ---
 
-## FASE 2 — GAS-DRAG (Q6) ⬜
+## FASE 2 — GAS-DRAG (Q6) ✅
+- `paper-trading.js` `simulatePaperMetrics`: param baru `gasDragSol` (default 0). PnL dipecah
+  `pnl_before_costs_sol = ilSol + feesSol` → `pnl_sol = before − costsSol` (costsSol=gas; slippage nyusul F3).
+  Output tambah: `gas_drag_sol/usd`, `costs_sol/usd`, `pnl_before_costs_sol/usd`, `il_usd` (untuk dekomposisi F4).
+- `tools/dlmm.js` `computePaperMetrics`: `gasDragSol = estimateGasSol({deploy:1,close:1,claim:1,swap:1})`
+  (estimator SAMA dgn briefing, reports.js GAS_EST_SOL) = **0.0001 SOL/round-trip** (~$0.015 @ $150).
+  Import `estimateGasSol` dari reports.js (no circular: lessons.js tak impor dlmm.js).
+- Smoke: before 0.01915 − gas 0.0001 = net 0.01905 SOL ✓. Live TIDAK disentuh.
+
 ## FASE 3 — SLIPPAGE/SWAP (Q3) ⬜
 ## FASE 4 — DEKOMPOSISI PnL ⬜
 ## FASE 5 (opsional) — perhalus IL ⬜

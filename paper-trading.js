@@ -72,6 +72,7 @@ export function simulatePaperMetrics({
   minutesInRange,
   minutesHeld,
   windowMinutes,
+  gasDragSol = 0,   // FASE 2: est. round-trip gas (deploy+close+claim+swap), SOL
 }) {
   const deposit = Math.max(0, fin(amountSol));
   const sp = Math.max(0, fin(solPrice));
@@ -115,7 +116,14 @@ export function simulatePaperMetrics({
   // yield > 50% of deposit would be a data anomaly, not a real pool).
   const feesSol = clamp(deposit * fy * (mir / win), 0, deposit * 0.5);
 
-  const pnlSol = ilSol + feesSol;
+  // ── Costs (FASE 2 gas; FASE 3 adds slippage) + PnL decomposition (FASE 4) ──
+  // "Edge before costs" = the raw LP outcome (fee yield + IL/price). "After costs"
+  // nets the frictions a real round-trip pays (gas now, slippage later) so paper PnL
+  // can predict live PnL instead of an idealized frictionless number.
+  const gas = Math.max(0, fin(gasDragSol));
+  const costsSol = gas;
+  const pnlBeforeCostsSol = ilSol + feesSol;
+  const pnlSol = pnlBeforeCostsSol - costsSol;
   const pnlPct = deposit > 0 ? (pnlSol / deposit) * 100 : 0;
 
   return {
@@ -124,11 +132,18 @@ export function simulatePaperMetrics({
     fill_frac: round(fillFrac, 3),
     fees_sol: round(feesSol, 6),
     il_sol: round(ilSol, 6),
+    gas_drag_sol: round(gas, 6),
+    costs_sol: round(costsSol, 6),
+    pnl_before_costs_sol: round(pnlBeforeCostsSol, 6),
     pnl_sol: round(pnlSol, 6),
     pnl_pct: round(pnlPct, 2),
     position_value_sol: round(positionValueSol + feesSol, 6),
     // USD mirrors (sol_price may be 0 if the price feed is down → USD fields 0).
     fees_usd: round(feesSol * sp, 4),
+    il_usd: round(ilSol * sp, 4),
+    gas_drag_usd: round(gas * sp, 4),
+    costs_usd: round(costsSol * sp, 4),
+    pnl_before_costs_usd: round(pnlBeforeCostsSol * sp, 4),
     pnl_usd: round(pnlSol * sp, 4),
     initial_value_usd: round(deposit * sp, 4),
     position_value_usd: round((positionValueSol + feesSol) * sp, 4),

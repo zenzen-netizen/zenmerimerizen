@@ -47,7 +47,7 @@ import { stageSignals } from "./signal-tracker.js";
 import { getWeightsSummary } from "./signal-weights.js";
 import { bootstrapHiveMind, ensureAgentId, getHiveMindPullMode, isHiveMindEnabled, pullHiveMindLessons, pullHiveMindPresets, registerHiveMindAgent, startHiveMindBackgroundSync } from "./hivemind.js";
 import { appendDecision } from "./decision-log.js";
-import { formatSolTracker } from "./sol-tracker.js";
+import { formatSolTracker, setTrackStart, getTrackStart } from "./sol-tracker.js";
 import { formatPnlTracker } from "./pnl-tracker.js";
 import { getOpenRouterBalance, getOpenRouterCredits } from "./openrouter-usage.js";
 
@@ -3032,11 +3032,13 @@ function formatHelpText() {
     "",
     "📊 LAPORAN & STATUS",
     "/status — wallet + positions snapshot",
-    "/wallet — wallet, deploy amount, HiveMind + SOL growth tracker (1d/7d/30d)",
-    "/positions — list open positions",
-    "/pool <n> — detailed info for one position",
+    "/wallet — wallet, rent tertahan + SOL bebas efektif + SOL tracker (1d/7d/30d)",
+    "/wallet trackstart <YYYY-MM-DD|off> — anchor tracker SOL ke tanggal",
+    "/positions — list open positions (+ rent tertahan)",
+    "/pool <n> — detail 1 posisi (+ range-efficiency + rent)",
     "/briefing — morning briefing (auto-pinned)",
-    "/report [week|month|day] — trade learning report",
+    "/report — racikan aktif · /report all = lifetime · /report setups · /report <racikan>",
+    "/report [week|month|day] — digest periodik",
     "",
     "🛠️ POSISI & DEPLOY",
     "/close <n> — close one position by index",
@@ -3353,6 +3355,29 @@ async function telegramHandler(msg) {
 
   if (text === "/help") {
     await sendMessage(formatHelpText()).catch(() => {});
+    return;
+  }
+
+  // SOL tracker anchor: "/wallet trackstart YYYY-MM-DD" (or off|clear to remove).
+  const trackStartMatch = text.match(/^\/wallet\s+trackstart\b\s*(.*)$/i);
+  if (trackStartMatch) {
+    const arg = trackStartMatch[1].trim().toLowerCase();
+    if (!arg) {
+      const cur = getTrackStart();
+      await sendMessage(cur
+        ? `📊 SOL tracker anchor: ${cur}\nGanti: /wallet trackstart YYYY-MM-DD · Hapus: /wallet trackstart off`
+        : `📊 SOL tracker anchor: belum diset.\nSet: /wallet trackstart YYYY-MM-DD (mis. ${new Date().toISOString().slice(0, 10)})`).catch(() => {});
+      return;
+    }
+    if (["off", "clear", "hapus", "reset"].includes(arg)) {
+      setTrackStart(null);
+      await sendMessage("📊 SOL tracker anchor dihapus. /wallet pakai window 1D/7D/30D saja.").catch(() => {});
+      return;
+    }
+    const res = setTrackStart(arg);
+    await sendMessage(res.ok
+      ? `✅ SOL tracker anchor diset ke ${res.dateKey}. /wallet sekarang nampilin baris "SINCE ${res.dateKey}".`
+      : `❌ ${res.error}`).catch(() => {});
     return;
   }
 
@@ -3790,7 +3815,7 @@ Commands:
   /status        Refresh wallet + positions
   /candidates    Refresh top pool list
   /briefing      Show morning briefing (last 24h)
-  /report        Trade learning report — /report [week|month|day]
+  /report        Trade report — /report [all|setups|<racikan>|week|month|day]
   /guide         Panduan setting (TOC) — /guide <no|katakunci|all>
   /learn         Study top LPers from the best current pool and save lessons
   /learn <addr>  Study top LPers from a specific pool address

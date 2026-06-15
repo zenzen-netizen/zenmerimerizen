@@ -21,6 +21,7 @@ import { blockDev, unblockDev, listBlockedDevs } from "../dev-blocklist.js";
 import { addSmartWallet, removeSmartWallet, listSmartWallets, checkSmartWalletsOnPool } from "../smart-wallets.js";
 import { getTokenInfo, getTokenHolders, getTokenNarrative } from "./token.js";
 import { config, reloadScreeningThresholds, MIN_SAFE_BINS_BELOW, applyConvictionSizing } from "../config.js";
+import { validateConfigValue } from "../config-schema.js";
 import { getRecentDecisions } from "../decision-log.js";
 import fs from "fs";
 import { execSync, spawn } from "child_process";
@@ -515,44 +516,10 @@ const toolMap = {
       "screeningCategories", "allowedLaunchpads", "blockedLaunchpads", "indicatorIntervals",
     ]);
 
-    // Per-key format/range validation (keyed by the destination FIELD name, so aliases
-    // like takeProfitFeePct→takeProfitPct are covered too). Returns an error string to
-    // REJECT the value, or null to accept. Only sensitive keys are guarded; everything
-    // else stays unvalidated (factory behavior). Fail-closed: a rejected value is never
-    // written. Rationale + table: notes/update-config-paths.md §5.
-    //   - *Model: kills the LLM "slugify" garble (e.g. screeningModel=minimax_m2_5 instead
-    //     of minimax/minimax-m2.5) — the bug that motivated this whole layer.
-    //   - SL/TP/sizing: reject text / wrong-sign / absurd magnitude.
-    const MODEL_ID_RE = /^[a-z0-9-]+\/[a-z0-9._-]+(:[a-z0-9-]+)?$/i;
-    const modelIdError = (v) => {
-      if (v == null) return null; // null / "off" clears to default — allowed
-      if (typeof v !== "string" || !MODEL_ID_RE.test(v.trim())) {
-        return `model id harus format "provider/slug" (mis. "minimax/minimax-m2.5", "openrouter/healer-alpha") — bukan "${v}"`;
-      }
-      return null;
-    };
-    const numError = (v, { min, max, integer = false, label } = {}) => {
-      const n = typeof v === "number" ? v : Number(v);
-      if (!Number.isFinite(n)) return `${label} harus angka — bukan "${v}"`;
-      if (integer && !Number.isInteger(n)) return `${label} harus bilangan bulat — bukan ${n}`;
-      if (min != null && n < min) return `${label} minimal ${min} — bukan ${n}`;
-      if (max != null && n > max) return `${label} maksimal ${max} — bukan ${n}`;
-      return null;
-    };
-    const CONFIG_VALIDATORS = {
-      managementModel: modelIdError,
-      screeningModel: modelIdError,
-      generalModel: modelIdError,
-      stopLossPct: (v) => numError(v, { min: -100, max: 0, label: "stopLossPct (ambang rugi, negatif)" }),
-      takeProfitPct: (v) => numError(v, { min: 0, max: 500, label: "takeProfitPct" }),
-      trailingTriggerPct: (v) => numError(v, { min: 0, max: 500, label: "trailingTriggerPct" }),
-      trailingDropPct: (v) => numError(v, { min: 0, max: 500, label: "trailingDropPct" }),
-      positionSizePct: (v) => numError(v, { min: 0, max: 1, label: "positionSizePct (fraksi 0–1)" }),
-      deployAmountSol: (v) => numError(v, { min: 0, label: "deployAmountSol" }),
-      maxDeployAmount: (v) => numError(v, { min: 0, label: "maxDeployAmount" }),
-      gasReserve: (v) => numError(v, { min: 0, label: "gasReserve" }),
-      maxPositions: (v) => numError(v, { min: 1, max: 50, integer: true, label: "maxPositions" }),
-    };
+    // Per-key value validation now lives in config-schema.js (validateConfigValue):
+    // a per-type schema covering ALL CONFIG_MAP keys — STRICT (hard reject) for
+    // harmful keys (model id, risk/sizing numerics, known enums), LIGHT type-check
+    // for the rest. RAGU = IZINKAN. Applied in the per-change loop below.
 
     // Robust arg recovery — weak models invent shapes instead of changes/key+value:
     //   { path: "management.gasReserveAutoTune", value: true }
@@ -590,12 +557,11 @@ const toolMap = {
         }
         normalizedVal = Math.max(MIN_SAFE_BINS_BELOW, Math.round(numericVal));
       }
-      // Format/range gate for sensitive keys — reject garbage before it lands in config.
-      const validate = CONFIG_VALIDATORS[match[1][1]];
-      if (validate) {
-        const verr = validate(normalizedVal);
-        if (verr) { invalid.push({ key: match[0], value: val, error: verr }); continue; }
-      }
+      // Schema gate (config-schema.js) — reject garbage before it lands in config.
+      // STRICT for sensitive keys (model id / risk / sizing / enums), LIGHT
+      // type-check for the rest. Fail-open: keys absent from the schema pass.
+      const verr = validateConfigValue(match[0], normalizedVal);
+      if (verr) { invalid.push({ key: match[0], value: val, error: verr }); continue; }
       applied[match[0]] = normalizedVal;
     }
 

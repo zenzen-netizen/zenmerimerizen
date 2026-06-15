@@ -19,15 +19,18 @@
   Tiering /report: default=aktif (getModePerformance), `all`=lifetime (live+arsip), `<nama>`=racikan spesifik.
   Recs: gate anti-naif (winnersDipDeep → jangan perketat stopLoss; give-back→trailingTrigger; tail rug→screening).
   formatMovement (give-back + MAE) TERNYATA sudah dipanggil buildTradeReport → sudah tampil di /report.
-  Commit: `21978a4` FASE 1.
-- FASE 2: rent per-posisi (baca lamport akun posisi via getConnection, real; fallback estimasi 0.057),
-  range-eff/in-range%/bins-past-edge di /pool & /positions, total tertahan + SOL bebas efektif di /wallet.
-  Commit: `02775c8` FASE 2.
-- FASE 3: report per-racikan PENUH (`/report setups` daftar; `/report <nama>` blok stats penuh);
-  wallet SOL-tracker start-date (`/wallet trackstart [tgl]`) — RENDER/setelan tracker, bukan config trade.
-  Commit: `2db86b1` FASE 3.
-- FASE 4: notifDeploy/Close/Swap/OOR konsisten (header ───), notifClose tampil give-back (peak→exit).
-  Commit: `2db86b1` (FASE 3+4 digabung 1 commit per topik notif terpisah → lihat git log).
+  Commit: `754e85d` (engine reports.js) + `e97ceaf` (tiering wiring).
+- FASE 2: rent per-posisi (getPositionsRentSol baca lamport akun posisi on-chain, real ≈0.0574 terverifikasi;
+  fallback estimasi 0.057), range-eff (bin range+width+bin_step, bar posisi active, in-range approx) di
+  /pool, rent+state+width di /positions, total tertahan + SOL bebas efektif di /wallet.
+  Commit: `398192a` FASE 2.
+- FASE 3: report per-racikan PENUH dikirim oleh tiering FASE 1 (`/report setups` daftar;
+  `/report <nama>` blok stats penuh via buildTradeReport); wallet SOL-tracker start-date
+  (`/wallet trackstart [tgl|off]`, baris "SINCE <tgl>") — RENDER/setelan tracker, bukan config trade.
+  Commit: `5f72e06` FASE 3.
+- FASE 4: notifDeploy/Close/Swap/OOR konsisten (divider ────, emoji-led, win/loss tint),
+  notifClose tampil give-back (peak +X%→exit, gate peak≥3% biar bukan dump stop-loss);
+  dlmm.js kedua close-path return peak_pnl_pct (passthrough render). Commit: `64f7975` FASE 4.
 
 ## RECON range-tracking (lapor saja — JANGAN implementasi)
 

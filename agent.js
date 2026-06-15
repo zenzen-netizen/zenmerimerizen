@@ -6,7 +6,12 @@ import { tools } from "./tools/definitions.js";
 
 const MANAGER_TOOLS  = new Set(["close_position", "claim_fees", "swap_token", "get_position_pnl", "get_my_positions", "get_wallet_balance"]);
 const SCREENER_TOOLS = new Set(["deploy_position", "get_active_bin", "get_top_candidates", "check_smart_wallets_on_pool", "get_token_holders", "get_token_narrative", "get_token_info", "search_pools", "get_pool_memory", "get_time_profile", "get_narrative_profile", "get_wallet_balance", "get_my_positions"]);
-const CHAT_CONFIRM_TOOLS = new Set(["update_config"]);
+// Tools that MUST be confirmed before executing in the interactive (casual-chat) path.
+// update_config = mutates settings; the four on-chain trade actions move real capital /
+// live positions, so an ambiguous chat message must never fire them unprompted. This set
+// only bites when the caller wires { interactive, onConfirmRequired } (see runToolCall) —
+// the autonomous SCREENER/MANAGER cron loops pass neither, so they keep auto-trading.
+const CHAT_CONFIRM_TOOLS = new Set(["update_config", "deploy_position", "close_position", "claim_fees", "swap_token"]);
 
 const GENERAL_INTENT_ONLY_TOOLS = new Set([
   "self_update",

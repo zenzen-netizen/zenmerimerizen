@@ -1953,7 +1953,70 @@ function getConfigValue(key) {
   return undefined;
 }
 
+// One-line human summary of a trade action for the confirmation prompt. Pure/defensive:
+// any odd arg shape still produces a readable line (never throws).
+function summarizeTradeAction(toolName, args = {}) {
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+  const shortAddr = (a) => (typeof a === "string" && a.length > 12 ? `${a.slice(0, 4)}…${a.slice(-4)}` : (a ?? "?"));
+  if (toolName === "deploy_position") {
+    const amt = num(args.amount_y) ?? num(args.amount_sol) ?? num(args.amount_x);
+    const strat = args.strategy ? ` | ${args.strategy}` : "";
+    return `🚀 BUKA POSISI (deploy)\n  pool: ${shortAddr(args.pool_address)}\n  ◎ ${amt ?? "?"} SOL${strat}`;
+  }
+  if (toolName === "close_position") {
+    return `🔻 TUTUP POSISI (close)\n  position: ${shortAddr(args.position_address)}${args.reason ? `\n  reason: ${args.reason}` : ""}`;
+  }
+  if (toolName === "claim_fees") {
+    return `💰 CLAIM FEES\n  position: ${shortAddr(args.position_address)}`;
+  }
+  if (toolName === "swap_token") {
+    return `🔁 SWAP TOKEN\n  ${num(args.amount) ?? "?"} ${shortAddr(args.input_mint)} → ${shortAddr(args.output_mint)}`;
+  }
+  return `${toolName}\n  ${JSON.stringify(args).slice(0, 200)}`;
+}
+
+// Confirm a real-capital / live-position action (deploy/close/claim/swap) in the interactive
+// path. Unlike update_config there is no diff to compute and no "no-op" to skip — the action
+// itself is what needs the operator's yes/no, so we ALWAYS prompt. Shares the single-flight
+// slot, 30s timeout, and confirm:yes/no callback with the config-confirmation path.
+async function requestActionConfirmation(toolName, args) {
+  const summary = summarizeTradeAction(toolName, args);
+  const signature = `${toolName}:${JSON.stringify(args ?? {})}`;
+
+  // Single-flight: collapse identical duplicate calls onto the same pending prompt; deny a
+  // different action while one is already pending (mirrors the config path).
+  if (_pendingConfirmation) {
+    return _pendingConfirmation.signature === signature ? _pendingConfirmation.promise : false;
+  }
+
+  let resolveFn;
+  const promise = new Promise((resolve) => { resolveFn = resolve; });
+  const pending = { promise, resolve: resolveFn, timer: null, messageId: null, signature };
+  _pendingConfirmation = pending; // claim the slot before awaiting the Telegram send
+
+  pending.timer = setTimeout(async () => {
+    if (_pendingConfirmation === pending) _pendingConfirmation = null;
+    if (pending.messageId) await editMessage("⏰ Expired — no action taken.", pending.messageId).catch(() => {});
+    resolveFn(false);
+  }, 30_000);
+
+  const sent = await sendMessageWithButtons(`⚠️ Konfirmasi aksi ini?\n${summary}`, [
+    [
+      { text: "✅ Ya", callback_data: "confirm:yes" },
+      { text: "❌ Batal", callback_data: "confirm:no" },
+    ],
+  ]);
+  pending.messageId = sent?.result?.message_id ?? null;
+
+  return promise;
+}
+
 async function requestConfirmation(toolName, args) {
+  // Trade-action tools (move real capital / live positions) take a plain action prompt — the
+  // config-diff machinery below only applies to update_config (where there's a before→after
+  // value to show and a no-op to skip).
+  if (toolName !== "update_config") return requestActionConfirmation(toolName, args);
+
   // Recover EVERY arg shape the executor's update_config accepts, so the
   // confirmation gate never lets one slip through unprompted. Weak models invent:
   //   { changes: {...} } | { key, value } | { path: "a.b", value }

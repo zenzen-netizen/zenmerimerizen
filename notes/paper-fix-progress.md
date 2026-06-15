@@ -6,7 +6,7 @@ Acuan: `notes/paper-recon.md`. Branch: `experimental`.
 TIDAK ke-sentuh. JANGAN sentuh `recordPerformance` bersama (bug Q4 = brief lain). Jangan sentuh
 logika trade/exit/screening live. Verifikasi = smoke-test level kode.
 
-> Status: F1 ✅ · F2 ✅ · F3 ⬜ · F4 ⬜ · F5 (opsional) ⬜
+> Status: F1 ✅ · F2 ✅ · F3 ✅ · F4 ⬜ · F5 (opsional) ⬜
 
 ---
 
@@ -65,7 +65,15 @@ Smoke-test pure `simulatePaperMetrics` (deposit 0.5 SOL, in-range, harga flat �
   Import `estimateGasSol` dari reports.js (no circular: lessons.js tak impor dlmm.js).
 - Smoke: before 0.01915 − gas 0.0001 = net 0.01905 SOL ✓. Live TIDAK disentuh.
 
-## FASE 3 — SLIPPAGE/SWAP (Q3) ⬜
+## FASE 3 — SLIPPAGE/SWAP (Q3) ✅
+- `paper-trading.js`: konstanta `PAPER_EXIT_SLIPPAGE_PCT=0.01` (1%) + param `slippagePct`.
+  Model: posisi single-side-SOL yg drift ke bawah range akumulasi base → close auto-swap base→SOL
+  (Jupiter) bayar price-impact+fee. `slippageSol = baseValueSol × slippagePct` (di blok fill, ~line 102).
+  Entry tanpa swap (SOL didepo langsung) → tak ada slippage entry. `costsSol = gas + slippage`.
+  Output tambah `slippage_sol/usd`. Proxy flat (impact nyata butuh quote Jupiter — di luar lingkup).
+- Smoke: in-range → slippage 0 (tak ada base); drift-bawah fill_frac 0.5 → slippage 0.002333 (1% base 0.2333);
+  costs==gas+slip ✓, net==before−costs ✓. Paper TIDAK lagi frictionless.
+
 ## FASE 4 — DEKOMPOSISI PnL ⬜
 ## FASE 5 (opsional) — perhalus IL ⬜
 ## VERIFIKASI ⬜

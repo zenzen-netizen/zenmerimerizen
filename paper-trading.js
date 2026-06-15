@@ -40,6 +40,13 @@ export function timeframeMinutes(tf) {
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
 const fin = (x, d = 0) => (Number.isFinite(Number(x)) ? Number(x) : d);
 
+// FASE 3: flat exit-swap haircut. A single-side-SOL position that drifts below range
+// accumulates base token; closing it auto-swaps base→SOL (Jupiter), paying price-impact
+// + swap fee. We model that as a flat % of the base value being sold (entry needs no
+// swap — SOL is deposited directly). Flat proxy: real impact depends on pool depth (a
+// live Jupiter quote would refine it — out of scope). Tunable via the slippagePct param.
+export const PAPER_EXIT_SLIPPAGE_PCT = 0.01; // 1% of the swapped-out base value
+
 /**
  * First-order simulation of a single-side SOL-below DLMM position.
  *
@@ -73,6 +80,7 @@ export function simulatePaperMetrics({
   minutesHeld,
   windowMinutes,
   gasDragSol = 0,   // FASE 2: est. round-trip gas (deploy+close+claim+swap), SOL
+  slippagePct = PAPER_EXIT_SLIPPAGE_PCT, // FASE 3: exit-swap haircut on base sold at close
 }) {
   const deposit = Math.max(0, fin(amountSol));
   const sp = Math.max(0, fin(solPrice));
@@ -103,6 +111,12 @@ export function simulatePaperMetrics({
   const positionValueSol = remainingSol + baseValueSol;
   const ilSol = positionValueSol - deposit;
 
+  // ── Slippage (FASE 3): exit-swap haircut on the accumulated base ─────
+  // The base side (baseValueSol) must be swapped back to SOL at close; that swap
+  // pays price-impact + fee. Fully in-range (no base) → 0. Frictional, not free.
+  const slipPct = clamp(fin(slippagePct), 0, 0.5);
+  const slippageSol = Math.max(0, baseValueSol) * slipPct;
+
   // ── Fees: deposit × per-window fee yield × (in-range time / window) ──────
   // feeYieldPerWindow is the TRUE fraction fee/active_tvl (caller already converted
   // the ×100 fee_active_tvl_ratio, or used raw fee/active_tvl). An LP earns ≈ its
@@ -121,7 +135,7 @@ export function simulatePaperMetrics({
   // nets the frictions a real round-trip pays (gas now, slippage later) so paper PnL
   // can predict live PnL instead of an idealized frictionless number.
   const gas = Math.max(0, fin(gasDragSol));
-  const costsSol = gas;
+  const costsSol = gas + slippageSol;
   const pnlBeforeCostsSol = ilSol + feesSol;
   const pnlSol = pnlBeforeCostsSol - costsSol;
   const pnlPct = deposit > 0 ? (pnlSol / deposit) * 100 : 0;
@@ -133,6 +147,7 @@ export function simulatePaperMetrics({
     fees_sol: round(feesSol, 6),
     il_sol: round(ilSol, 6),
     gas_drag_sol: round(gas, 6),
+    slippage_sol: round(slippageSol, 6),
     costs_sol: round(costsSol, 6),
     pnl_before_costs_sol: round(pnlBeforeCostsSol, 6),
     pnl_sol: round(pnlSol, 6),
@@ -142,6 +157,7 @@ export function simulatePaperMetrics({
     fees_usd: round(feesSol * sp, 4),
     il_usd: round(ilSol * sp, 4),
     gas_drag_usd: round(gas * sp, 4),
+    slippage_usd: round(slippageSol * sp, 4),
     costs_usd: round(costsSol * sp, 4),
     pnl_before_costs_usd: round(pnlBeforeCostsSol * sp, 4),
     pnl_usd: round(pnlSol * sp, 4),

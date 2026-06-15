@@ -3769,6 +3769,12 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
     // ── Free-form chat ───────────────────────
     await runBusy(async () => {
       log("user", input);
+      // No onConfirmRequired here (unlike the Telegram path, which wires
+      // requestConfirmation): the CLI REPL is the local operator's own console —
+      // whoever types here is already the trusted operator, so a confirm prompt
+      // would be redundant. Value safety is not skipped: update_config still runs
+      // through the same executor, so config-schema.js validation applies on this
+      // path too (a garbled model id / out-of-range value is rejected regardless).
       const { content } = await agentLoop(input, config.llm.maxSteps, sessionHistory, "GENERAL", config.llm.generalModel, null, { interactive: true });
       appendHistory(input, content);
       console.log(`\n${content}\n`);

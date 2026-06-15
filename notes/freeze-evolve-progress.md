@@ -76,5 +76,27 @@ Full-sync semua permukaan:
 - Test: `npm test` (test:syntax semua *.js) → EXIT 0. Smoke: schema=bool, subgroup keys ok, config.learning loads.
 - Commit: (lihat git log)
 
-## FASE 3 — SET FROZEN (user-config.json) ⬜
-## VERIFIKASI ⬜
+## FASE 3 — SET FROZEN (user-config.json) ✅
+- `user-config.json` (racikan aktif **mainzen_v2**): `"evolveEnabled": false`.
+- ⚠️ `user-config.json` di-`.gitignore` (runtime/secret) → FASE 3 = perubahan FILE runtime, BUKAN commit.
+  Default-nya didokumentasikan di `user-config.example.json` (committed, =true). Restore: balikkan ke `true`.
+- Smoke: `config.learning.evolveEnabled=false` → gate "frozen? YES (auto-evolve SKIP)";
+  `darwin.enabled=true` (tak tersentuh); `minFeeActiveTvlRatio=0.1` / `minOrganic=70` (tak berubah).
+
+## VERIFIKASI ✅
+- **Gate (false → auto-evolve skip):** `lessons.js:262` `if (config.learning?.evolveEnabled === false)`
+  di call-site AUTO (`recordPerformance`, tiap 5 close) → `log("evolve","frozen … unchanged")`, TANPA tulis user-config.
+  `evolveThresholds()` (writer murni, `lessons.js:405`) TIDAK disentuh → manual tetap bisa.
+- **/config & /settings:** evolveEnabled muncul (rowMap `/config` sub-grup Learning/Evolve dgn dot 🟢/⚪;
+  `/settings` → 🧬Learn → tombol toggle). Satpam `validateConfigValue("evolveEnabled", …)` terima true/false/off,
+  tolak garbage (string non-coerce/angka). `coerceConfigValue` "true"/"false"→bool sebelum validasi (toggle aman).
+- **user-config.json:** evolveEnabled=false ✅. **branch:** experimental ✅. **log per fase** ✅ (2 commit kode).
+- **diff --stat:** 9 file kode/docs + progress (177++/10--). `npm test` (syntax semua *.js) EXIT 0.
+- **pm2:** id 0 `meridian` = repo ini (`/home/ubuntu/meridianzen`) — JALAN 7 jam di KODE LAMA (belum ada gate).
+  ⚠️ **RESTART PENDING (aksi owner):** gate baru aktif setelah `pm2 restart meridian --update-env`.
+  Sampai restart, proses lama tak punya `config.learning` → auto-evolve masih bisa jalan di kode lama.
+  Tidak di-restart otomatis (bot trading live = keputusan owner). id 1 `meridian-v3` (meridianzen2) = TERPISAH, tak disinkron.
+
+**TEGAS:** Setelah pm2 di-restart, `minFeeActiveTvlRatio` & `minOrganic` TIDAK akan berubah otomatis lagi
+(auto-evolve BEKU) sampai `evolveEnabled` di-`true`-kan lagi (chat/`/setcfg`/`/settings` → 🧬Learn, atau `/evolve force` 1×).
+Darwin DI LUAR LINGKUP (toggle `darwinEnabled` sendiri, tetap true).

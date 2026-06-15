@@ -19,6 +19,18 @@ function readJsonIfExists(filePath) {
 
 const u = readJsonIfExists(USER_CONFIG_PATH);
 const gmgnUserConfig = readJsonIfExists(GMGN_CONFIG_PATH);
+
+// Strip dead screening-side orphans. Upstream deleted these in its setup
+// overhaul (setup.js delete block); our merge fdc0c45 swallowed the overhaul
+// but dropped the delete lines, so the keys lingered in user-config.json and
+// were still advertised to the LLM. config.js has no field for either, so this
+// is purely defensive — should one reappear in the file it can never be read.
+// The LIVE bundler/ATH gates are maxBotHoldersPct + gmgn.maxBundlerRate +
+// gmgn.athFilterPct (key gmgnAthFilterPct) — those are untouched here.
+// See notes/dev-crosscheck.md §4/§5.
+delete u.maxBundlePct;
+delete u.athFilterPct;
+
 export const MIN_SAFE_BINS_BELOW = 35;
 
 function numericConfig(value) {

@@ -249,7 +249,10 @@ export async function recordPerformance(perf) {
   // Evolve thresholds every 5 closed positions — LIVE records only. Sim (paper)
   // closes never move real screening thresholds or Darwinian signal weights, even
   // if this box is later flipped to live with paper history still on file.
-  const livePerf = data.performance.filter((p) => !p.paper);
+  // LIVE records of the ACTIVE racikan only — paper closes never move real
+  // thresholds/Darwin weights, and a different racikan's records are isolated out
+  // (keepActiveRacikan) so each racikan evolves on its own trades.
+  const livePerf = data.performance.filter((p) => !p.paper && keepActiveRacikan(p));
   if (livePerf.length > 0 && livePerf.length % MIN_EVOLVE_POSITIONS === 0) {
     const { reloadScreeningThresholds } = await import("./config.js");
     const result = evolveThresholds(livePerf, config);
@@ -400,6 +403,10 @@ function derivLesson(perf) {
  * @returns {{ changes: Object, rationale: Object } | null}
  */
 export function evolveThresholds(perfData, config) {
+  // Active-racikan isolation at the chokepoint: BOTH the auto-loop (livePerf,
+  // already filtered) and the manual /evolve (raw performance[]) only ever tune
+  // on the current racikan's trades. Future-proof — no hardcoded racikan name.
+  perfData = (perfData || []).filter(keepActiveRacikan);
   if (!perfData || perfData.length < MIN_EVOLVE_POSITIONS) return null;
 
   const winners = perfData.filter((p) => p.pnl_pct > 0);
@@ -819,7 +826,20 @@ export function getPerformanceHistory({ hours = 24, limit = 50 } = {}) {
   };
 }
 
-/** Full closed-position performance array (for the reports engine). */
+/**
+ * True if a record belongs to the CURRENTLY ACTIVE racikan (config.activeSetup).
+ * Isolates the learning loop + stats per-racikan: trades earned under a different
+ * racikan never move the active racikan's thresholds / Darwin weights / headline
+ * stats. Future-proof — NOT hardcoded, so switching racikan auto-isolates the new
+ * one. A record with no racikan (active_setup=null) belongs to the "no racikan"
+ * set, matched only when config.activeSetup is also null.
+ */
+function keepActiveRacikan(p) {
+  return (p?.active_setup ?? null) === (config.activeSetup ?? null);
+}
+
+/** Full closed-position performance array, RAW (every racikan + mode). For the
+ *  archival/debug path only — stats/reports use getModePerformance (isolated). */
 export function getAllPerformance() {
   return load().performance || [];
 }
@@ -833,9 +853,13 @@ export function getAllPerformance() {
  */
 export function getModePerformance() {
   const all = load().performance || [];
-  return isPaperMode()
+  const modeRows = isPaperMode()
     ? all.filter((p) => p.paper)
     : all.filter((p) => !p.paper);
+  // Per-racikan isolation: stats/reports/briefings see only the ACTIVE racikan's
+  // records, so a prior racikan's trades never skew the current racikan's numbers
+  // (the headline now matches the "By racikan" breakdown).
+  return modeRows.filter(keepActiveRacikan);
 }
 
 /**
@@ -843,7 +867,9 @@ export function getModePerformance() {
  */
 export function getPerformanceSummary() {
   const data = load();
-  const p = data.performance;
+  // Active-racikan isolation: the /status + /evolve headline counts only the
+  // current racikan's closed positions.
+  const p = (data.performance || []).filter(keepActiveRacikan);
 
   if (p.length === 0) return null;
 

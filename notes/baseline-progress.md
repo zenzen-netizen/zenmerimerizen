@@ -8,7 +8,10 @@
 - ✅ FASE 1 — ARSIP 84 record null → lessons-archive-pre-mainzen_v2.json; aktif=61 (61+84=145 terjaga). COMMIT
      · cutoff bersih: arsip recorded_at 2026-06-03T17:17→2026-06-10T13:02 | aktif 2026-06-10T14:26→2026-06-15T02:52 (no overlap)
      · lessons[] (95) sengaja TAK disentuh (di luar lingkup FASE 1)
-- ⬜ FASE 2 — ISOLASI LOOP: livePerf + getter stats filter active_setup===config.activeSetup (lessons.js) + COMMIT
+- ✅ FASE 2 — ISOLASI LOOP (lessons.js): helper `keepActiveRacikan` (active_setup===config.activeSetup, no hardcode).
+     Diterapkan: livePerf (loop evolve+Darwin), getModePerformance (stats/report/briefing), getPerformanceSummary
+     (/status,/evolve), evolveThresholds chokepoint (auto+manual /evolve). Darwin ikut via livePerf.
+     Uji: getModePerformance=61 all mainzen_v2; mix 4 aktif+20 asing → evolveThresholds=null ✅. COMMIT
 - ⬜ FASE 3 — RESET OTAK: signal-weights reset/recompute; threshold → mainzen_v2.json (surgical); clear stamp + COMMIT
 - ⬜ FASE 4 — VERIFIKASI: aktif=61, loop racikan-aktif, weights reset, threshold baseline, 4 backup; node --check
 

@@ -2248,6 +2248,7 @@ export async function closePosition({ position_address, reason }) {
             fees_earned_usd: feesUsd,
             base_mint: closeBaseMint,
             close_reason: reason || "agent decision",
+            peak_pnl_pct: tracked.peak_pnl_pct ?? null, // for notifyClose give-back (render only)
             derived_lesson: derivedLesson1?.rule ?? null,
           };
         }
@@ -2540,6 +2541,7 @@ export async function closePosition({ position_address, reason }) {
         fees_earned_usd: feesUsd,
         base_mint: closeBaseMint,
         close_reason: reason || "agent decision",
+        peak_pnl_pct: tracked.peak_pnl_pct ?? null, // for notifyClose give-back (render only)
         derived_lesson: derivedLesson2?.rule ?? null,
       };
     }

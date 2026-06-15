@@ -13,6 +13,7 @@ import { isPaperMode } from "./paper-trading.js";
 import {
   computeTradeStats, formatStatsBlock, formatBreakdown, formatMovement, buildVerdict,
   buildRecommendations, buildRoleCostLines, estimateGasSol, buildTradeReport,
+  formatQuantBlock, computeCostDragPct,
 } from "./reports.js";
 import { formatIdentity } from "./preset-manager.js";
 import { formatPnlTracker } from "./pnl-tracker.js";
@@ -315,6 +316,17 @@ export async function generateBriefing() {
   const gasIsEst = !gasStatsW.hasData;
   const solPrice = wallet?.sol_price || 0;
 
+  // Cost-drag for the quant block: annualize the 24h (gas+LLM) burn over liquid
+  // wallet capital. Directional (1d window ×365 is noisy) — null on any gap.
+  const llmStats24h = getLlmCostStats(last24h.getTime());
+  const modalUsd = wallet?.total_usd || wallet?.sol_usd || null;
+  const gasUsd24h = gasSol && solPrice ? gasSol * solPrice : 0;
+  const llmUsd24h = llmStats24h.hasData ? llmStats24h.totalCost : 0;
+  const costDragPct = modalUsd
+    ? computeCostDragPct({ costUsd: gasUsd24h + llmUsd24h, windowDays: 1, modalUsd })
+    : null;
+  const quantOpts = Number.isFinite(costDragPct) ? { costDragPct } : {};
+
   // 6. Format Message
   const lines = [
     "☀️ <b>Morning Briefing</b> (Last 24h)",
@@ -335,6 +347,7 @@ export async function generateBriefing() {
     "",
     formatStatsBlock(statsAll, "All-time"),
     buildVerdict(statsAll) || "",
+    formatQuantBlock(statsAll, quantOpts) ? "\n" + formatQuantBlock(statsAll, quantOpts) : "",
     formatMovement(statsAll) ? "\n" + formatMovement(statsAll) : "",
     "",
     `<b>Lessons Learned (24h):</b>`,
@@ -415,11 +428,17 @@ export async function generatePeriodicBriefing(period = "week") {
   const llmWindow = period === "month" ? balance?.usageMonthly : period === "week" ? balance?.usageWeekly : balance?.usageDaily;
   const llmTotal = llmStats.hasData ? llmStats.totalCost : (paper ? 0 : (llmWindow ?? 0));
 
+  // Cost-drag (annualized window burn over liquid wallet capital) for the quant block.
+  const modalUsd = wallet?.total_usd || wallet?.sol_usd || null;
+  const windowCostUsd = (gasUsd ?? 0) + llmTotal;
+  const costDragPct = modalUsd ? computeCostDragPct({ costUsd: windowCostUsd, windowDays: days, modalUsd }) : null;
+
   const report = buildTradeReport(windowPerf, {
     title: `${emoji} ${label} Briefing — last ${days}d`,
     statsLabel: `Last ${days}d`,
     trendN: period === "month" ? 10 : 7,
     identity: (() => { try { return formatIdentity({ compact: true }); } catch { return null; } })(),
+    quant: Number.isFinite(costDragPct) ? { costDragPct } : {},
   });
 
   const costLines = [`<b>💵 Costs (${days}d)${paper ? " — 🧪 simulasi" : ""}:</b>`];

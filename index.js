@@ -12,8 +12,9 @@ import { confirmIndicatorPreset } from "./tools/chart-indicators.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
 import { config, reloadScreeningThresholds, computeDeployAmount, persistConfigChange } from "./config.js";
 import { getGasStats } from "./gas-tracker.js";
-import { evolveThresholds, getPerformanceSummary, getModePerformance, listLessons, classifySession, currentWibSession } from "./lessons.js";
-import { buildTradeReport } from "./reports.js";
+import { evolveThresholds, getPerformanceSummary, getModePerformance, listLessons, classifySession, currentWibSession, getLifetimePerformance, getPerformanceForRacikan, listRacikanInPerformance } from "./lessons.js";
+import { buildTradeReport, computeCostDragPct } from "./reports.js";
+import { getLlmCostStats } from "./llm-cost-tracker.js";
 import { executeTool, registerCronRestarter } from "./tools/executor.js";
 import {
   startPolling,
@@ -29,6 +30,7 @@ import {
   createLiveMessage,
   pinMessage,
   unpinMessage,
+  escapeHtml as escapeHtmlSafe,
 } from "./telegram.js";
 import { generateBriefing, generatePeriodicBriefing } from "./briefing.js";
 import { renderGuide } from "./guide.js";
@@ -228,17 +230,99 @@ async function maybeFireLearningReport() {
 }
 
 /**
- * On-demand /report. No arg = all-time learning report; `week`/`month`/`day` (and
- * ID synonyms) produce the richer windowed periodic digest (activity + cost too).
- * Async because the windowed digest fetches cost/wallet data.
+ * Annualized cost-drag % for the quant block: recent (gas+LLM) burn scaled to a
+ * year, over the liquid wallet capital. Uses the 30d window (falls back to the
+ * gas estimate when no real data). Returns null on any gap. Display only.
+ */
+async function computeReportCostDrag() {
+  try {
+    const since = Date.now() - 30 * 86400000;
+    const wallet = await getWalletBalances().catch(() => null);
+    const modalUsd = wallet?.total_usd || wallet?.sol_usd || null;
+    if (!modalUsd) return null;
+    const solPrice = wallet?.sol_price || 0;
+    const gasStats = getGasStats(since);
+    const gasSol = gasStats.hasData ? gasStats.sol : 0;
+    const gasUsd = gasSol && solPrice ? gasSol * solPrice : 0;
+    const llm = getLlmCostStats(since);
+    const llmUsd = llm.hasData ? llm.totalCost : 0;
+    const costUsd = gasUsd + llmUsd;
+    if (costUsd <= 0) return null;
+    return computeCostDragPct({ costUsd, windowDays: 30, modalUsd });
+  } catch { return null; }
+}
+
+/**
+ * On-demand /report — tiered:
+ *   /report                → ACTIVE racikan (getModePerformance, racikan-isolated)
+ *   /report all|lifetime   → LIFETIME (every live record + pre-baseline archive)
+ *   /report setups         → list racikan present in the log
+ *   /report <racikan-name> → that specific racikan
+ *   /report week|month|day → windowed periodic digest (activity + cost)
+ * Async: fetches cost/wallet for the windowed digest + the cost-drag quant line.
  */
 async function buildReportForArg(arg = "") {
   const a = String(arg).trim().toLowerCase();
   if (["week", "weekly", "7d", "minggu", "mingguan"].includes(a)) return generatePeriodicBriefing("week");
   if (["month", "monthly", "30d", "bulan", "bulanan"].includes(a)) return generatePeriodicBriefing("month");
   if (["day", "today", "24h", "hari", "harian"].includes(a)) return generatePeriodicBriefing("day");
+  const trendN = config.reports?.learningReportTrendN ?? 10;
+  const costDragPct = await computeReportCostDrag();
+  const quant = costDragPct != null ? { costDragPct } : {};
+
+  // List racikan present in the log.
+  if (["setups", "setup", "racikan", "racikans", "list"].includes(a)) {
+    const rows = listRacikanInPerformance();
+    if (!rows.length) return "🗂️ Belum ada racikan ber-nama di log performa (semua trade null / pra-baseline).";
+    const lines = rows.map((r, i) => `${i + 1}. <b>${escapeHtmlSafe(r.name)}</b> — ${r.count} trade${r.name === config.activeSetup ? " ✅ aktif" : ""}`);
+    return `🗂️ <b>Racikan di log performa</b>\nPakai <code>/report &lt;nama&gt;</code> buat blok stats penuh per racikan.\n────────────────\n${lines.join("\n")}`;
+  }
+
+  // LIFETIME tier — every live record + pre-baseline archive (mixed settings).
+  if (["all", "lifetime", "semua", "seumur", "everything"].includes(a)) {
+    const lifePerf = getLifetimePerformance();
+    const rep = buildTradeReport(lifePerf, {
+      title: "🎓 Trade Report — LIFETIME",
+      subtitle: "⚠️ lifetime — termasuk pra-baseline (arsip), setting CAMPUR; bukan satu racikan",
+      statsLabel: "Lifetime",
+      trendN,
+      identity: formatIdentity(),
+      quant,
+    });
+    const tracker = formatPnlTracker(lifePerf);
+    return tracker ? `${rep}\n\n${tracker}` : rep;
+  }
+
+  // Specific racikan tier.
+  if (a) {
+    const recsPerf = getPerformanceForRacikan(a);
+    if (!recsPerf.length) {
+      const known = listRacikanInPerformance().map((r) => r.name);
+      const hint = known.length ? ` Tersedia: ${known.join(", ")}.` : "";
+      return `🗂️ Racikan "<b>${escapeHtmlSafe(a)}</b>" tak punya trade tercatat.${hint}\nCoba <code>/report setups</code>, <code>/report all</code>, atau <code>/report</code> (racikan aktif).`;
+    }
+    const rep = buildTradeReport(recsPerf, {
+      title: `🎓 Trade Report — racikan ${a}`,
+      subtitle: a === (config.activeSetup || "").toLowerCase() ? "racikan AKTIF" : "racikan spesifik (non-aktif)",
+      statsLabel: `Racikan ${a}`,
+      trendN,
+      identity: formatIdentity(),
+      quant,
+    });
+    const tracker = formatPnlTracker(recsPerf);
+    return tracker ? `${rep}\n\n${tracker}` : rep;
+  }
+
+  // Default tier — ACTIVE racikan (already racikan-isolated by getModePerformance).
   const modePerf = getModePerformance();
-  const rep = buildTradeReport(modePerf, { title: "🎓 Trade Report (all-time)", statsLabel: "All-time", trendN: config.reports?.learningReportTrendN ?? 10, identity: formatIdentity() });
+  const rep = buildTradeReport(modePerf, {
+    title: "🎓 Trade Report — racikan aktif",
+    subtitle: config.activeSetup ? `racikan: ${config.activeSetup} · pakai /report all buat lifetime` : "pakai /report all buat lifetime (incl. arsip)",
+    statsLabel: "Racikan aktif",
+    trendN,
+    identity: formatIdentity(),
+    quant,
+  });
   const tracker = formatPnlTracker(modePerf);
   return tracker ? `${rep}\n\n${tracker}` : rep;
 }

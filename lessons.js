@@ -844,6 +844,59 @@ export function getAllPerformance() {
   return load().performance || [];
 }
 
+const ARCHIVE_FILE = repoPath("lessons-archive-pre-mainzen_v2.json");
+
+/**
+ * Pre-baseline archived performance (the 84 unattributed records moved out of
+ * lessons.json at the mainzen_v2 baseline reset). Display-only — these never feed
+ * the learning loop. Returns [] when the archive is absent. Fail-open.
+ */
+export function getArchivedPerformance() {
+  try {
+    if (!fs.existsSync(ARCHIVE_FILE)) return [];
+    const d = JSON.parse(fs.readFileSync(ARCHIVE_FILE, "utf8"));
+    return Array.isArray(d) ? d : (d.performance || []);
+  } catch (e) {
+    log("lessons_error", `archive read failed: ${e.message}`);
+    return [];
+  }
+}
+
+/**
+ * LIFETIME closed-position perf for the `/report all` tier: every LIVE record
+ * across all racikan (current lessons.json) + the pre-baseline archive. Display
+ * only (mixed settings) — explicitly NOT racikan-isolated. Paper rows excluded.
+ */
+export function getLifetimePerformance() {
+  const live = (load().performance || []).filter((p) => !p.paper);
+  return [...getArchivedPerformance(), ...live];
+}
+
+/**
+ * Live closed-position perf for ONE racikan (active_setup), across the current
+ * lessons.json. Display only — used by the `/report <racikan>` tier. The archive
+ * is excluded (its records are unattributed / active_setup=null).
+ */
+export function getPerformanceForRacikan(name) {
+  const target = String(name || "").trim().toLowerCase();
+  if (!target) return [];
+  return (load().performance || []).filter(
+    (p) => !p.paper && String(p.active_setup || "").toLowerCase() === target,
+  );
+}
+
+/** Distinct racikan names present in the live performance log (for `/report setups`). */
+export function listRacikanInPerformance() {
+  const counts = {};
+  for (const p of (load().performance || [])) {
+    if (p.paper) continue;
+    const k = p.active_setup || null;
+    if (!k) continue;
+    counts[k] = (counts[k] || 0) + 1;
+  }
+  return Object.entries(counts).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
+}
+
 /**
  * Performance records scoped to the CURRENT run mode, so sim (paper) and live
  * records never mix in anything user-facing. Paper mode → only paper records

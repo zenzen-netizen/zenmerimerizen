@@ -8,7 +8,7 @@
 ## Checklist
 - ✅ FASE 1 — Investigasi (read-only, no commit)
 - ✅ FASE 2 — Fix: wajib konfirmasi aksi-trade di jalur interaktif (CHAT_CONFIRM_TOOLS + requestConfirmation) — COMMIT
-- ⬜ FASE 3 — Disambiguasi: prompt GENERAL + router role (kalimat "ubah X" → setelan) — COMMIT
+- ✅ FASE 3 — Disambiguasi: prompt GENERAL + router role (kalimat "ubah X" → setelan) — COMMIT
 
 ### FASE 2 — DIKERJAKAN
 - `agent.js:9` — `CHAT_CONFIRM_TOOLS` kini = `update_config` + 4 aksi-trade (deploy/close/claim/swap).
@@ -78,3 +78,30 @@ punya `update_config` — model hanya bisa `deploy_position`/screening. Akibatny
 SETELAN deployAmount" bisa berubah jadi aksi deploy. (Diperbaiki di FASE 3: router + prompt.)
 
 (Tidak ada commit di fase ini.)
+
+---
+
+## FASE 3 — DIKERJAKAN
+- `index.js` router (telegramHandler ~3492): tambah guard `isSettingEdit`
+  (ubah/ganti/naikin/turunin/set/atur/… EN+ID). Frasa ubah-setelan → `isDeployRequest=false`
+  → role **GENERAL** (yang punya update_config), bukan SCREENER. Tes routing 9/9 lulus.
+- `prompt.js` (GENERAL prompt): blok **INTENT DISAMBIGUATION** — "ubah/set/ganti/naikin/turunin
+  <x>" = update_config (SETELAN), kata "deploy/amount/size" di frasa itu = nama setelan, bukan
+  order; buka/tutup posisi hanya kalau jelas; ragu → tanya dulu.
+
+## VERIFIKASI (lapor)
+- **(b) interaktif:**
+  - "ubah deploy jadi 0.3" → router=GENERAL; GENERAL punya update_config (config-intent) DAN
+    deploy_position (deploy-intent), prompt mengarahkan ke update_config; kalau toh model coba
+    deploy → gate FASE 2 minta konfirmasi → bisa Batal. (Defense-in-depth, BUKAN auto-buka.)
+  - "buka posisi …" / "deploy 0.5 SOL into <pool>" → router=SCREENER; deploy_position kini di
+    CHAT_CONFIRM_TOOLS → muncul prompt "⚠️ Konfirmasi aksi ini? 🚀 BUKA POSISI …" dulu.
+- **(c) OTONOM tak terpengaruh (bukti):** gate `agent.js:443` butuh `interactive &&
+  onConfirmRequired`. Tiga call otonom TIDAK pass keduanya:
+  - SCREENER `index.js:906` opts = `{ allowNoToolFinal, onToolStart, onToolFinish }` (no interactive/onConfirmRequired)
+  - MANAGER `index.js:496` opts = `{ onToolStart, onToolFinish }`
+  - MANAGER health `index.js:1092` tanpa opts → `{}`
+  → `interactive` default false → gate short-circuit → deploy/close jalan otomatis. Manajemen
+  TURTLE-SOL (lewat MANAGER 496) tak tersentuh.
+- **CLI REPL (`index.js:3778`)**: `interactive:true` tapi TANPA onConfirmRequired (operator
+  console, by design) → gate juga tak fire di sini. Sesuai pagar (hanya jalur onConfirmRequired).

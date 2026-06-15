@@ -3490,7 +3490,11 @@ async function telegramHandler(msg) {
   try {
     log("telegram", `Incoming: ${text}`);
     const hasCloseIntent = /\bclose\b|\bsell\b|\bexit\b|\bwithdraw\b|\btutup\b|\bjual\b|\btarik\b|\bcabut\b/i.test(text);
-    const isDeployRequest = !hasCloseIntent && /\bdeploy\b|\bopen position\b|\blp into\b|\badd liquidity\b|\bbuka posisi\b|\btambah likuiditas\b/i.test(text);
+    // A settings-change phrase ("ubah/ganti/naikin/turunin/set/atur deploy …") must NOT be
+    // treated as a deploy request: it belongs in GENERAL (which has update_config), not
+    // SCREENER (which can only deploy). The word "deploy"/"amount" here names the SETTING.
+    const isSettingEdit = /\b(ubah|ganti|atur|setel|set|naik(?:in|kan)|turun(?:in|kan)|tingkatkan|kurangi|perbesar|perkecil|change|update|increase|decrease|lower|raise|bump|adjust)\b/i.test(text);
+    const isDeployRequest = !hasCloseIntent && !isSettingEdit && /\bdeploy\b|\bopen position\b|\blp into\b|\badd liquidity\b|\bbuka posisi\b|\btambah likuiditas\b/i.test(text);
     const agentRole = isDeployRequest ? "SCREENER" : "GENERAL";
     const agentModel = agentRole === "SCREENER" ? config.llm.screeningModel : config.llm.generalModel;
     liveMessage = await createLiveMessage("🤖 Live Update", `Request: ${text.slice(0, 240)}`);

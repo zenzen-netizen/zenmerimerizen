@@ -1798,6 +1798,9 @@ function buildConfigRowMap() {
     learningReportEvery: ["learningReportEvery", `${fmt(c.reports?.learningReportEvery)}${c.reports?.learningReportEvery > 0 ? " 🟢 (ON)" : " ⚪ (OFF)"}`],
     learningReportTrendN: ["learningReportTrendN", fmt(c.reports?.learningReportTrendN)],
 
+    // ── Learning/Evolve (zen) ──
+    evolveEnabled: ["evolveEnabled", `${fmt(c.learning?.evolveEnabled)}${c.learning?.evolveEnabled === false ? " (auto-evolve BEKU — threshold manual)" : " (auto-evolve aktif)"}`],
+
     // ── 🧪 Experiments (zen) ──
     exitLiquidityCheck: ["exitLiquidityCheck", fmt(c.experiments?.exitLiquidityCheck)],
     exitLiquidityMaxSlippagePct: ["exitLiquidityMaxSlippagePct", fmt(c.experiments?.exitLiquidityMaxSlippagePct)],
@@ -2012,6 +2015,8 @@ function settingValue(key) {
     idleScreeningCooldownMin: config.experiments.idleScreeningCooldownMin,
     paperTrading: config.experiments.paperTrading,
     usePaperHistoryWhenLive: config.experiments.usePaperHistoryWhenLive,
+    // 🧬 Learning / Auto-Evolve freeze
+    evolveEnabled: config.learning.evolveEnabled,
     // 📊 GRUP 17 — Reports & Gas
     learningReportEvery: config.reports.learningReportEvery,
     learningReportTrendN: config.reports.learningReportTrendN,
@@ -2175,7 +2180,7 @@ async function requestConfirmation(toolName, args) {
     return v;
   };
   const RESERVED = new Set(["changes", "key", "value", "path", "reason"]);
-  const KNOWN_SECTIONS = new Set(["screening", "management", "risk", "schedule", "llm", "strategy", "hiveMind", "api", "gmgn", "indicators", "chartIndicators", "experiments", "reports", "tokens", "darwin"]);
+  const KNOWN_SECTIONS = new Set(["screening", "management", "risk", "schedule", "llm", "strategy", "hiveMind", "api", "gmgn", "indicators", "chartIndicators", "experiments", "reports", "tokens", "darwin", "learning"]);
   const raw = {};
   if (args.changes && typeof args.changes === "object") Object.assign(raw, args.changes);
   if (typeof args.key === "string" && args.key.trim()) raw[args.key.trim()] = args.value;
@@ -2289,8 +2294,8 @@ const MENU_GROUP_SHORT = {
   "dev-indicators": "Indik", "dev-infra": "Infra",
   "zen-screening": "Screen+", "zen-gmgn": "GMGN", "zen-management": "Mgmt+",
   "zen-strategy": "Strat+", "zen-schedule": "Jadwal+", "zen-llm": "LLM+",
-  "zen-indicators": "Indik+", "zen-reports": "Report", "zen-experiments": "🧪Exp",
-  "zen-racikan": "Racikan",
+  "zen-indicators": "Indik+", "zen-reports": "Report", "zen-learning": "🧬Learn",
+  "zen-experiments": "🧪Exp", "zen-racikan": "Racikan",
 };
 // Max editable T3 rows per page; groups with more paginate (T1+T2 stay visible).
 const MAX_T3_ROWS = 8;
@@ -2548,6 +2553,8 @@ const MENU_CONTROLS = {
   // 🧩 zen-reports
   learningReportEvery: { input: ["learningReportEvery", "Learning report every N (0=off)"] },
   learningReportTrendN: { input: ["learningReportTrendN", "Trend window N"] },
+  // 🧬 zen-learning
+  evolveEnabled: { toggle: ["evolveEnabled", "Auto-evolve threshold (off=FREEZE)"] },
   // 🧪 zen-experiments
   candidateMomentum: { toggle: ["candidateMomentum", "Candidate momentum"] },
   smartWalletMomentum: { toggle: ["smartWalletMomentum", "Smart-wallet mom."] },

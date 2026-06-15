@@ -219,6 +219,8 @@ export const CONFIG_SCHEMA = {
   // reports
   learningReportEvery: num(),
   learningReportTrendN: num(),
+  // learning (auto-evolve freeze)
+  evolveEnabled: bool(),
 };
 
 /**

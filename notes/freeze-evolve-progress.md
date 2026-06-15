@@ -59,6 +59,22 @@ trade/exit/screening. Aman di-restart. Reversible.
 - Syntax: `node -c` config.js + lessons.js + index.js → PASS.
 - Commit: (lihat git log)
 
-## FASE 2 — REGISTER (CONFIG_MAP + schema + display + /settings + docs) ⬜
+## FASE 2 — REGISTER (CONFIG_MAP + schema + display + /settings + docs) ✅
+Full-sync semua permukaan:
+- `tools/executor.js`: CONFIG_MAP `evolveEnabled:["learning","evolveEnabled"]` + KNOWN_SECTIONS +`"learning"`.
+- `index.js`: KNOWN_SECTIONS (jalur konfirmasi) +`"learning"`.
+- `config-schema.js`: `evolveEnabled: bool()` (satpam — terima true/false/off, tolak garbage).
+- `index.js` rowMap (`/config`): baris `evolveEnabled` dgn dot 🟢/⚪ (via `fmt`) + tag BEKU/aktif.
+- `config-origin.js`: subgroup baru `zen-learning` ("Learning/Evolve") + `KEY_SUBCLUSTER.evolveEnabled="learning"`
+  + `SUB_CLUSTER_META.learning` (🧬 Auto-Evolve).
+- `index.js`: `settingValue.evolveEnabled` + `MENU_CONTROLS.evolveEnabled` (toggle) + `MENU_GROUP_SHORT["zen-learning"]="🧬Learn"`.
+  (`pageForKey` auto-derive → zen-learning).
+- `tools/definitions.js`: baris `Learning: evolveEnabled (…)` di deskripsi update_config.
+- `config.js` `reloadScreeningThresholds`: re-read `evolveEnabled` (hand-edit tanpa restart).
+- `SETTINGS-GUIDE.md`: GRUP 18 baru — Learning/Auto-Evolve + entri `evolveEnabled` + analogi + beda-Darwin.
+- `user-config.example.json`: `"evolveEnabled": true` (dokumentasi default).
+- Test: `npm test` (test:syntax semua *.js) → EXIT 0. Smoke: schema=bool, subgroup keys ok, config.learning loads.
+- Commit: (lihat git log)
+
 ## FASE 3 — SET FROZEN (user-config.json) ⬜
 ## VERIFIKASI ⬜

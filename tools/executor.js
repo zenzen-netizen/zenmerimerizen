@@ -496,6 +496,8 @@ const toolMap = {
       // reports
       learningReportEvery: ["reports", "learningReportEvery"],
       learningReportTrendN: ["reports", "learningReportTrendN"],
+      // learning (auto-evolve freeze)
+      evolveEnabled: ["learning", "evolveEnabled"],
     };
 
     const applied = {};
@@ -527,7 +529,7 @@ const toolMap = {
     //   { gasReserveAutoTune: true }                   (bare flat key at top level)
     // Fold all of them into `changes` so casual chat works regardless of phrasing.
     const resolveKey = (k) => (CONFIG_MAP[k] ? k : CONFIG_MAP_LOWER[String(k).toLowerCase()]?.[0]);
-    const KNOWN_SECTIONS = new Set(["screening", "management", "risk", "schedule", "llm", "strategy", "hiveMind", "api", "gmgn", "indicators", "chartIndicators", "experiments", "reports", "tokens", "darwin"]);
+    const KNOWN_SECTIONS = new Set(["screening", "management", "risk", "schedule", "llm", "strategy", "hiveMind", "api", "gmgn", "indicators", "chartIndicators", "experiments", "reports", "tokens", "darwin", "learning"]);
     if (Object.keys(changes).length === 0 && typeof path === "string" && path.trim()) {
       const rk = resolveKey(path.trim().split(".").pop());
       if (rk) changes[rk] = value;

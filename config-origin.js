@@ -164,6 +164,12 @@ export const ORIGIN_SECTIONS = [
         keys: ["learningReportEvery", "learningReportTrendN"],
       },
       {
+        id: "zen-learning",
+        title: "Learning/Evolve",
+        desc: "Kunci auto-evolve threshold screening. OFF = baseline BEKU (minFeeActiveTvlRatio + minOrganic tidak ditulis-ulang otomatis tiap 5 close). Darwin punya toggle sendiri (GRUP Darwin).",
+        keys: ["evolveEnabled"],
+      },
+      {
         id: "zen-experiments",
         title: "🧪 Experiments (GRUP 16)",
         desc: "Fitur coba-coba opt-in, default OFF = perilaku pabrik.",
@@ -261,6 +267,8 @@ export const SUB_CLUSTER_META = {
   "gmgn-ind-rules": { emoji: "📐", label: "Aturan Indikator" },
   // Reports (zen)
   reports: { emoji: "📑", label: "Reports" },
+  // Learning/Evolve (zen)
+  learning: { emoji: "🧬", label: "Auto-Evolve" },
   // Experiments (zen)
   experiments: { emoji: "🧪", label: "Experiments" },
 };
@@ -342,6 +350,8 @@ export const KEY_SUBCLUSTER = {
   smiPdLookback: "ind-smi", smiPaLookback: "ind-smi", smiCrossWindow: "ind-smi",
   // zen-reports
   learningReportEvery: "reports", learningReportTrendN: "reports",
+  // zen-learning
+  evolveEnabled: "learning",
   // zen-experiments (single cluster)
   exitLiquidityCheck: "experiments", exitLiquidityMaxSlippagePct: "experiments",
   marketRegimeGate: "experiments", marketRegimeMaxDrop24hPct: "experiments",

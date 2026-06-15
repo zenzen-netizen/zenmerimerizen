@@ -571,6 +571,8 @@ export function reloadScreeningThresholds() {
     // Racikan prompt rules: pick up hand-edits to user-config.json without a restart.
     if (fresh.promptNotes !== undefined) config.promptNotes = normalizePromptNotes(fresh.promptNotes);
     if (fresh.activeSetup !== undefined) config.activeSetup = fresh.activeSetup;
+    // Auto-evolve freeze: hand-edits to evolveEnabled apply without a restart too.
+    if (fresh.evolveEnabled !== undefined) { if (!config.learning) config.learning = {}; config.learning.evolveEnabled = fresh.evolveEnabled; }
     const minBinsBelow = numericConfig(fresh.minBinsBelow) ?? config.strategy.minBinsBelow;
     const maxBinsBelow = numericConfig(fresh.maxBinsBelow) ?? numericConfig(fresh.binsBelow) ?? config.strategy.maxBinsBelow;
     const defaultBinsBelow = numericConfig(fresh.defaultBinsBelow) ?? numericConfig(fresh.binsBelow) ?? config.strategy.defaultBinsBelow ?? maxBinsBelow;

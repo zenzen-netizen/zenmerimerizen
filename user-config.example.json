@@ -79,6 +79,8 @@
   "screeningModel": "minimax/minimax-m2.5",
   "generalModel": "minimax/minimax-m2.7",
 
+  "evolveEnabled": true,
+
   "darwinEnabled": true,
   "darwinWindowDays": 60,
   "darwinRecalcEvery": 5,

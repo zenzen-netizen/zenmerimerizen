@@ -408,6 +408,7 @@ Hive/API: hiveMindUrl, hiveMindApiKey, agentId, hiveMindPullMode, publicApiKey, 
 PnL fetcher/poller: pnlSource (rpc|meteora — rpc = on-chain via public RPC primary, meteora = API-only path), pnlRpcUrl, pnlPollIntervalSec (poller cadence in seconds; poller restarts on change), pnlDepositCacheTtlSec
 Indicators: chartIndicatorsEnabled, indicatorEntryPreset, indicatorExitPreset, indicatorExitEnabled, indicatorRejectAtBottom, rsiLength, indicatorIntervals, indicatorCandles, rsiOversold, rsiOverbought, requireAllIntervals, smiPdLookback, smiPaLookback, smiCrossWindow (last 3 only apply when indicatorEntryPreset=supertrend_plus_smi)
 Reports: learningReportEvery, learningReportTrendN
+Learning: evolveEnabled (true=auto-evolve screening thresholds every 5 closes; false=FROZEN, thresholds left manual — minFeeActiveTvlRatio + minOrganic never auto-written)
 Experiments (default off): exitLiquidityCheck, exitLiquidityMaxSlippagePct, marketRegimeGate, marketRegimeMaxDrop24hPct, candidateMomentum, narrativeProfileSignal, expectedYieldSignal, convictionSizing, convictionSizingMaxAdjustPct, counterfactualReview, counterfactualMinMcapGainPct, smartWalletMomentum, idleScreeningCooldown, idleScreeningCooldownMin, paperTrading (DRY-RUN-only: simulate virtual positions instead of vanishing would-deploy), usePaperHistoryWhenLive (LIVE-only opt-in: let paper-derived lessons appear in the live prompt as low-credibility soft reference; never touches thresholds/reports/hive)
 
 Reason is optional but helpful — logged as a lesson when provided.

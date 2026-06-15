@@ -1560,6 +1560,32 @@ Matikan (balik pabrik): `set usePaperHistoryWhenLive to false`
 
 ---
 
+# GRUP 18 — LEARNING / AUTO-EVOLVE (Pembekuan Baseline)
+
+> **Analogi:** bayangkan bot itu murid yang otomatis mengubah aturan-screening-nya sendiri tiap 5 trade tutup, berdasarkan menang/kalah terakhir. Kadang kamu lagi mau **menguji satu racikan apa adanya** (baseline bersih) — kamu tidak mau si murid diam-diam mengganti aturannya di tengah ujian. `evolveEnabled` itu **gembok** untuk proses itu.
+>
+> Yang dikunci: hanya **auto-evolve threshold** (`evolveThresholds`) yang menulis-ulang `minFeeActiveTvlRatio` + `minOrganic` tiap 5 posisi tutup. **Tidak** menyentuh eksekusi trade / exit / screening. Reversible — tinggal balik ke `true`.
+>
+> **Beda dengan Darwin (GRUP 12):** Darwin mengubah *bobot sinyal* screening; ini mengubah *angka threshold* screening. Dua mekanisme beda, dua toggle beda. `evolveEnabled` TIDAK mempengaruhi Darwin (dan sebaliknya).
+
+### evolveEnabled
+
+| | |
+|---|---|
+| **Nilai sekarang** | `false` (BEKU) |
+| **Default** | `true` |
+| **Format** | `true` atau `false` (atau `off`) |
+| **Di `config.js`** | `config.learning.evolveEnabled` |
+| **Penjelasan** | `true` = perilaku pabrik: tiap 5 posisi tutup (racikan aktif), bot boleh menaikkan `minFeeActiveTvlRatio` / `minOrganic` otomatis dari data menang-kalah. `false` = **FROZEN**: auto-tulis itu dilewati total (tidak ada tulisan ke `user-config.json`, threshold tetap persis seperti kamu set). Dipakai untuk menjaga baseline (mis. **mainzen_v2**) tetap bersih saat lagi di-tuning manual. |
+
+**Contoh:** `set evolveEnabled to true` (buka kunci, balikkan auto-evolve), atau lewat `/settings` → **🧬Learn** → tombol *Auto-evolve threshold*.
+
+**Override manual sekali jalan (CLI saja):** kalau frozen tapi operator tetap mau menjalankan evolve sekali, ketik `/evolve force` di REPL — ada banner ⚠️, threshold ditulis sekali itu, toggle tetap `false`. Plain `/evolve` saat frozen akan menolak + menjelaskan.
+
+> Di `/settings` evolveEnabled ada di halaman **🧬Learn** (seksi 🧩 Add by Zen). Di `/config` muncul di sub-grup **Learning/Evolve** dengan titik 🟢 on / ⚪ off.
+
+---
+
 # CATATAN — GMGN & DUA SISTEM INDIKATOR
 
 > Bagian ini menjawab kebingungan umum: "blok GMGN di `/config` itu semua kepakai atau tidak?"

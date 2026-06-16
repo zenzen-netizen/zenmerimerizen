@@ -47,4 +47,22 @@ di-exclude di SEMUA konsumen auto-learning/sharing/stats yang sudah exclude pape
 - ✅ FASE 1 — RECORD + FLAG (gate buang→flag `suspect_pnl`; entry simpan flag+reason)
 - ✅ FASE 2 — ALERT operator (notif Telegram fire-and-forget + fail-open di blok gate)
 - ✅ FASE 3 — KARANTINA (A–H: filter livePerf/stats + guard hive/pool-memory + drop lesson prompt + /report suspect line)
-- ⬜ VERIFIKASI smoke + npm test
+- ✅ VERIFIKASI smoke + npm test
+
+## Verifikasi (2026-06-16)
+Smoke test (live mode, backup+restore semua runtime JSON, SHA1 cocok 100% sesudahnya):
+- record kena gate (initial=$50, final=$2.5 → −95%, reason "OOR pumped exit"):
+  - ✅ DIREKAM (bukan dibuang) + `suspect_pnl:true` + `suspect_reason` + pnl_pct=−95
+  - ✅ alert path kepicu (log `[LESSONS_WARN] SUSPECT … recorded (NOT dropped)`)
+  - ✅ lesson di-tag `[suspect]` (terlihat di log `New lesson [suspect]`)
+  - ✅ DIKECUALIKAN dari `getModePerformance` (stats)
+  - ✅ pool-memory HANYA terisi utk record NORMAL (suspect ter-skip — guard E)
+  - ✅ `getSuspectCount()` +1
+- record NORMAL (+6%): ✅ tak berubah, masuk stats, tanpa flag suspect.
+- `npm test` (node --check semua .js): ✅ lulus. `git diff --stat`: index.js+lessons.js+nota.
+- File runtime LIVE (lessons/pool-memory/signal-weights/user-config): ✅ utuh (SHA1 identik).
+
+## PENDING (owner)
+- ⚠️ **Restart pm2 `meridian` (id 0)** — proses online 4j masih pakai kode LAMA; fix baru aktif
+  setelah `pm2 restart meridian --update-env`. (Tak auto-restart: bot trading LIVE.)
+- `meridian-v3` (id 1 = meridianzen2, folder terpisah) TAK tersentuh; port terpisah bila diinginkan.

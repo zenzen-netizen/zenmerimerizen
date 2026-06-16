@@ -145,6 +145,66 @@ function fase1(recs) {
   return { maps, withPeak, withTrough, oorAbove, oorBelow };
 }
 
+// ── FASE 2 — COVERAGE % + ⭐ MISSED-UPSIDE ──────────────────────
+function fase2(recs, maps) {
+  console.log("\n=== FASE 2 — COVERAGE % + ⭐ MISSED-UPSIDE ===");
+
+  // Coverage classification over trades with BOTH peak & trough.
+  const both = maps
+    .map((m, i) => ({ m, rec: recs[i] }))
+    .filter(({ m }) => m.hasPeak && m.hasTrough);
+  let inRange = 0, breachAbove = 0, breachBelow = 0, breachBoth = 0;
+  for (const { m } of both) {
+    if (m.oorAbove && m.oorBelow) breachBoth++;
+    else if (m.oorAbove) breachAbove++;
+    else if (m.oorBelow) breachBelow++;
+    else inRange++;
+  }
+  const nb = both.length;
+  const p = (x) => (nb ? Math.round((x / nb) * 100) : 0) + "%";
+  console.log(`\nKlasifikasi excursion (n=${nb} trade dgn peak & trough lengkap):`);
+  console.log(`  · DALAM range penuh (tak tembus dua arah) : ${padL(inRange, 3)}  (${p(inRange)})`);
+  console.log(`  · tembus ATAS saja                        : ${padL(breachAbove, 3)}  (${p(breachAbove)})`);
+  console.log(`  · tembus BAWAH saja                       : ${padL(breachBelow, 3)}  (${p(breachBelow)})`);
+  console.log(`  · tembus DUA arah                         : ${padL(breachBoth, 3)}  (${p(breachBoth)})`);
+  console.log(`  → ${p(breachAbove + breachBoth)} excursion keluar lewat ATAS, ${p(breachBelow + breachBoth)} lewat BAWAH.`);
+
+  // ⭐ MISSED-UPSIDE: how far price ran ABOVE the top edge before we'd be idle SOL.
+  // In single-side-below the upper edge sits at entry (edgeAbovePct≈0) → we capture ~0 of any
+  // up-move; the whole peak above the edge is "left on the table".
+  console.log("\n⭐ MISSED-UPSIDE — 'kita ninggalin berapa di meja karena single-side-bawah?'");
+  console.log("   Pas harga pump, SOL kita idle di atas range (deket entry) → up-move TAK ke-capture.");
+  console.log("   missed% = peak% − edge_atas% (edge_atas≈0 krn bins_above=0) ≈ seluruh run di atas entry.\n");
+
+  const summarize = (label, items) => {
+    if (!items.length) {
+      console.log(`  ${label}: (tak ada sampel)`);
+      return;
+    }
+    const missedPct = items.map(({ m, rec }) => rec.price_peak_pct - m.edgeAbovePct);
+    // $ CEILING: full deployed capital riding the up-move then sold at peak. NOT achievable
+    // (would need to HOLD the base token + eat IL) — strictly an upper bound for scale.
+    const missedUsd = items.map(({ rec }, i) =>
+      f(rec.initial_value_usd) ? (missedPct[i] / 100) * rec.initial_value_usd : 0);
+    const totUsd = missedUsd.reduce((s, x) => s + x, 0);
+    console.log(`  ${label} (n=${items.length}):`);
+    console.log(`     missed% per trade  : median ${pct(median(missedPct))} · avg ${pct(mean(missedPct))} · max ${pct(Math.max(...missedPct))}`);
+    console.log(`     $ CEILING (≣ atas) : total ~$${r2(totUsd)} · median/trade ~$${r2(median(missedUsd))}  ⚠️ plafon (butuh HOLD token + kena IL)`);
+  };
+
+  const breachers = maps
+    .map((m, i) => ({ m, rec: recs[i] }))
+    .filter(({ m }) => m.hasPeak && m.oorAbove);
+  const pumped = breachers.filter(({ rec }) => isPump(rec));
+  summarize("Exit 'pumped far above range'", pumped);
+  summarize("SEMUA trade tembus tepi-atas (apapun exit)", breachers);
+
+  console.log("\n  Baca: di single-side-bawah, tiap pump = upside penuh KELEWAT (median ~+11%/trade).");
+  console.log("  ⚠️ Ini sisi COVERAGE saja — meng-capture upside butuh GANTI strategi (hold token /");
+  console.log("     dual-side bins_above>0), yg bawa IL + ubah profil fee (TAK ter-replay di sini).");
+  return { both, breachers, pumped };
+}
+
 // ── MAIN ────────────────────────────────────────────────────────
 function main() {
   const recs = loadRecords();
@@ -157,7 +217,8 @@ function main() {
   console.log("    → output INFORMASIONAL. Keputusan final lebar bin = konfirmasi live/paper.");
   console.log(`    Racikan = bid_ask single-side-BAWAH (bins_above=0 di ${recs.filter((r) => r.bin_range.bins_above === 0).length}/${recs.length} record).`);
 
-  fase1(recs);
+  const { maps } = fase1(recs);
+  fase2(recs, maps);
 }
 
 main();

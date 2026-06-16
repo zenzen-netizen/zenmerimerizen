@@ -31,6 +31,11 @@ Per gerak `k` bin dari entry: `price% = (1+step/1e4)^k − 1`. In-range `Δbin �
         trough −43.29% vs edge −49.7%, sisa margin 6.4pp — tak ada yg tembus). **Asimetri ekstrem:** tepi atas
         di entry (naik ≥1 bin langsung OOR), tepi bawah median −46% tak pernah disentuh → bins_below
         over-provisioned (coverage-side), tepi atas nol headroom.
-- ⬜ FASE 2 — Coverage % + ⭐ MISSED-UPSIDE (berapa upside kelewat karena single-side)
+- ✅ FASE 2 — Coverage % + ⭐ MISSED-UPSIDE (berapa upside kelewat karena single-side)
+      → Coverage (n=56 peak&trough): **DALAM penuh 11%**, **tembus ATAS saja 89%**, tembus BAWAH 0%, dua-arah 0%.
+        **MISSED-UPSIDE** — exit "pumped above" (n=32): median **+13.8%**/trade, avg +14.6%, max +29.5%, plafon-$
+        total **~$67.83**; SEMUA breacher-atas (n=50): median +11.6%, plafon ~$82.54. Bandingkan net buku −$8.43
+        → biaya STRUKTURAL single-side-bawah (forfeit up-move) >> realisasi. ⚠️ plafon = butuh HOLD token + IL,
+        TAK achievable single-side; capture upside = GANTI strategi (dual-side), fee TAK ter-replay.
 - ⬜ FASE 3 — Kandidat lebar/bentuk (bins_below ±, skenario tepi-atas/dual-side) → `notes/backtest-binwidth-results.md`
 - ⬜ VERIFIKASI — script jalan, lessons.json SHA tak berubah, npm test hijau

@@ -171,6 +171,12 @@ export async function recordPerformance(perf) {
     ? (perf.minutes_in_range / perf.minutes_held) * 100
     : 0;
 
+  // A ≤−90% close on a ≥$20 position that was NOT a stop-loss is ambiguous: it
+  // could be a genuine ≥90% rug OR a bad-data artifact (e.g. a mis-scaled / not-yet-
+  // settled PnL reading). We used to DROP it silently here — which meant a real rug
+  // could vanish without a trace. Now we never drop it: the record is kept but FLAGGED
+  // `suspect_pnl` so it is quarantined from auto-learning + user-facing stats until an
+  // operator verifies it (see the `!suspect_pnl` filters downstream). An alert fires too.
   const closeReasonText = String(perf.close_reason || "").toLowerCase();
   const suspiciousAbsurdClosedPnl =
     Number.isFinite(pnl_pct) &&
@@ -178,9 +184,11 @@ export async function recordPerformance(perf) {
     pnl_pct <= -90 &&
     !closeReasonText.includes("stop loss");
 
+  const suspectReason = suspiciousAbsurdClosedPnl
+    ? "≤-90% non-stopLoss, verifikasi rug vs bad-data"
+    : null;
   if (suspiciousAbsurdClosedPnl) {
-    log("lessons_warn", `Skipped absurd closed PnL record for ${perf.pool_name || perf.pool}: pnl_pct=${pnl_pct.toFixed(2)} reason=${perf.close_reason}`);
-    return;
+    log("lessons_warn", `SUSPECT closed PnL recorded (NOT dropped) for ${perf.pool_name || perf.pool}: pnl_pct=${pnl_pct.toFixed(2)} reason=${perf.close_reason} — quarantined from auto-learning/stats until verified (rug asli vs bad-data)`);
   }
 
   const signalSnapshot = buildSignalSnapshot(perf);
@@ -198,6 +206,9 @@ export async function recordPerformance(perf) {
     open_hour_wib: openHourWib,
     open_session: openHourWib != null ? sessionForHour(openHourWib).key : null,
     recorded_at: recordedAt,
+    // Quarantine flag for an absurd (≤−90% non-stopLoss) close — see gate above.
+    // Persisted on the record so every downstream consumer can exclude it (like `paper`).
+    ...(suspiciousAbsurdClosedPnl ? { suspect_pnl: true, suspect_reason: suspectReason } : {}),
   };
 
   data.performance.push(entry);

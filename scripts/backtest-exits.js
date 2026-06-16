@@ -136,6 +136,55 @@ function fase1StopLoss(recs, baseActual) {
   return { sims, baseActual };
 }
 
+// ── TRAILING overlay (APPROX) ───────────────────────────────────
+function simTrailing(recs, T, D) {
+  let armed = 0, deltaUsd = 0;
+  const rows = recs.map((r) => {
+    const isArmed = Number.isFinite(r.peak_pnl_pct) && r.peak_pnl_pct >= T;
+    const simPct = isArmed ? r.peak_pnl_pct - D : r.pnl_pct;
+    const simUsd = (simPct / 100) * r.initial_value_usd;
+    if (isArmed) { armed++; deltaUsd += simUsd - r.pnl_usd; }
+    return { pnlPct: simPct, pnlUsd: simUsd, initial: r.initial_value_usd };
+  });
+  return { rows, armed, deltaUsd, st: stats(rows) };
+}
+
+function fase2Trailing(recs) {
+  const Ts = [0.8, 1.0, 1.2, 1.5];
+  const Ds = [0.5, 1.0];
+  const BASE_T = 1.5, BASE_D = 1.0;
+  const combos = [];
+  for (const T of Ts) for (const D of Ds) combos.push({ T, D, sim: simTrailing(recs, T, D) });
+  const baseNet = combos.find((c) => c.T === BASE_T && c.D === BASE_D).sim.st.netUsd;
+
+  console.log("\n=== FASE 2 — TRAILING BACKTEST (RANKING — APPROX) ===");
+  console.log("⚠️  APPROX: urutan peak/trough TAK diketahui. Model = 'tiap trade ber-peak≥T exit di peak−D'.");
+  console.log("    Bisa over/understate (lewatkan recovery pasca-drop, atau potong yg masih naik).");
+  console.log("    Pakai utk RANKING kandidat → konfirmasi paper, BUKAN vonis.\n");
+  console.log(
+    pad("T", 6) + pad("D", 6) + padL("armed", 7) + padL("net$", 11) + padL("roi%", 8) +
+    padL("win%", 7) + padL("PF", 7) + padL("Δnet$ vs base", 15),
+  );
+  console.log("─".repeat(67));
+  for (const c of combos) {
+    const s = c.sim;
+    const isBase = c.T === BASE_T && c.D === BASE_D;
+    console.log(
+      pad(c.T + (isBase ? "*" : ""), 6) +
+        pad(c.D, 6) +
+        padL(s.armed, 7) +
+        padL(usd(s.st.netUsd), 11) +
+        padL(r2(s.st.roiPct), 8) +
+        padL(Math.round(s.st.winRate), 7) +
+        padL(pfStr(s.st.pf), 7) +
+        padL((s.st.netUsd - baseNet >= 0 ? "+" : "") + r2(s.st.netUsd - baseNet), 15),
+    );
+  }
+  console.log("\n  armed = jml trade dgn peak_pnl_pct ≥ T (yg model-nya trailing-exit di peak−D)");
+  console.log("  * = baseline live (trig 1.5 / drop 1.0)");
+  return { combos, baseNet };
+}
+
 // ── MAIN ────────────────────────────────────────────────────────
 function main() {
   const recs = loadRecords();
@@ -156,6 +205,7 @@ function main() {
   console.log(`  match: ${match ? "✓ (model aggregation OK)" : "✗ — MODEL/ FILTER SALAH, periksa"}`);
 
   fase1StopLoss(recs, baseActual);
+  fase2Trailing(recs);
 }
 
 main();

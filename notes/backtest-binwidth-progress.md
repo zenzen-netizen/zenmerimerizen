@@ -42,4 +42,5 @@ Per gerak `k` bin dari entry: `price% = (1+step/1e4)^k − 1`. In-range `Δbin �
         OOR-bawah (lever fee TAK terukur). (B) bins_above: 0→89% OOR-atas, 10 bin→55% (captured +10.5%),
         20 bin→2% → capture pump butuh dual-side = GANTI strategi (hold token+IL+fee beda), bukan tuning lebar.
         Hasil + rekomendasi ditulis ke `notes/backtest-binwidth-results.md`.
-- ⬜ VERIFIKASI — script jalan, lessons.json SHA tak berubah, npm test hijau
+- ✅ VERIFIKASI — full run OK (n=74); `lessons.json` SHA `1fcc0adb…` **tak berubah**; `git status` nol
+      modifikasi data/state/config; `npm test` (node --check semua .js) hijau; branch=experimental.

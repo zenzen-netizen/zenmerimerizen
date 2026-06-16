@@ -37,5 +37,9 @@ Per gerak `k` bin dari entry: `price% = (1+step/1e4)^k − 1`. In-range `Δbin �
         total **~$67.83**; SEMUA breacher-atas (n=50): median +11.6%, plafon ~$82.54. Bandingkan net buku −$8.43
         → biaya STRUKTURAL single-side-bawah (forfeit up-move) >> realisasi. ⚠️ plafon = butuh HOLD token + IL,
         TAK achievable single-side; capture upside = GANTI strategi (dual-side), fee TAK ter-replay.
-- ⬜ FASE 3 — Kandidat lebar/bentuk (bins_below ±, skenario tepi-atas/dual-side) → `notes/backtest-binwidth-results.md`
+- ✅ FASE 3 — Kandidat lebar/bentuk (bins_below ±, skenario tepi-atas/dual-side) → `notes/backtest-binwidth-results.md`
+      → (A) bins_below: ×0.5 OOR-bawah 16%, ×0.75 2%, ×1+ 0% → ada ruang sempitin tepi bawah ~×0.75 tanpa
+        OOR-bawah (lever fee TAK terukur). (B) bins_above: 0→89% OOR-atas, 10 bin→55% (captured +10.5%),
+        20 bin→2% → capture pump butuh dual-side = GANTI strategi (hold token+IL+fee beda), bukan tuning lebar.
+        Hasil + rekomendasi ditulis ke `notes/backtest-binwidth-results.md`.
 - ⬜ VERIFIKASI — script jalan, lessons.json SHA tak berubah, npm test hijau

@@ -205,6 +205,70 @@ function fase2(recs, maps) {
   return { both, breachers, pumped };
 }
 
+// ── FASE 3 — CANDIDATE WIDTH / SHAPE (coverage-side, direction only) ──
+function fase3(recs, maps) {
+  console.log("\n=== FASE 3 — KANDIDAT LEBAR/BENTUK (coverage-side, ARAH doang) ===");
+  console.log("⚠️  FEE TAK TERHITUNG: range lebih sempit = fee/$ lebih padat (inti bid_ask) — TAK ter-replay.");
+  console.log("    Tabel ini cuma trade-off OOR/coverage. Keputusan lebar = konfirmasi live/paper.\n");
+
+  // (A) bins_below scenarios — does a narrower DOWN range start breaching? (currently 0% OOR-below)
+  const tr = maps.map((m, i) => ({ m, rec: recs[i] })).filter(({ m }) => m.hasTrough);
+  console.log(`(A) bins_below {lebih sempit ↔ lebih lebar} — efek ke OOR-BAWAH (n=${tr.length} trade dgn trough):`);
+  console.log("    Tepi bawah = sisi 'beli pas turun' (inti racikan). OOR-bawah = berhenti nampung dip.\n");
+  console.log(pad("skala bb", 10) + padL("bb median", 11) + padL("OOR-bawah", 11) + padL("freq%", 8) + padL("depth-past bins (med/avg)", 27));
+  console.log("─".repeat(67));
+  for (const mult of [0.5, 0.75, 1.0, 1.25, 1.5]) {
+    const rows = tr.map(({ m, rec }) => {
+      const bbNew = Math.max(1, Math.round(m.bb * mult));
+      const bd = binsDown(rec.price_trough_pct, m.s);
+      return { bbNew, oor: bd > bbNew, depthPast: bd - bbNew };
+    });
+    const oor = rows.filter((r) => r.oor);
+    const dp = oor.map((r) => r.depthPast);
+    const tag = mult === 1.0 ? " *base" : "";
+    console.log(
+      pad("×" + mult + tag, 10) +
+        padL(median(rows.map((r) => r.bbNew)), 11) +
+        padL(oor.length, 11) +
+        padL(Math.round((oor.length / rows.length) * 100), 8) +
+        padL(`${r1(median(dp))} / ${r1(mean(dp))}`, 27),
+    );
+  }
+  console.log("\n  Trade-off bawah: lebih SEMPIT → OOR-bawah naik (kehilangan coverage dip = inti racikan) TAPI");
+  console.log("  fee/$ lebih padat (TAK terhitung). Lebih LEBAR → OOR-bawah tetap ~0 tapi modal makin encer.");
+
+  // (B) upper edge / dual-side scenarios — how much pump would a wider TOP / dual-side cover?
+  const pk = maps.map((m, i) => ({ m, rec: recs[i] })).filter(({ m }) => m.hasPeak);
+  console.log(`\n(B) tepi-ATAS lebih lebar / dual-side (bins_above>0) — efek ke OOR-ATAS + upside ke-capture (n=${pk.length}):`);
+  console.log("    base = bins_above 0 (di entry). Skenario = naikin tepi atas X bin di ATAS entry.\n");
+  console.log(pad("bins_above", 12) + padL("edge_atas%", 12) + padL("OOR-atas", 10) + padL("freq%", 8) +
+    padL("captured med%", 15) + padL("missed med%", 13));
+  console.log("─".repeat(70));
+  for (const ba of [0, 5, 10, 20, 35]) {
+    const rows = pk.map(({ m, rec }) => {
+      const bu = binsUp(rec.price_peak_pct, m.s);
+      const edge = pricePctAt(ba, m.s);
+      const captured = Math.min(rec.price_peak_pct, edge); // % up to the new upper edge (cap at peak)
+      const missed = Math.max(0, rec.price_peak_pct - edge);
+      return { oor: bu > ba, captured, missed, edge };
+    });
+    const oor = rows.filter((r) => r.oor);
+    const tag = ba === 0 ? " *base" : "";
+    console.log(
+      pad(ba + tag, 12) +
+        padL(pct(median(rows.map((r) => r.edge))), 12) +
+        padL(oor.length, 10) +
+        padL(Math.round((oor.length / rows.length) * 100), 8) +
+        padL(pct(median(rows.map((r) => r.captured))), 15) +
+        padL(pct(median(rows.map((r) => r.missed))), 13),
+    );
+  }
+  console.log("\n  Trade-off atas: tepi-atas lebih lebar → OOR-atas turun + sebagian pump ke-capture (captured%↑).");
+  console.log("  ⚠️ TAPI bins_above>0 = HOLD base token saat deploy (BUKAN single-side-SOL lagi — safety check");
+  console.log("     executor.js larang bins_above>0 di single-side-SOL) → bawa IL + ubah profil fee. GANTI strategi,");
+  console.log("     bukan tuning lebar. Angka captured = plafon coverage; realisasi butuh paper/live.");
+}
+
 // ── MAIN ────────────────────────────────────────────────────────
 function main() {
   const recs = loadRecords();
@@ -219,6 +283,7 @@ function main() {
 
   const { maps } = fase1(recs);
   fase2(recs, maps);
+  fase3(recs, maps);
 }
 
 main();

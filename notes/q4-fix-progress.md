@@ -21,14 +21,14 @@ di-exclude di SEMUA konsumen auto-learning/sharing/stats yang sudah exclude pape
 |---|--------|------|------|--------|
 | Gate | lessons.js:175-184 | `return` → flag + record | 1 | ✅ |
 | Alert | lessons.js (di gate) | notif Telegram | 2 | ✅ |
-| A | livePerf lessons.js:255 | `&& !p.suspect_pnl` (evolve+Darwin) | 3 | ⬜ |
-| B | getModePerformance:924 | `&& !p.suspect_pnl` (stats/report/briefing/profil) | 3 | ⬜ |
-| C | getPerformanceSummary:934 | `&& !p.suspect_pnl` (/status + /evolve headline) | 3 | ⬜ |
-| D | pushHiveLesson guard:216 | `&& !entry.suspect_pnl` (jangan broadcast bad-data) | 3 | ⬜ |
-| E | recordPoolDeploy guard:223 | `&& !entry.suspect_pnl` (jangan bias screening live) | 3 | ⬜ |
-| F | pushHivePerfEvent guard:284 | `&& !entry.suspect_pnl` | 3 | ⬜ |
-| G | derivLesson tag + getLessonsForPrompt:722 | `lesson.suspect=true` + drop dari prompt | 3 | ⬜ |
-| H | /report default tier (index.js) | baris "⚠️ Suspect (perlu verifikasi): N" (sembunyi N=0) | 3 | ⬜ |
+| A | livePerf lessons.js | `&& !p.suspect_pnl` (evolve+Darwin) | 3 | ✅ |
+| B | getModePerformance | `&& !p.suspect_pnl` (stats/report/briefing/profil) | 3 | ✅ |
+| C | getPerformanceSummary | `&& !p.suspect_pnl` (/status + /evolve headline) | 3 | ✅ |
+| D | pushHiveLesson guard | `&& !entry.suspect_pnl` (jangan broadcast bad-data) | 3 | ✅ |
+| E | recordPoolDeploy guard | `&& !entry.suspect_pnl` (jangan bias screening live) | 3 | ✅ |
+| F | pushHivePerfEvent guard | `&& !entry.suspect_pnl` | 3 | ✅ |
+| G | derivLesson tag + getLessonsForPrompt | `lesson.suspect=true` + drop dari prompt | 3 | ✅ |
+| H | /report default tier (index.js) | baris "⚠️ Suspect (perlu verifikasi): N" (sembunyi N=0) + helper `getSuspectCount()` | 3 | ✅ |
 
 **Batas (sengaja TIDAK disentuh):** anti-flicker `dlmm.js:2414`, `getDeterministicCloseRule`
 `index.js:1346`, perilaku record NON-suspect, eksekusi trade/exit/screening. Semua tambahan
@@ -46,5 +46,5 @@ di-exclude di SEMUA konsumen auto-learning/sharing/stats yang sudah exclude pape
 - ✅ FASE 0 — recon + keputusan
 - ✅ FASE 1 — RECORD + FLAG (gate buang→flag `suspect_pnl`; entry simpan flag+reason)
 - ✅ FASE 2 — ALERT operator (notif Telegram fire-and-forget + fail-open di blok gate)
-- ⬜ FASE 3 — KARANTINA + /report
+- ✅ FASE 3 — KARANTINA (A–H: filter livePerf/stats + guard hive/pool-memory + drop lesson prompt + /report suspect line)
 - ⬜ VERIFIKASI smoke + npm test

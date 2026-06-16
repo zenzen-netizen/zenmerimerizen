@@ -229,25 +229,27 @@ export async function recordPerformance(perf) {
 
   data.performance.push(entry);
 
-  // Derive and store a lesson. Paper (sim) lessons are TAGGED so live consumers
-  // can exclude them (getLessonsForPrompt) — and a sim lesson is never pushed to
-  // the shared hive.
+  // Derive and store a lesson. Paper (sim) AND suspect lessons are TAGGED so live
+  // consumers can exclude them (getLessonsForPrompt) — and neither is ever pushed to
+  // the shared hive (a suspect close is unverified data; don't broadcast it).
   const lesson = derivLesson(entry);
   if (lesson) {
     if (entry.paper) lesson.paper = true;
+    if (entry.suspect_pnl) lesson.suspect = true;
     data.lessons.push(lesson);
-    log("lessons", `New lesson${entry.paper ? " [paper]" : ""}: ${lesson.rule}`);
+    log("lessons", `New lesson${entry.paper ? " [paper]" : ""}${entry.suspect_pnl ? " [suspect]" : ""}: ${lesson.rule}`);
   }
 
   save(data);
-  if (lesson && !entry.paper) {
+  if (lesson && !entry.paper && !entry.suspect_pnl) {
     void pushHiveLesson(lesson);
   }
 
-  // Update pool-level memory — LIVE closes only. Paper outcomes never touch
-  // pool-memory.json so they can't bias live screening once you flip to live.
+  // Update pool-level memory — LIVE, non-suspect closes only. Paper outcomes never
+  // touch pool-memory.json (so they can't bias live screening once you flip to live),
+  // and a suspect (unverified ≤−90%) close is quarantined the same way.
   // (return lesson so callers can include it in close notifications)
-  if (perf.pool && !entry.paper) {
+  if (perf.pool && !entry.paper && !entry.suspect_pnl) {
     const { recordPoolDeploy } = await import("./pool-memory.js");
     recordPoolDeploy(perf.pool, {
       pool_name: perf.pool_name,
@@ -278,8 +280,9 @@ export async function recordPerformance(perf) {
   // if this box is later flipped to live with paper history still on file.
   // LIVE records of the ACTIVE racikan only — paper closes never move real
   // thresholds/Darwin weights, and a different racikan's records are isolated out
-  // (keepActiveRacikan) so each racikan evolves on its own trades.
-  const livePerf = data.performance.filter((p) => !p.paper && keepActiveRacikan(p));
+  // (keepActiveRacikan) so each racikan evolves on its own trades. Suspect
+  // (unverified ≤−90%) closes are also excluded so bad-data can't steer evolution.
+  const livePerf = data.performance.filter((p) => !p.paper && !p.suspect_pnl && keepActiveRacikan(p));
   if (livePerf.length > 0 && livePerf.length % MIN_EVOLVE_POSITIONS === 0) {
     // Auto-evolve threshold writer — gated by config.learning.evolveEnabled (FREEZE
     // baseline). false = FROZEN: skip the auto-write entirely (no user-config write, no
@@ -307,8 +310,9 @@ export async function recordPerformance(perf) {
     }
   }
 
-  // Sim closes are never broadcast to the shared hive (would contaminate other bots).
-  if (!entry.paper) {
+  // Sim AND suspect closes are never broadcast to the shared hive (would contaminate
+  // other bots — paper is sim data, suspect is unverified ≤−90% data).
+  if (!entry.paper && !entry.suspect_pnl) {
     void pushHivePerformanceEvent({
       ...entry,
       base_mint: perf.base_mint || null,
@@ -748,6 +752,9 @@ export function getLessonsForPrompt(opts = {}) {
   if (!isPaperMode() && !config.experiments?.usePaperHistoryWhenLive) {
     data.lessons = data.lessons.filter((l) => !l.paper);
   }
+  // Suspect (unverified ≤−90%) lessons never enter the prompt, in either mode — a
+  // bad-data artifact must not steer the agent until the operator verifies it.
+  data.lessons = data.lessons.filter((l) => !l.suspect);
   if (data.lessons.length === 0) return null;
 
   // Smaller caps for automated cycles — they don't need the full lesson history
@@ -947,8 +954,21 @@ export function getModePerformance() {
     : all.filter((p) => !p.paper);
   // Per-racikan isolation: stats/reports/briefings see only the ACTIVE racikan's
   // records, so a prior racikan's trades never skew the current racikan's numbers
-  // (the headline now matches the "By racikan" breakdown).
-  return modeRows.filter(keepActiveRacikan);
+  // (the headline now matches the "By racikan" breakdown). Suspect (unverified
+  // ≤−90%) closes are excluded too so bad-data can't contaminate user-facing stats.
+  return modeRows.filter((p) => keepActiveRacikan(p) && !p.suspect_pnl);
+}
+
+/**
+ * Count of SUSPECT (flagged ≤−90% non-stopLoss) closed positions in the current
+ * mode + ACTIVE racikan — the records EXCLUDED from getModePerformance/stats until an
+ * operator verifies them (rug asli vs bad-data). Drives the "⚠️ Suspect" line in
+ * /report. Returns 0 when none, so the caller can hide the line.
+ */
+export function getSuspectCount() {
+  const all = load().performance || [];
+  const modeRows = isPaperMode() ? all.filter((p) => p.paper) : all.filter((p) => !p.paper);
+  return modeRows.filter((p) => keepActiveRacikan(p) && p.suspect_pnl).length;
 }
 
 /**
@@ -957,8 +977,9 @@ export function getModePerformance() {
 export function getPerformanceSummary() {
   const data = load();
   // Active-racikan isolation: the /status + /evolve headline counts only the
-  // current racikan's closed positions.
-  const p = (data.performance || []).filter(keepActiveRacikan);
+  // current racikan's closed positions. Suspect (unverified ≤−90%) closes are
+  // excluded so a flagged bad-data artifact can't skew the headline stats.
+  const p = (data.performance || []).filter((p) => keepActiveRacikan(p) && !p.suspect_pnl);
 
   if (p.length === 0) return null;
 

@@ -12,7 +12,7 @@ import { confirmIndicatorPreset } from "./tools/chart-indicators.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
 import { config, reloadScreeningThresholds, computeDeployAmount, persistConfigChange } from "./config.js";
 import { getGasStats } from "./gas-tracker.js";
-import { evolveThresholds, getPerformanceSummary, getModePerformance, listLessons, classifySession, currentWibSession, getLifetimePerformance, getPerformanceForRacikan, listRacikanInPerformance } from "./lessons.js";
+import { evolveThresholds, getPerformanceSummary, getModePerformance, getSuspectCount, listLessons, classifySession, currentWibSession, getLifetimePerformance, getPerformanceForRacikan, listRacikanInPerformance } from "./lessons.js";
 import { buildTradeReport, computeCostDragPct } from "./reports.js";
 import { getLlmCostStats } from "./llm-cost-tracker.js";
 import { executeTool, registerCronRestarter } from "./tools/executor.js";
@@ -323,8 +323,14 @@ async function buildReportForArg(arg = "") {
     identity: formatIdentity(),
     quant,
   });
+  // Surface any SUSPECT (flagged ≤−90% non-stopLoss) closes that are being held out
+  // of the stats above until verified — so the operator knows they exist (hidden if 0).
+  const suspectN = getSuspectCount();
+  const suspectLine = suspectN > 0
+    ? `\n\n⚠️ <b>Suspect (perlu verifikasi): ${suspectN}</b>\n<i>Close ≤−90% non-stopLoss — dikecualikan dari stats di atas sampai dicek (rug asli vs bad-data).</i>`
+    : "";
   const tracker = formatPnlTracker(modePerf);
-  return tracker ? `${rep}\n\n${tracker}` : rep;
+  return `${rep}${tracker ? `\n\n${tracker}` : ""}${suspectLine}`;
 }
 
 /**

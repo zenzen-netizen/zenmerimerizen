@@ -26,5 +26,7 @@ Rug headline: **1B-SOL** pnl_pct −45.05% / pnl_usd −16.14 / init $35.8 / tro
       → baseline (1.5/1) net −$8.03 ≈ raw aktual. D=0.5 > D=1.0 konsisten; T rendah lebih baik;
         top (0.8/0.5) +$10.39 PF 20.66 = PLAFON OPTIMIS (model asumsi jual dekat puncak) → arah valid,
         magnitudo TAK dipercaya → konfirmasi paper.
-- ⬜ FASE 3 — OUTPUT tabel + rekomendasi + SANITY (raw-actual ≈ /report) → `notes/backtest-results.md`
-- ⬜ VERIFIKASI — jalankan, sanity, SHA lessons.json tak berubah, npm test
+- ✅ FASE 3 — OUTPUT tabel + rekomendasi + SANITY (raw-actual = /report PERSIS) → `notes/backtest-results.md`
+      → REKOMENDASI: stopLoss TETAP −12 (level inert utk buku non-rug; rug gap lewat ambang → screening,
+        bukan SL); trailing uji drop 1.0→0.5 + trigger 1.5→~1.0 via PAPER (model = plafon optimis).
+- ✅ VERIFIKASI — script jalan, sanity ✓, lessons.json SHA tak berubah, npm test hijau

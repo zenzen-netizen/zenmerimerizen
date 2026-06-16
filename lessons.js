@@ -189,6 +189,22 @@ export async function recordPerformance(perf) {
     : null;
   if (suspiciousAbsurdClosedPnl) {
     log("lessons_warn", `SUSPECT closed PnL recorded (NOT dropped) for ${perf.pool_name || perf.pool}: pnl_pct=${pnl_pct.toFixed(2)} reason=${perf.close_reason} — quarantined from auto-learning/stats until verified (rug asli vs bad-data)`);
+    // Alert the operator so a flagged close gets eyes-on (rug asli vs bad-data).
+    // Fire-and-forget + fail-open: a Telegram hiccup must never block recording.
+    void (async () => {
+      try {
+        const { sendMessage, isEnabled } = await import("./telegram.js");
+        if (!isEnabled()) return;
+        await sendMessage(
+          `⚠️ Close ${pnl_pct.toFixed(1)}% (non-stopLoss) direkam SUSPECT — cek rug asli vs bad-data.\n` +
+          `Pool: ${perf.pool_name || perf.pool || "?"}\n` +
+          `Alasan close: ${perf.close_reason || "?"}\n` +
+          `Dikarantina dari auto-learning + stats sampai diverifikasi.`
+        );
+      } catch (e) {
+        log("lessons_warn", `Suspect-PnL alert failed (fail-open): ${e.message}`);
+      }
+    })();
   }
 
   const signalSnapshot = buildSignalSnapshot(perf);

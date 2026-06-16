@@ -20,7 +20,7 @@ di-exclude di SEMUA konsumen auto-learning/sharing/stats yang sudah exclude pape
 | # | Lokasi | Aksi | Fase | Status |
 |---|--------|------|------|--------|
 | Gate | lessons.js:175-184 | `return` → flag + record | 1 | ✅ |
-| Alert | lessons.js (di gate) | notif Telegram | 2 | ⬜ |
+| Alert | lessons.js (di gate) | notif Telegram | 2 | ✅ |
 | A | livePerf lessons.js:255 | `&& !p.suspect_pnl` (evolve+Darwin) | 3 | ⬜ |
 | B | getModePerformance:924 | `&& !p.suspect_pnl` (stats/report/briefing/profil) | 3 | ⬜ |
 | C | getPerformanceSummary:934 | `&& !p.suspect_pnl` (/status + /evolve headline) | 3 | ⬜ |
@@ -45,6 +45,6 @@ di-exclude di SEMUA konsumen auto-learning/sharing/stats yang sudah exclude pape
 ## Progres fase
 - ✅ FASE 0 — recon + keputusan
 - ✅ FASE 1 — RECORD + FLAG (gate buang→flag `suspect_pnl`; entry simpan flag+reason)
-- ⬜ FASE 2 — ALERT operator
+- ✅ FASE 2 — ALERT operator (notif Telegram fire-and-forget + fail-open di blok gate)
 - ⬜ FASE 3 — KARANTINA + /report
 - ⬜ VERIFIKASI smoke + npm test

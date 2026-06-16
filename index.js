@@ -728,8 +728,11 @@ export async function runScreeningCycle({ silent = false } = {}) {
   try {
     // Reuse pre-fetched balance — no extra RPC call needed
     const currentBalance = preBalance;
-    const deployAmount = computeDeployAmount(currentBalance.sol);
-    log("cron", `Computed deploy amount: ${deployAmount} SOL (wallet: ${currentBalance.sol} SOL)`);
+    // "maximize" sizing splits the wallet across the slots still open; "fixed"
+    // ignores slotsRemaining. prePositions is the fresh force:true count above.
+    const slotsRemaining = Math.max(1, config.risk.maxPositions - prePositions.total_positions);
+    const deployAmount = computeDeployAmount(currentBalance.sol, { slotsRemaining });
+    log("cron", `Computed deploy amount: ${deployAmount} SOL (wallet: ${currentBalance.sol} SOL, slots left: ${slotsRemaining}, mode: ${config.management.sizingMode})`);
 
     // Load active strategy
     const activeStrategy = getActiveStrategy();
@@ -1547,7 +1550,8 @@ function buildRangeEfficiencyLines(pos, tracked) {
 }
 
 function formatWalletStatus(wallet, positions, rent = null) {
-  const deployAmount = computeDeployAmount(wallet.sol);
+  const slotsRemaining = Math.max(1, config.risk.maxPositions - (positions?.total_positions ?? 0));
+  const deployAmount = computeDeployAmount(wallet.sol, { slotsRemaining });
   const hive = isHiveMindEnabled() ? "on" : "off";
   const gasReserve = config.management?.gasReserve ?? 0;
   const lines = [
@@ -3217,7 +3221,9 @@ async function deployLatestCandidate(index) {
       throw new Error(`NO DEPLOY: only cached candidate ${candidate.name} is not worth deploying — ${skipReason}`);
     }
   }
-  const deployAmount = computeDeployAmount((await getWalletBalances()).sol);
+  const [balForDeploy, posForDeploy] = await Promise.all([getWalletBalances(), getMyPositions({ force: true }).catch(() => ({ total_positions: 0 }))]);
+  const slotsLeft = Math.max(1, config.risk.maxPositions - (posForDeploy?.total_positions ?? 0));
+  const deployAmount = computeDeployAmount(balForDeploy.sol, { slotsRemaining: slotsLeft });
   const binsBelow = computeBinsBelow(candidate.volatility);
   const result = await executeTool("deploy_position", {
     pool_address: candidate.pool,

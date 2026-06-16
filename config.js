@@ -240,6 +240,16 @@ export const config = {
     gasReserveBufferDays:  u.gasReserveBufferDays  ?? 14,
     gasReserveFloorSol:    u.gasReserveFloorSol    ?? 0.03,
     positionSizePct:       u.positionSizePct       ?? 0.35,
+    // Sizing mode: "fixed" (factory) = computeDeployAmount uses the legacy
+    // walletSol×positionSizePct formula (slot-blind). "maximize" = split the
+    // deployable wallet evenly across the REMAINING position slots, reserving
+    // gas + rent per slot, so every maxPositions slot can open without the
+    // last one failing on rent. Default "fixed" → behavior byte-identical.
+    sizingMode:            u.sizingMode            ?? "fixed",
+    // SOL locked as account rent per open DLMM position (refundable on close).
+    // 0 (factory) = balance check & sizing ignore rent (legacy). >0 (e.g. 0.057)
+    // = balance check reserves it AND "maximize" sizing reserves it per slot.
+    rentPerPositionSol:    u.rentPerPositionSol    ?? 0,
     // Trailing take-profit
     trailingTakeProfit:    u.trailingTakeProfit    ?? true,
     trailingTriggerPct:    u.trailingTriggerPct    ?? 3,    // activate trailing at X% PnL
@@ -470,21 +480,43 @@ export const config = {
 
 /**
  * Compute the optimal deploy amount for a given wallet balance.
- * Scales position size with wallet growth (compounding).
  *
- * Formula: clamp(deployable × positionSizePct, floor=deployAmountSol, ceil=maxDeployAmount)
+ * Two modes (config.management.sizingMode):
  *
- * Examples (defaults: gasReserve=0.2, positionSizePct=0.35, floor=0.5):
- *   0.8 SOL wallet → 0.6 SOL deploy  (floor)
- *   2.0 SOL wallet → 0.63 SOL deploy
- *   3.0 SOL wallet → 0.98 SOL deploy
- *   4.0 SOL wallet → 1.33 SOL deploy
+ * "fixed" (factory) — scales position size with wallet growth (compounding):
+ *   Formula: clamp(deployable × positionSizePct, floor=deployAmountSol, ceil=maxDeployAmount)
+ *   Examples (defaults: gasReserve=0.2, positionSizePct=0.35, floor=0.5):
+ *     0.8 SOL wallet → 0.6 SOL deploy (floor) · 2.0 → 0.63 · 3.0 → 0.98 · 4.0 → 1.33
+ *   Slot-blind: ignores how many position slots remain.
+ *
+ * "maximize" — fills the wallet evenly across the REMAINING slots, reserving
+ *   gas + rent per slot so every slot can open without the last failing on rent:
+ *     perSlot = (walletSol − gasReserve − rentPerPositionSol × slotsRemaining) / slotsRemaining
+ *   Re-derived from the CURRENT wallet on every cycle (so it self-corrects as
+ *   positions fill), floored to 3 decimals so it NEVER over-commits the balance
+ *   check, and clamped to [0, maxDeployAmount] — the deployAmountSol floor is
+ *   intentionally skipped (a 0.13 SOL/slot deploy must be allowed). slotsRemaining
+ *   defaults to maxPositions (the fresh-start, most conservative per-slot size).
+ *
+ * @param {number} walletSol  current free wallet SOL
+ * @param {{slotsRemaining?: number}} [opts]  open slots left to fill (maximize mode)
  */
-export function computeDeployAmount(walletSol) {
+export function computeDeployAmount(walletSol, opts = {}) {
   const reserve  = config.management.gasReserve      ?? 0.2;
-  const pct      = config.management.positionSizePct ?? 0.35;
-  const floor    = config.management.deployAmountSol;
   const ceil     = config.risk.maxDeployAmount;
+
+  if (config.management.sizingMode === "maximize") {
+    const rent  = Math.max(0, config.management.rentPerPositionSol ?? 0);
+    const slots = Math.max(1, Math.floor(opts.slotsRemaining ?? config.risk.maxPositions ?? 1));
+    const deployable = Math.max(0, walletSol - reserve - rent * slots);
+    const perSlot    = deployable / slots;
+    // floor to 3 decimals (never round UP past what the balance check allows)
+    const floored    = Math.floor(perSlot * 1000) / 1000;
+    return Math.max(0, Math.min(ceil, floored));
+  }
+
+  const pct        = config.management.positionSizePct ?? 0.35;
+  const floor      = config.management.deployAmountSol;
   const deployable = Math.max(0, walletSol - reserve);
   const dynamic    = deployable * pct;
   const result     = Math.min(ceil, Math.max(floor, dynamic));
@@ -573,6 +605,12 @@ export function reloadScreeningThresholds() {
     if (fresh.activeSetup !== undefined) config.activeSetup = fresh.activeSetup;
     // Auto-evolve freeze: hand-edits to evolveEnabled apply without a restart too.
     if (fresh.evolveEnabled !== undefined) { if (!config.learning) config.learning = {}; config.learning.evolveEnabled = fresh.evolveEnabled; }
+    // Sizing mode + per-position rent reserve: pick up hand-edits without a restart.
+    if (fresh.sizingMode !== undefined) config.management.sizingMode = fresh.sizingMode;
+    if (fresh.rentPerPositionSol !== undefined) {
+      const rv = numericConfig(fresh.rentPerPositionSol);
+      if (rv != null) config.management.rentPerPositionSol = rv;
+    }
     const minBinsBelow = numericConfig(fresh.minBinsBelow) ?? config.strategy.minBinsBelow;
     const maxBinsBelow = numericConfig(fresh.maxBinsBelow) ?? numericConfig(fresh.binsBelow) ?? config.strategy.maxBinsBelow;
     const defaultBinsBelow = numericConfig(fresh.defaultBinsBelow) ?? numericConfig(fresh.binsBelow) ?? config.strategy.defaultBinsBelow ?? maxBinsBelow;

@@ -1015,15 +1015,20 @@ async function runSafetyChecks(name, args) {
         };
       }
 
-      // Check SOL balance
+      // Check SOL balance. Reserve account rent per position (~0.057 SOL, locked
+      // on deploy, refundable on close) on top of gas when rentPerPositionSol>0,
+      // so rent never silently eats the gas reserve and the Nth position can't
+      // fail mid-fill (audit fix). rentPerPositionSol=0 (factory) → legacy check.
       if (process.env.DRY_RUN !== "true") {
         const balance = await getWalletBalances();
         const gasReserve = config.management.gasReserve;
-        const minRequired = amountY + gasReserve;
+        const rentReserve = Math.max(0, config.management.rentPerPositionSol ?? 0);
+        const minRequired = amountY + gasReserve + rentReserve;
         if (balance.sol < minRequired) {
+          const rentNote = rentReserve > 0 ? ` + ${rentReserve} rent` : "";
           return {
             pass: false,
-            reason: `Insufficient SOL: have ${balance.sol} SOL, need ${minRequired} SOL (${amountY} deploy + ${gasReserve} gas reserve).`,
+            reason: `Insufficient SOL: have ${balance.sol} SOL, need ${minRequired} SOL (${amountY} deploy + ${gasReserve} gas reserve${rentNote}).`,
           };
         }
       }

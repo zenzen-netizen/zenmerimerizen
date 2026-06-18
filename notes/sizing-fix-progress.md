@@ -7,7 +7,7 @@
 ## Status fase
 - ✅ FASE 0 — RECON (temuan di bawah)
 - ✅ FASE 1 — ADAPTIVE SLOTS (computeDeployAmount maximize)
-- ⬜ FASE 2 — SKIP-SCREENING kalau broke (stop burn LLM)
+- ✅ FASE 2 — SKIP-SCREENING kalau broke (stop burn LLM)
 - ⬜ FASE 3 — VERIFIKASI + restart
 
 ## FASE 0 — TEMUAN
@@ -59,3 +59,14 @@ TIDAK kena skip ini (posisi terbuka tetap dikelola).
   "modal kurang" yang jelas (bukan error generic).
 - SMOKE (fungsi ASLI config.js): 0.334→0.247(1pos) · 0.4→0.128(2pos) · 0.15→0(skip) · 0.087→0 · 1.0→0.428(2pos).
   Semua target cocok. npm test PASS. Commit FASE 1.
+
+## FASE 2 — IMPLEMENTASI
+- TEMUAN: pre-skip "insufficient SOL" SUDAH ADA di index.js:673, TAPI pakai `deployAmountSol+gasReserve=0.13`
+  → abai rent (0.057) & sizing adaptif. Wallet 0.334 > 0.13 → lolos → tetap burn. Itu lubangnya.
+- FIX: blok diganti jadi sizing-aware (sebelum liveMessage/getTopCandidates/LLM):
+  `plannedDeploy = computeDeployAmount(preBalance.sol,{slotsRemaining})` (per-slot ASLI, rent-aware);
+  skip kalau `plannedDeploy < minDeployAmount()` (maximize broke→0) ATAU `wallet < planned+gas+rent`
+  (afford check, nutupin fixed-mode). Log "modal kurang", appendDecision skip, return — NOL LLM.
+  Dry-run dilewati (sama spt guard lama). Management cycle = fungsi lain, tak tersentuh.
+- VERIFIKASI keputusan (config live): 0.334→PROCEED(0.247) · 0.4→PROCEED(0.128) · 0.15→SKIP · 0.087(1pos)→SKIP.
+  Bug 0.334 kini PROCEED deploy valid (bukan stuck). npm test PASS. Commit FASE 2.

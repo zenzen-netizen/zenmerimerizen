@@ -669,16 +669,29 @@ export async function runScreeningCycle({ silent = false } = {}) {
       _screeningBusy = false;
       return screenReport;
     }
-    const minRequired = config.management.deployAmountSol + config.management.gasReserve;
+    // Broke-skip: bail BEFORE any candidate fetch or the (expensive) screening LLM
+    // when we can't open a new position at the min-deploy floor. Sizing-aware: ask
+    // computeDeployAmount for the REAL per-slot amount (maximize reserves gas + rent
+    // per slot and returns 0 when the wallet can't size one slot ≥ min) and also
+    // require the wallet to actually afford that one position + gas + rent (covers
+    // fixed mode, whose floor ignores affordability). The old check compared only
+    // deployAmountSol + gasReserve — it ignored rent AND adaptive slot sizing, so a
+    // 0.334 SOL wallet sailed past it and burned the LLM on a 0.095/slot deploy the
+    // safety floor would always reject (the stuck-retry bug).
     const isDryRun = process.env.DRY_RUN === "true";
-    if (!isDryRun && preBalance.sol < minRequired) {
-      log("cron", `Screening skipped — insufficient SOL (${preBalance.sol.toFixed(3)} < ${minRequired} needed for deploy + gas)`);
-      screenReport = `Screening skipped — insufficient SOL (${preBalance.sol.toFixed(3)} < ${minRequired} needed for deploy + gas).`;
+    const slotsRemaining = Math.max(1, config.risk.maxPositions - prePositions.total_positions);
+    const plannedDeploy = computeDeployAmount(preBalance.sol, { slotsRemaining });
+    const rentReserve = Math.max(0, config.management.rentPerPositionSol ?? 0);
+    const needForOne = plannedDeploy + config.management.gasReserve + rentReserve;
+    if (!isDryRun && (plannedDeploy < minDeployAmount() || preBalance.sol < needForOne)) {
+      const needNote = (minDeployAmount() + config.management.gasReserve + rentReserve).toFixed(3);
+      log("cron", `Screening skipped — modal kurang (wallet ${preBalance.sol.toFixed(3)} SOL, sizing/slot ${plannedDeploy} < min ${minDeployAmount()}; butuh ~${needNote} SOL utk 1 posisi). No LLM call.`);
+      screenReport = `Screening skipped — modal kurang (wallet ${preBalance.sol.toFixed(3)} SOL < ~${needNote} untuk 1 posisi ≥ ${minDeployAmount()} SOL + gas + rent).`;
       appendDecision({
         type: "skip",
         actor: "SCREENER",
-        summary: "Screening skipped",
-        reason: `Insufficient SOL (${preBalance.sol.toFixed(3)} < ${minRequired})`,
+        summary: "Screening skipped — modal kurang",
+        reason: `Sizing/slot ${plannedDeploy} < min ${minDeployAmount()} (wallet ${preBalance.sol.toFixed(3)})`,
       });
       _screeningBusy = false;
       return screenReport;

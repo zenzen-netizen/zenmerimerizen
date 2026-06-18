@@ -10,7 +10,7 @@ import { getWalletBalances, getSolMarketRegime } from "./tools/wallet.js";
 import { getTopCandidates, formatYieldToMe } from "./tools/screening.js";
 import { confirmIndicatorPreset } from "./tools/chart-indicators.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
-import { config, reloadScreeningThresholds, computeDeployAmount, persistConfigChange } from "./config.js";
+import { config, reloadScreeningThresholds, computeDeployAmount, minDeployAmount, persistConfigChange } from "./config.js";
 import { getGasStats } from "./gas-tracker.js";
 import { evolveThresholds, getPerformanceSummary, getModePerformance, getSuspectCount, listLessons, classifySession, currentWibSession, getLifetimePerformance, getPerformanceForRacikan, listRacikanInPerformance } from "./lessons.js";
 import { buildTradeReport, computeCostDragPct } from "./reports.js";
@@ -3233,6 +3233,12 @@ async function deployLatestCandidate(index) {
   const [balForDeploy, posForDeploy] = await Promise.all([getWalletBalances(), getMyPositions({ force: true }).catch(() => ({ total_positions: 0 }))]);
   const slotsLeft = Math.max(1, config.risk.maxPositions - (posForDeploy?.total_positions ?? 0));
   const deployAmount = computeDeployAmount(balForDeploy.sol, { slotsRemaining: slotsLeft });
+  // 0 = adaptive sizing can't reach the min-deploy floor (wallet too small). Fail
+  // with a clear "modal kurang" message instead of letting the executor reject a
+  // sub-min / zero amount with a generic error.
+  if (deployAmount < minDeployAmount()) {
+    throw new Error(`NO DEPLOY: modal kurang — wallet ${balForDeploy.sol.toFixed(3)} SOL tak cukup untuk satu posisi ≥ ${minDeployAmount()} SOL (gas ${config.management.gasReserve} + rent ${config.management.rentPerPositionSol}/pos).`);
+  }
   const binsBelow = computeBinsBelow(candidate.volatility);
   const result = await executeTool("deploy_position", {
     pool_address: candidate.pool,

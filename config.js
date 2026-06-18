@@ -479,6 +479,17 @@ export const config = {
 };
 
 /**
+ * Minimum SOL a single position may deploy — our sanity floor against dust
+ * positions (NOT a Meteora protocol limit; Meteora accepts smaller deposits).
+ * Shared by computeDeployAmount (maximize adaptive slots) AND the deploy safety
+ * check (executor.js) so the two can never disagree — a divergence there is what
+ * let sizing emit a sub-min amount the check then rejected (the stuck-retry bug).
+ */
+export function minDeployAmount() {
+  return Math.max(0.1, config.management.deployAmountSol ?? 0.1);
+}
+
+/**
  * Compute the optimal deploy amount for a given wallet balance.
  *
  * Two modes (config.management.sizingMode):
@@ -489,14 +500,17 @@ export const config = {
  *     0.8 SOL wallet → 0.6 SOL deploy (floor) · 2.0 → 0.63 · 3.0 → 0.98 · 4.0 → 1.33
  *   Slot-blind: ignores how many position slots remain.
  *
- * "maximize" — fills the wallet evenly across the REMAINING slots, reserving
- *   gas + rent per slot so every slot can open without the last failing on rent:
- *     perSlot = (walletSol − gasReserve − rentPerPositionSol × slotsRemaining) / slotsRemaining
- *   Re-derived from the CURRENT wallet on every cycle (so it self-corrects as
- *   positions fill), floored to 3 decimals so it NEVER over-commits the balance
- *   check, and clamped to [0, maxDeployAmount] — the deployAmountSol floor is
- *   intentionally skipped (a 0.13 SOL/slot deploy must be allowed). slotsRemaining
- *   defaults to maxPositions (the fresh-start, most conservative per-slot size).
+ * "maximize" — fills the wallet across the REMAINING slots with ADAPTIVE slot
+ *   count, reserving gas + rent per slot so every slot opens without the last
+ *   failing on rent:
+ *     perSlot(N) = (walletSol − gasReserve − rentPerPositionSol × N) / N
+ *   Picks the LARGEST N ∈ [1..slotsRemaining] whose perSlot stays ≥ minDeployAmount,
+ *   so it opens as many positions as the wallet can size at/above the floor (small
+ *   wallet → falls back to one bigger position). If even N=1 can't clear the floor,
+ *   returns 0 (explicit "can't deploy"). Re-derived from the CURRENT wallet every
+ *   cycle (self-corrects as positions fill), floored to 3 decimals so it NEVER
+ *   over-commits the balance check, clamped to maxDeployAmount. slotsRemaining
+ *   defaults to maxPositions (fresh-start, most conservative).
  *
  * @param {number} walletSol  current free wallet SOL
  * @param {{slotsRemaining?: number}} [opts]  open slots left to fill (maximize mode)
@@ -506,13 +520,23 @@ export function computeDeployAmount(walletSol, opts = {}) {
   const ceil     = config.risk.maxDeployAmount;
 
   if (config.management.sizingMode === "maximize") {
-    const rent  = Math.max(0, config.management.rentPerPositionSol ?? 0);
-    const slots = Math.max(1, Math.floor(opts.slotsRemaining ?? config.risk.maxPositions ?? 1));
-    const deployable = Math.max(0, walletSol - reserve - rent * slots);
-    const perSlot    = deployable / slots;
-    // floor to 3 decimals (never round UP past what the balance check allows)
-    const floored    = Math.floor(perSlot * 1000) / 1000;
-    return Math.max(0, Math.min(ceil, floored));
+    const rent     = Math.max(0, config.management.rentPerPositionSol ?? 0);
+    const maxSlots = Math.max(1, Math.floor(opts.slotsRemaining ?? config.risk.maxPositions ?? 1));
+    const min      = minDeployAmount();
+    // ADAPTIVE SLOTS. perSlot = (wallet − gas − rent×N)/N decreases monotonically
+    // as N grows (more rent reserved + a smaller share each), so the LARGEST N that
+    // still keeps every slot ≥ min opens as many positions as possible without any
+    // falling under the floor. Iterate N down from the open slots; take the first
+    // that clears min. If even a single position can't reach min (wallet too small),
+    // return 0 — an explicit "can't deploy" signal. Returning a sub-min amount was
+    // the stuck-retry bug: the deploy safety check rejects it, the LLM retries, the
+    // cycle burns. 0 lets callers skip cleanly instead.
+    for (let n = maxSlots; n >= 1; n--) {
+      const deployable = Math.max(0, walletSol - reserve - rent * n);
+      const perSlot    = Math.floor((deployable / n) * 1000) / 1000; // never round UP
+      if (perSlot >= min) return Math.min(ceil, perSlot);
+    }
+    return 0;
   }
 
   const pct        = config.management.positionSizePct ?? 0.35;

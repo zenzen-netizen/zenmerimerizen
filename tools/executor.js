@@ -20,7 +20,7 @@ import { addToBlacklist, removeFromBlacklist, listBlacklist } from "../token-bla
 import { blockDev, unblockDev, listBlockedDevs } from "../dev-blocklist.js";
 import { addSmartWallet, removeSmartWallet, listSmartWallets, checkSmartWalletsOnPool } from "../smart-wallets.js";
 import { getTokenInfo, getTokenHolders, getTokenNarrative } from "./token.js";
-import { config, reloadScreeningThresholds, MIN_SAFE_BINS_BELOW, applyConvictionSizing } from "../config.js";
+import { config, reloadScreeningThresholds, MIN_SAFE_BINS_BELOW, applyConvictionSizing, minDeployAmount } from "../config.js";
 import { validateConfigValue } from "../config-schema.js";
 import { getRecentDecisions } from "../decision-log.js";
 import fs from "fs";
@@ -1003,7 +1003,7 @@ async function runSafetyChecks(name, args) {
         };
       }
 
-      const minDeploy = Math.max(0.1, config.management.deployAmountSol);
+      const minDeploy = minDeployAmount(); // shared floor — see config.js
       if (amountY < minDeploy) {
         return {
           pass: false,

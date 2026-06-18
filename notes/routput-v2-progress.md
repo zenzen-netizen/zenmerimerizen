@@ -14,7 +14,7 @@
 
 ## Status fase
 - ✅ FASE 1 — notifClose decompose (Fee/Efek-harga/Gas) + $/% konsisten (headline=total)
-- ⬜ FASE 2 — metrik fee-density (/positions + /report): fee/$ + fee-APR
+- ✅ FASE 2 — metrik fee-density (/positions + /report): fee/$ + fee-APR
 - ⬜ FASE 3 — /wallet Bebas(cair) vs Real-deploy/slot; fix double-count tertahan
 - ⬜ FASE 4 — glitch cost-drag Quant Edge (kurung) + cek basis modal
 
@@ -24,3 +24,11 @@
   Gas = estimateGasSol(close+claim+swap) ~0.00006 SOL (import dari reports.js, no circular).
   Formatter `usd()` tunggal → sign/presisi seragam. Hapus baris lama "Fees earned (sudah termasuk)" (redundan).
   Verifikasi 3 kasus (fee-nyelametin / rugi / give-back) reconcile sempurna. Commit FASE 1.
+- FASE 2 (reports.js + index.js):
+  · computeTradeStats nambah `fee_pct_capital` (feesTotal/investedTotal×100), `fee_apr_pct`
+    (annualized by Σminutes_in_range, fallback minutes_held), `in_range_min_total`. Live: 0.98% modal, ~76%/th.
+  · formatQuantBlock baris `💧 Fee-density X% modal · ~Y%/th in-range (total fee $Z)` tepat di atas cost-drag
+    (income vs cost berdampingan). Ikut ke briefing (sumber sama) — konsisten.
+  · /positions per-posisi: `💧 fee X.XX%` = SIMPLE fees/value (collected+unclaimed). SENGAJA tak di-annualize:
+    posisi muda (85 mnt) kalau di-APR-kan meledak (~12706% nonsense). APR proper cuma di agregat /report (window stabil).
+  Commit FASE 2.

@@ -41,6 +41,15 @@ export function computeTradeStats(records = []) {
   const grossLoss = Math.abs(sum(losses.map((p) => p.pnl_usd)));
   const feesUsd = sum(fin(perf.map((p) => p.fees_earned_usd)));
 
+  // Fee density — how hard the deployed capital works as FEES, independent of
+  // price PnL. fee% = fees recovered per $ deployed; fee-APR annualizes that by
+  // total in-range time (fees only accrue in range). Pure render metric — the
+  // v2.1 question is whether the narrower bin range packs fees denser.
+  // minutes_in_range falls back to minutes_held when absent.
+  const inRangeMin = sum(fin(perf.map((p) => Number.isFinite(p.minutes_in_range) ? p.minutes_in_range : p.minutes_held)));
+  const feePctCapital = invested > 0 ? (feesUsd / invested) * 100 : null;
+  const feeAprPct = (feePctCapital != null && inRangeMin > 0) ? feePctCapital * (525600 / inRangeMin) : null;
+
   const winPcts = fin(wins.map((p) => p.pnl_pct));
   const lossPcts = fin(losses.map((p) => p.pnl_pct));
   const avgWinUsd = mean(wins.map((p) => p.pnl_usd));
@@ -148,6 +157,9 @@ export function computeTradeStats(records = []) {
     // Net the book would show WITHOUT the single worst loser — exposes tail dominance.
     net_excl_worst_usd: worstUsdRow ? r2(netUsd - worstUsdRow.pnl_usd) : r2(netUsd),
     fees_usd: r2(feesUsd),
+    fee_pct_capital: feePctCapital != null ? r2(feePctCapital) : null,
+    fee_apr_pct: feeAprPct != null ? Math.round(feeAprPct) : null,
+    in_range_min_total: r2(inRangeMin),
     avg_hold_min: r2(mean(fin(perf.map((p) => p.minutes_held)))),
     avg_range_efficiency: r2(mean(fin(perf.map((p) => p.range_efficiency)))),
     max_drawdown_usd: r2(maxDD),
@@ -328,6 +340,13 @@ export function formatQuantBlock(st, { costDragPct = null, costDragHealthyMax = 
     const dd = st.max_drawdown_pct / 100;
     const recov = (1 / (1 - dd) - 1) * 100;
     lines.push(`  Max DD -$${(st.max_drawdown_usd ?? 0).toFixed(2)} (−${st.max_drawdown_pct.toFixed(0)}% dari puncak) → butuh +${recov.toFixed(0)}% buat pulih`);
+  }
+
+  // Fee density — income side (how hard capital works as fees), the counterpart
+  // to cost-drag below. v2.1 lens: did narrower bins pack fees denser?
+  if (Number.isFinite(st.fee_pct_capital)) {
+    const aprStr = Number.isFinite(st.fee_apr_pct) ? ` · ~${st.fee_apr_pct}%/th in-range` : "";
+    lines.push(`  💧 Fee-density ${st.fee_pct_capital}% modal${aprStr} (total fee $${(st.fees_usd ?? 0).toFixed(2)})`);
   }
 
   // Cost drag — only when the caller supplied it (it owns cost/wallet fetch).

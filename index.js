@@ -3501,10 +3501,19 @@ async function telegramHandler(msg) {
         const rent = rentMap[p.position];
         if (rent) { totalRent += rent.sol; if (rent.estimated) anyRentEst = true; }
         const rentStr = rent ? ` · 🔒 ${rent.sol.toFixed(3)}◎${rent.estimated ? " (est)" : ""}` : "";
+        // Fee density so far: simple fees-earned / position-value (% of capital
+        // recovered as fees). NOT annualized — extrapolating a young position's
+        // short window to a year produces nonsense (a fresh pos reads 1000s of %).
+        // The aggregate /report carries the proper fee-APR (large, stable window).
+        const feesSoFar = (p.collected_fees_usd ?? 0) + (p.unclaimed_fees_usd ?? 0);
+        let feeDensStr = "";
+        if (Number.isFinite(p.total_value_usd) && p.total_value_usd > 0 && feesSoFar > 0) {
+          feeDensStr = ` · 💧 fee ${((feesSoFar / p.total_value_usd) * 100).toFixed(2)}%`;
+        }
         lines.push(
           `${i + 1}. ${p.pair}  ${state}`,
           `   value ${cur}${p.total_value_usd ?? "?"} · PnL ${pnl} · fees ${cur}${p.unclaimed_fees_usd ?? "?"}`,
-          `   age ${age} · range ${width}${rentStr}`,
+          `   age ${age} · range ${width}${rentStr}${feeDensStr}`,
         );
       });
       const footer = [

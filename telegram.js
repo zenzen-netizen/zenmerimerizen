@@ -1,6 +1,7 @@
 import fs from "fs";
 import { log } from "./logger.js";
 import { repoPath } from "./repo-root.js";
+import { estimateGasSol } from "./reports.js";
 
 const USER_CONFIG_PATH = repoPath("user-config.json");
 
@@ -598,17 +599,31 @@ export async function notifyDeploy({ pair, amountSol, position, tx, priceRange, 
 export async function notifyClose({ pair, pnlUsd, pnlPct, peakPnlPct, reason, lesson, feesUsd }) {
   if (hasActiveLiveMessage()) return;
   const safePair = escapeHtml(pair || "?");
-  const sign = pnlUsd >= 0 ? "+" : "";
-  const win = (pnlUsd ?? 0) >= 0;
+  const net = pnlUsd ?? 0;
+  const win = net >= 0;
+  // One signed-$ formatter so every figure shares the same sign/precision style.
+  const usd = (v) => `${v >= 0 ? "+" : "-"}$${Math.abs(v).toFixed(2)}`;
   const lines = [
     `${win ? "🟢" : "🔴"} <b>Closed</b> ${safePair}`,
     NOTIF_DIV,
-    `📊 PnL: ${sign}$${(pnlUsd ?? 0).toFixed(2)} (${sign}${(pnlPct ?? 0).toFixed(2)}%)`,
+    // Headline $ and % are the SAME basis: total net, fees INCLUDED (pnl_usd =
+    // leg + fee, verified empirically). No more "$ = price-leg, % = total" split.
+    `📊 Net PnL: ${usd(net)} (${pnlPct >= 0 ? "+" : ""}${(pnlPct ?? 0).toFixed(2)}%)`,
   ];
-  // PnL already includes claimed fees — say so, so a softened/worsened number
-  // is never mistaken for "fees not yet counted".
-  if (feesUsd != null && feesUsd > 0) {
-    lines.push(`💎 Fees earned: +$${feesUsd.toFixed(2)} (sudah termasuk dalam PnL)`);
+  // Decompose the position PnL so a number's SOURCE is legible: how much came
+  // from harvested FEES vs the price leg (IL+drift). Live can't separate IL from
+  // drift (paper can) — fee vs price-effect vs gas is the right granularity.
+  // FEE + EFEK-HARGA = Net PnL exactly (price = net − fee = final − initial).
+  if (feesUsd != null) {
+    const fee = feesUsd;
+    const priceEffect = net - fee;
+    // Gas is a separate wallet-side network cost (NOT part of the position PnL the
+    // DLMM API reports). Rough per-action estimate; real fees aren't captured per tx.
+    const gasSol = estimateGasSol({ close_position: 1, claim_fees: 1, swap_token: 1 });
+    lines.push(
+      `   💎 Fee panen ${usd(fee)}  ·  📈 Efek-harga ${usd(priceEffect)}`,
+      `   ⛽ Gas ~${gasSol.toFixed(5)} SOL (est, di luar PnL — dari wallet)`,
+    );
   }
   // Give-back: how much of a real PROFIT run-up wasn't captured at exit. Gated on
   // a meaningful peak (≥3%) so a stop-loss dump from a near-flat peak isn't framed

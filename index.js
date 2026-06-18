@@ -1558,15 +1558,18 @@ function formatWalletStatus(wallet, positions, rent = null) {
     `Wallet: ${wallet.sol} SOL ($${wallet.sol_usd})`,
     `SOL price: $${wallet.sol_price}`,
     `Open positions: ${positions.total_positions}/${config.risk.maxPositions}`,
-    `Next deploy amount: ${deployAmount} SOL`,
+    `📦 Real deploy/slot: ${deployAmount} SOL  (ukuran per posisi baru)`,
   ];
-  // Held rent (refundable on close) + the SOL that's actually free to deploy.
+  // Liquid SOL = wallet − gasReserve. Rent is NOT subtracted: it already left the
+  // wallet into the on-chain position accounts (it's not part of wallet.sol), so
+  // deducting it here double-counted. Held rent is shown as info — it refunds to
+  // the wallet on close, it isn't an extra reservation against today's balance.
+  const free = wallet.sol - gasReserve;
+  lines.push(`🟢 Bebas (cair): ~${free.toFixed(3)} SOL  (wallet − gasReserve ${gasReserve})`);
   const held = rent?.totalRentSol ?? 0;
   if (held > 0) {
-    lines.push(`🔒 Tertahan (rent ${positions.total_positions} posisi): ~${held.toFixed(3)} SOL${rent?.estimated ? " (sebagian est)" : ""} — refund saat close`);
+    lines.push(`🔒 Tertahan (rent ${positions.total_positions} posisi): ~${held.toFixed(3)} SOL${rent?.estimated ? " (sebagian est)" : ""} — info: sudah keluar wallet, balik saat close`);
   }
-  const free = wallet.sol - held - gasReserve;
-  lines.push(`🟢 SOL bebas efektif: ~${free.toFixed(3)} SOL  (wallet − ${held > 0 ? "tertahan − " : ""}gasReserve ${gasReserve})`);
   lines.push(
     `Dry run: ${process.env.DRY_RUN === "true" ? "yes" : "no"}`,
     `HiveMind: ${hive}`,
@@ -3055,7 +3058,7 @@ function formatHelpText() {
     "",
     "📊 LAPORAN & STATUS",
     "/status — wallet + positions snapshot",
-    "/wallet — wallet, rent tertahan + SOL bebas efektif + SOL tracker (1d/7d/30d)",
+    "/wallet — wallet, SOL bebas (cair) + real deploy/slot + rent tertahan + SOL tracker (1d/7d/30d)",
     "/wallet trackstart <YYYY-MM-DD|off> — anchor tracker SOL ke tanggal",
     "/positions — list open positions (+ rent tertahan)",
     "/pool <n> — detail 1 posisi (+ range-efficiency + rent)",

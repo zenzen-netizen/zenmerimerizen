@@ -15,7 +15,7 @@
 ## Status fase
 - ✅ FASE 1 — notifClose decompose (Fee/Efek-harga/Gas) + $/% konsisten (headline=total)
 - ✅ FASE 2 — metrik fee-density (/positions + /report): fee/$ + fee-APR
-- ⬜ FASE 3 — /wallet Bebas(cair) vs Real-deploy/slot; fix double-count tertahan
+- ✅ FASE 3 — /wallet Bebas(cair) vs Real-deploy/slot; fix double-count tertahan
 - ⬜ FASE 4 — glitch cost-drag Quant Edge (kurung) + cek basis modal
 
 ## Catatan implementasi
@@ -32,3 +32,8 @@
   · /positions per-posisi: `💧 fee X.XX%` = SIMPLE fees/value (collected+unclaimed). SENGAJA tak di-annualize:
     posisi muda (85 mnt) kalau di-APR-kan meledak (~12706% nonsense). APR proper cuma di agregat /report (window stabil).
   Commit FASE 2.
+- FASE 3 (index.js formatWalletStatus): FIX double-count. `Bebas (cair) = wallet − gasReserve`
+  (BUKAN − held lagi). Alasan: rent SOL sudah keluar wallet ke akun posisi on-chain, tak ada di
+  `wallet.sol` → `wallet − held − gas` motong rent dobet (understate). `📦 Real deploy/slot` =
+  computeDeployAmount (per-slot, relabel jelas). `🔒 Tertahan` jadi baris INFO ("sudah keluar wallet,
+  balik saat close") — tak dikurangi dari Bebas. /help diselaraskan. Commit FASE 3.

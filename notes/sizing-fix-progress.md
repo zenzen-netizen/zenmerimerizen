@@ -8,7 +8,7 @@
 - ✅ FASE 0 — RECON (temuan di bawah)
 - ✅ FASE 1 — ADAPTIVE SLOTS (computeDeployAmount maximize)
 - ✅ FASE 2 — SKIP-SCREENING kalau broke (stop burn LLM)
-- ⬜ FASE 3 — VERIFIKASI + restart
+- ✅ FASE 3 — VERIFIKASI (⚠️ restart pm2 meridian id0 PENDING — owner)
 
 ## FASE 0 — TEMUAN
 
@@ -70,3 +70,16 @@ TIDAK kena skip ini (posisi terbuka tetap dikelola).
   Dry-run dilewati (sama spt guard lama). Management cycle = fungsi lain, tak tersentuh.
 - VERIFIKASI keputusan (config live): 0.334→PROCEED(0.247) · 0.4→PROCEED(0.128) · 0.15→SKIP · 0.087(1pos)→SKIP.
   Bug 0.334 kini PROCEED deploy valid (bukan stuck). npm test PASS. Commit FASE 2.
+
+## FASE 3 — VERIFIKASI
+- Invariant terbukti (smoke konsolidasi config live): TIAP PROCEED → deploy ≥ min 0.1; TIAP broke → SKIP
+  tanpa LLM. NOL angka sub-min. (0.10/0.15/0.087→SKIP · 0.20→0.113 · 0.334→0.247 · 0.4→0.128 · 1.0→0.428.)
+- Edge float ketat (wallet=0.334 → 0.247): `amt+gas+rent = 0.334` persis = wallet → executor `< ` = false →
+  LOLOS (margin 0). Floor 3dp menjamin `perSlot×N + gas + rent×N ≤ wallet` (tak pernah over-commit).
+- Tak ada jalur stuck tersisa: semua deploy_position lewat executor minDeploy (`minDeployAmount()` bersama);
+  autonomous tak pernah GENERATE sub-min lagi; manual /deploy throw bersih; dry-run dilewati (paper jalan).
+- npm test PASS. diff --stat: config.js +54/-? · index.js +33 · executor.js +4. 3 commit.
+- ⚠️ Bot LIVE (pm2 meridian id0). Owner restart pm2 tadi SEBELUM commit sizing → **butuh restart lagi**
+  biar fix aktif: `pm2 restart meridian --update-env`.
+
+## DI LUAR LINGKUP (tak disentuh): exit, kriteria-screening, recordPerformance. dual-side = task berikut.

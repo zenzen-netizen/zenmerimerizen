@@ -16,7 +16,7 @@
 - ✅ FASE 1 — notifClose decompose (Fee/Efek-harga/Gas) + $/% konsisten (headline=total)
 - ✅ FASE 2 — metrik fee-density (/positions + /report): fee/$ + fee-APR
 - ✅ FASE 3 — /wallet Bebas(cair) vs Real-deploy/slot; fix double-count tertahan
-- ⬜ FASE 4 — glitch cost-drag Quant Edge (kurung) + cek basis modal
+- ✅ FASE 4 — glitch cost-drag Quant Edge (kurung) + cek basis modal
 
 ## Catatan implementasi
 - FASE 1 (telegram.js notifyClose): headline `📊 Net PnL: $X (Y%)` (keduanya total incl fee).
@@ -37,3 +37,17 @@
   `wallet.sol` → `wallet − held − gas` motong rent dobet (understate). `📦 Real deploy/slot` =
   computeDeployAmount (per-slot, relabel jelas). `🔒 Tertahan` jadi baris INFO ("sudah keluar wallet,
   balik saat close") — tak dikurangi dari Bebas. /help diselaraskan. Commit FASE 3.
+- FASE 4 (reports.js formatQuantBlock): cost-drag lama `(sehat <20% ⚠️ berat)` = verdict "berat"
+  nyempil dalam kurung yang sama dgn "sehat" → kontradiktif. Dirapikan: verdict di LUAR →
+  `Cost-drag ~X%/th (biaya jalan ÷ modal wallet) — ⚠️ berat (ambang <20%)`.
+  Cek basis modal: `wallet.total_usd||sol_usd`, konsisten 3 surface (index 30d, briefing 1d/periodik) —
+  denominator benar (modal yg dipegang), TAK diubah. Fee-density dilabeli `modal-deploy` biar beda
+  dari cost-drag `modal wallet` (dua "modal" beda basis). Commit FASE 4.
+
+## Verifikasi (preview render data live)
+- notifClose: Net PnL headline (total) + sub `💎 Fee panen · 📈 Efek-harga` (jumlah=Net persis) + `⛽ Gas est`.
+  Kasus fee-nyelametin: `+$0.32 = Fee +$0.48 + Efek −$0.16` → transparan.
+- Quant Edge: `💧 Fee-density 0.98% modal-deploy · ~76%/th in-range (total fee $15.49)` + cost-drag rapi.
+- /positions: `💧 fee 2.05%` per posisi (simple, tak meledak).
+- /wallet: `📦 Real deploy/slot 14.5 SOL` + `🟢 Bebas (cair) 18.220 SOL (wallet − gas)` (rent tak dobel).
+- npm test PASS tiap fase. Logika trade/exit/sizing/recordPerformance TAK disentuh.

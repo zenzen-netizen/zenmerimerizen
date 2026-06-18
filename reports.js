@@ -346,13 +346,17 @@ export function formatQuantBlock(st, { costDragPct = null, costDragHealthyMax = 
   // to cost-drag below. v2.1 lens: did narrower bins pack fees denser?
   if (Number.isFinite(st.fee_pct_capital)) {
     const aprStr = Number.isFinite(st.fee_apr_pct) ? ` · ~${st.fee_apr_pct}%/th in-range` : "";
-    lines.push(`  💧 Fee-density ${st.fee_pct_capital}% modal${aprStr} (total fee $${(st.fees_usd ?? 0).toFixed(2)})`);
+    lines.push(`  💧 Fee-density ${st.fee_pct_capital}% modal-deploy${aprStr} (total fee $${(st.fees_usd ?? 0).toFixed(2)})`);
   }
 
   // Cost drag — only when the caller supplied it (it owns cost/wallet fetch).
+  // Basis (modal) = total wallet USD (the capital you hold), distinct from the
+  // fee-density basis above (deployed capital). Verdict sits OUTSIDE the threshold
+  // note so "berat" no longer collides with "sehat" inside one parenthesis.
   if (Number.isFinite(costDragPct)) {
     const ok = costDragPct < costDragHealthyMax;
-    lines.push(`  Cost-drag ~${costDragPct.toFixed(0)}%/th biaya:modal (sehat <${costDragHealthyMax}% ${ok ? "✅" : "⚠️ berat"})`);
+    const verdict = ok ? "✅ sehat" : "⚠️ berat";
+    lines.push(`  Cost-drag ~${costDragPct.toFixed(0)}%/th (biaya jalan ÷ modal wallet) — ${verdict} (ambang <${costDragHealthyMax}%)`);
   }
 
   if (noisy) lines.push(`  <i>⚠️ n=${n} (<${noisyBelow}) — noisy ±10%, baca arah saja, jangan overfit angka.</i>`);

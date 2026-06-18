@@ -209,6 +209,26 @@ keras" — dulu hardcoded di prompt.js, sekarang ikut racikan.
 
 ---
 
+### `sizingMode`
+| | |
+|---|---|
+| **Default** | `fixed` |
+| **Format** | Pilihan: `fixed` \| `maximize` |
+| **Penjelasan** | Cara bot menghitung jumlah deploy. **`fixed` (pabrik)** = rumus lama `(saldo − gasReserve) × positionSizePct`, lalu diclamp ke `deployAmountSol`–`maxDeployAmount`. Buta jumlah-slot: tiap deploy ambil porsi yang sama, jadi posisi terakhir bisa kehabisan SOL. **`maximize`** = bagi saldo **rata ke sisa slot posisi** sambil mencadangkan gas + `rentPerPositionSol` per slot, lalu floor 3-desimal supaya tidak pernah over-commit. Rumus: `(saldo − gasReserve − rentPerPositionSol × sisa_slot) / sisa_slot`. Tujuannya: semua `maxPositions` slot bisa kebuka tanpa yang terakhir gagal gara-gara rent. Di mode `maximize`, floor `deployAmountSol` **sengaja dilewati** (boleh deploy < `deployAmountSol`), tapi gerbang minimum `max(0.1, deployAmountSol)` di executor tetap berlaku — jadi kalau pakai `maximize`, set `deployAmountSol` ≤ ukuran per-slot terkecil (mis. 0.1). |
+| **Contoh** | Wallet 0.4, gas 0.03, rent 0.057, maxPositions 2 → tiap slot `(0.4 − 0.03 − 0.057×2)/2 = 0.128` SOL; dua-duanya kebuka, sisa ≈ gasReserve. |
+
+---
+
+### `rentPerPositionSol`
+| | |
+|---|---|
+| **Default** | `0` |
+| **Format** | Angka desimal (SOL) |
+| **Opsi** | `0` – `1.0` (rent nyata Meteora positionV2 ≈ `0.057`) |
+| **Penjelasan** | SOL yang terkunci sebagai *account rent* tiap posisi DLMM terbuka (balik lagi saat posisi ditutup / refundable). **`0` (pabrik)** = cek saldo & sizing **abaikan** rent (perilaku lama; rent diam-diam makan buffer gas, posisi ke-N bisa gagal). **`> 0`** (mis. `0.057`) = cek saldo pre-deploy mencadangkan rent **di atas** gas, DAN sizing `maximize` mencadangkan rent per slot. Memperbaiki audit `executor.js` (balance check dulu cuma `amount + gasReserve`). |
+
+---
+
 ---
 
 # GRUP 2 — ATURAN KELUAR POSISI (EXIT RULES)

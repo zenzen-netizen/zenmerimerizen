@@ -1783,6 +1783,8 @@ function buildConfigRowMap() {
     "gmgn.rules.requireBbPosition": ["rules.requireBbPosition", fmt(ir.requireBbPosition)],
 
     // ── Management+ (zen) ──
+    sizingMode: ["sizingMode", `${fmt(c.management.sizingMode)}${c.management.sizingMode === "maximize" ? " (bagi modal rata across slot)" : " (pabrik: pct×wallet)"}`],
+    rentPerPositionSol: ["rentPerPositionSol", `${fmt(c.management.rentPerPositionSol)}${(c.management.rentPerPositionSol ?? 0) > 0 ? " 🟢 (dicadangkan/posisi)" : " ⚪ (off)"}`],
     gasReserveAutoTune: ["gasReserveAutoTune", fmt(c.management.gasReserveAutoTune)],
     gasReserveBufferDays: ["gasReserveBufferDays", fmt(c.management.gasReserveBufferDays)],
     gasReserveFloorSol: ["gasReserveFloorSol", fmt(c.management.gasReserveFloorSol)],
@@ -2033,6 +2035,8 @@ function settingValue(key) {
     gasReserveAutoTune: config.management.gasReserveAutoTune,
     gasReserveBufferDays: config.management.gasReserveBufferDays,
     gasReserveFloorSol: config.management.gasReserveFloorSol,
+    sizingMode: config.management.sizingMode,
+    rentPerPositionSol: config.management.rentPerPositionSol,
     // ── menu-editable additions (cascade /settings: cover remaining CONFIG_MAP keys) ──
     // screening
     minTvl: config.screening.minTvl,
@@ -2534,6 +2538,8 @@ const MENU_CONTROLS = {
   "gmgn.rules.minRsi": { input: ["gmgnMinRsi", "Min RSI"] },
   "gmgn.rules.maxRsi": { input: ["gmgnMaxRsi", "Max RSI"] },
   // 🧩 zen-management
+  sizingMode: cycleControl("sizingMode", "Sizing mode", ["fixed", "maximize"], 2),
+  rentPerPositionSol: { input: ["rentPerPositionSol", "Rent/posisi SOL", { digits: 3 }] },
   gasReserveAutoTune: { toggle: ["gasReserveAutoTune", "Gas reserve auto-tune"] },
   gasReserveBufferDays: { input: ["gasReserveBufferDays", "Gas buffer days"] },
   gasReserveFloorSol: { input: ["gasReserveFloorSol", "Gas reserve floor SOL", { digits: 2 }] },

@@ -130,8 +130,8 @@ export const ORIGIN_SECTIONS = [
       {
         id: "zen-management",
         title: "Management+",
-        desc: "Auto-tune cadangan gas.",
-        keys: ["gasReserveAutoTune", "gasReserveBufferDays", "gasReserveFloorSol"],
+        desc: "Mode sizing (maximize: bagi modal rata across slot + cadangkan rent/posisi) + auto-tune cadangan gas.",
+        keys: ["sizingMode", "rentPerPositionSol", "gasReserveAutoTune", "gasReserveBufferDays", "gasReserveFloorSol"],
       },
       {
         id: "zen-strategy",
@@ -338,6 +338,7 @@ export const KEY_SUBCLUSTER = {
   "gmgn.rules.requireAboveSupertrend": "gmgn-ind-rules", "gmgn.rules.minRsi": "gmgn-ind-rules",
   "gmgn.rules.maxRsi": "gmgn-ind-rules", "gmgn.rules.requireBbPosition": "gmgn-ind-rules",
   // zen-management
+  sizingMode: "sizing", rentPerPositionSol: "sizing",
   gasReserveAutoTune: "gas", gasReserveBufferDays: "gas", gasReserveFloorSol: "gas",
   // zen-strategy
   strategyLock: "strategy",

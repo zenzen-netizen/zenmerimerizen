@@ -375,6 +375,8 @@ const toolMap = {
       gasReserveBufferDays: ["management", "gasReserveBufferDays"],
       gasReserveFloorSol: ["management", "gasReserveFloorSol"],
       positionSizePct: ["management", "positionSizePct"],
+      sizingMode: ["management", "sizingMode"],
+      rentPerPositionSol: ["management", "rentPerPositionSol"],
       minAgeBeforeYieldCheck: ["management", "minAgeBeforeYieldCheck"],
       // risk
       maxPositions: ["risk", "maxPositions"],

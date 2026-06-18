@@ -99,6 +99,8 @@ export const CONFIG_SCHEMA = {
   gasReserveBufferDays: num(),
   gasReserveFloorSol: num(),
   positionSizePct: numStrict({ min: 0, max: 1, label: "positionSizePct (fraksi 0–1)" }),
+  sizingMode: enumOf("fixed", "maximize"),
+  rentPerPositionSol: numStrict({ min: 0, max: 1, label: "rentPerPositionSol (SOL/posisi cadangan rent)" }),
   minAgeBeforeYieldCheck: num(),
   // risk
   maxPositions: numStrict({ min: 1, max: 50, integer: true, label: "maxPositions" }),

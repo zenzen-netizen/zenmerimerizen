@@ -1315,6 +1315,20 @@ Summarize the current portfolio health, total fees earned, and performance of al
             }
             continue;
           }
+          // ── Lever A: EMERGENCY (stop-loss) → close directly, LLM-free, no cooldown ──
+          if (exit.action === "STOP_LOSS") {
+            const em = await emergencyCloseDirect(p, exit.reason);
+            if (em.success) break;
+            if (em.needFallback) {
+              // close attempted & failed — fall back to the old path ASAP (after the
+              // helper released _managementBusy), no cooldown (this is an emergency).
+              _pollTriggeredAt = Date.now();
+              log("state", `[PnL poll] EMERGENCY close failed: ${p.pair} — falling back to management ASAP`);
+              runManagementCycle({ silent: true }).catch((e) => log("cron_error", `Poll-triggered (emergency fallback) management failed: ${e.message}`));
+              break;
+            }
+            continue; // skipped (management busy) — let that cycle handle it
+          }
           const cooldownMs = config.schedule.managementIntervalMin * 60 * 1000;
           const sinceLastTrigger = Date.now() - _pollTriggeredAt;
           if (sinceLastTrigger >= cooldownMs) {
@@ -1328,6 +1342,18 @@ Summarize the current portfolio health, total fees earned, and performance of al
         }
         const closeRule = getDeterministicCloseRule(p, config.management);
         if (closeRule) {
+          // ── Lever A: EMERGENCY (rule 1 = stop loss) → close directly, LLM-free, no cooldown ──
+          if (closeRule.rule === 1) {
+            const em = await emergencyCloseDirect(p, closeRule.reason || "stop loss");
+            if (em.success) break;
+            if (em.needFallback) {
+              _pollTriggeredAt = Date.now();
+              log("state", `[PnL poll] EMERGENCY close (rule 1) failed: ${p.pair} — falling back to management ASAP`);
+              runManagementCycle({ silent: true }).catch((e) => log("cron_error", `Poll-triggered (emergency fallback) management failed: ${e.message}`));
+              break;
+            }
+            continue; // skipped (management busy) — let that cycle handle it
+          }
           const cooldownMs = config.schedule.managementIntervalMin * 60 * 1000;
           const sinceLastTrigger = Date.now() - _pollTriggeredAt;
           if (sinceLastTrigger >= cooldownMs) {

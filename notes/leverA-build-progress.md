@@ -33,7 +33,20 @@ Commit: (lihat git log) `feat(gap-fix): phase-1 emergencyCloseDirect helper (lev
   & poller top-guard (`index.js:1236`) sama-sama hormati lock.
 - `node --check index.js` ✅ PASS.
 
-## ⬜ FASE 2 — WIRING poller
+## ✅ FASE 2 — WIRING poller
+Commit: `feat(gap-fix): phase-2 wire emergency direct close into PnL poller (lever A)`
+
+Dua cabang darurat disisipkan di poller (`index.js`, dalam `startCronJobs`):
+- Cabang `exit.action === "STOP_LOSS"` (di atas blok cooldown lama, ~line 1318):
+  `await emergencyCloseDirect(p, exit.reason)` → `success` break; `needFallback` (gagal) →
+  set `_pollTriggeredAt` + `runManagementCycle` ASAP (no cooldown) + break; `skipped` → `continue`.
+- Cabang `closeRule.rule === 1` (di atas blok cooldown lama, ~line 1345): idem dengan
+  `closeRule.reason`.
+- Non-darurat (TRAILING_TP/exit lain/rule 2-5): blok cooldown→runManagementCycle lama **TIDAK
+  disentuh**.
+- Fallback dipicu SETELAH helper return (lock sudah lepas di `finally`) → tidak self-block (D3).
+- `node --check index.js` ✅ PASS.
+
 ## ⬜ FASE 3 — TEST (DRY_RUN + code-review idempotensi + /close regress)
 ## ⬜ FASE 4 — VERIFIKASI & restart pm2 id0 (--update-env) + pantau SL natural berikut
 

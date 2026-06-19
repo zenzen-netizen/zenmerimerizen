@@ -106,10 +106,24 @@ note "Backfilled from on-chain" (BUKAN sekarang).
 - PERTAHANKAN note "Backfilled from on-chain" (jujur: atribusi = ASUMSI racikan-saat-ini).
 - config in-scope (state.js:14 import). Additive ke record backfill DOANG.
 
-## FASE 6 — VERIFIKASI ⬜
+## FASE 6 — VERIFIKASI ✅
 
-- node --check semua file. diff --stat. recordPerformance/exit/screening/sizing NOL diubah.
-- /report label PnL/Net + disclosure. notif==report. branch=experimental. restart pm2 meridian id0 --update-env.
+- **node --check** semua 8 file changed: OK.
+- **diff --stat** (vs 9facff5): briefing 6, index 28, lessons 17, reports 14, state 12, dlmm 24, executor 5, pnl 2
+  = 88+/20−. Cuma DISPLAY + state.js backfill (FASE 5).
+- **recordPerformance/exit/screening/sizing NOL diubah** — diff lessons.js cuma helper baru; diff dlmm.js cuma
+  3 separator + 2 blok return additive (recordPerformance inputs / shouldRejectClosedPnl / exit-rule TAK ada di diff).
+- **Render smoke test** (data nyata, racikan aktif mainzen_v2_1):
+  - headline `💰 PnL: +$1.51` (dulu "Net"), trend `PnL: +$0.21 → +$0.92`, pnl-tracker `net (PnL +$X − biaya $Y)`
+    → "PnL" = dagang, "net" = after-opex, **KONSISTEN**.
+  - disclosure: `⚠️ 93 trade live di luar racikan ini dikecualikan (PnL -$11.20) — /report all buat semua`.
+  - tail line: `tanpa itu PnL +$1.91` (follow-up F3).
+- **branch** = experimental ✓. **pm2 id 0** = `meridian`, cwd `/home/ubuntu/meridianzen` (bot UTAMA) ✓;
+  id 1 = `meridian-v3` (TAK disentuh).
+- **⚠️ RESTART PENDING (owner):** `pm2 restart 0 --update-env` (atau `pm2 restart meridian --update-env`).
+  Kode baru belum ke-load — bot masih jalan kode lama. (Aku tak auto-restart bot LIVE; itu keputusan owner.)
+- **TES manual setelah restart:** `/report` (cek label PnL + baris disclosure), `/wallet`/`/status` (disclosure),
+  dan deploy/close berikut → cek popup notif == angka di /report.
 
 ---
 

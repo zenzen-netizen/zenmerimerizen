@@ -120,6 +120,7 @@ When adding an experiment: add the flag to `config.experiments` (default false),
 
 > **Full-sync rule:** any new feature/config that reaches the Telegram bot must be wired across ALL access surfaces, not just some — `CONFIG_MAP` (`/setcfg`, chat), the `update_config` tool description (definitions.js), `formatFullConfig()` (`/config`), the `/settings` button menu (`renderSettingsMenu` + `settingValue` + `pageForKey`), `BOT_COMMANDS`/`/help` (for new commands), and SETTINGS-GUIDE.md (`/guide`). The button menu is the surface most often missed.
 
+
 ### Racikan Prompt Notes (`promptNotes`)
 
 A racikan (config preset) carries its own prompt "character" as **data**, so behavior travels with the preset file — clone the bot anywhere, load the same racikan, get the same behavior. **Never hardcode racikan-specific prompt text in prompt.js** (that's how the mainzen_v3 smart-wallet relaxation originally leaked into code; it now lives in `presets/mainzen_v3.json`).
@@ -128,7 +129,6 @@ A racikan (config preset) carries its own prompt "character" as **data**, so beh
 - `racikanRules(role)` (prompt.js) renders the notes as a **RACIKAN RULES** block — hard instructions that beat soft guidelines but never HARD RULE / mechanical safety checks. Injected: SCREENER after RISK SIGNALS, MANAGER before lessons, GENERAL after PVP RULE. No notes → "" (factory prompt, byte-identical).
 - Deliberately **file-level only** (edit `presets/<name>.json` → `/preset use`): not in `CONFIG_MAP`/`/setcfg`/`/settings` — free text is a poor fit for those surfaces, so the full-sync rule is intentionally not applied. Documented in SETTINGS-GUIDE (Config Presets section).
 - preset-manager needs no changes: presets are full-file snapshots, so the key rides through save/use/diff automatically. `reloadScreeningThresholds()` re-reads `promptNotes` + `activeSetup` so hand-edits to user-config.json apply without a restart.
-
 ---
 
 ## Position Lifecycle

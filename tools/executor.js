@@ -20,7 +20,8 @@ import { addToBlacklist, removeFromBlacklist, listBlacklist } from "../token-bla
 import { blockDev, unblockDev, listBlockedDevs } from "../dev-blocklist.js";
 import { addSmartWallet, removeSmartWallet, listSmartWallets, checkSmartWalletsOnPool } from "../smart-wallets.js";
 import { getTokenInfo, getTokenHolders, getTokenNarrative } from "./token.js";
-import { config, reloadScreeningThresholds, MIN_SAFE_BINS_BELOW, applyConvictionSizing } from "../config.js";
+import { config, reloadScreeningThresholds, MIN_SAFE_BINS_BELOW, applyConvictionSizing, minDeployAmount } from "../config.js";
+import { validateConfigValue } from "../config-schema.js";
 import { getRecentDecisions } from "../decision-log.js";
 import fs from "fs";
 import { execSync, spawn } from "child_process";
@@ -374,6 +375,8 @@ const toolMap = {
       gasReserveBufferDays: ["management", "gasReserveBufferDays"],
       gasReserveFloorSol: ["management", "gasReserveFloorSol"],
       positionSizePct: ["management", "positionSizePct"],
+      sizingMode: ["management", "sizingMode"],
+      rentPerPositionSol: ["management", "rentPerPositionSol"],
       minAgeBeforeYieldCheck: ["management", "minAgeBeforeYieldCheck"],
       // risk
       maxPositions: ["risk", "maxPositions"],
@@ -408,7 +411,13 @@ const toolMap = {
       publicApiKey: ["api", "publicApiKey"],
       agentMeridianApiUrl: ["api", "url"],
       lpAgentRelayEnabled: ["api", "lpAgentRelayEnabled"],
+      // pnl fetcher / poller
+      pnlSource: ["pnl", "source"],
+      pnlRpcUrl: ["pnl", "rpcUrl"],
+      pnlPollIntervalSec: ["pnl", "pollIntervalSec"],
+      pnlDepositCacheTtlSec: ["pnl", "depositCacheTtlSec"],
       // GMGN screening
+      gmgnFeeSource: ["gmgn", "feeSource"],
       gmgnApiKey: ["gmgn", "apiKey"],
       gmgnBaseUrl: ["gmgn", "baseUrl"],
       gmgnInterval: ["gmgn", "interval"],
@@ -489,10 +498,13 @@ const toolMap = {
       // reports
       learningReportEvery: ["reports", "learningReportEvery"],
       learningReportTrendN: ["reports", "learningReportTrendN"],
+      // learning (auto-evolve freeze)
+      evolveEnabled: ["learning", "evolveEnabled"],
     };
 
     const applied = {};
     const unknown = [];
+    const invalid = [];
 
     // Build case-insensitive lookup
     const CONFIG_MAP_LOWER = Object.fromEntries(
@@ -508,13 +520,18 @@ const toolMap = {
       "screeningCategories", "allowedLaunchpads", "blockedLaunchpads", "indicatorIntervals",
     ]);
 
+    // Per-key value validation now lives in config-schema.js (validateConfigValue):
+    // a per-type schema covering ALL CONFIG_MAP keys — STRICT (hard reject) for
+    // harmful keys (model id, risk/sizing numerics, known enums), LIGHT type-check
+    // for the rest. RAGU = IZINKAN. Applied in the per-change loop below.
+
     // Robust arg recovery — weak models invent shapes instead of changes/key+value:
     //   { path: "management.gasReserveAutoTune", value: true }
     //   { management: { gasReserveAutoTune: true } }   (section-nested)
     //   { gasReserveAutoTune: true }                   (bare flat key at top level)
     // Fold all of them into `changes` so casual chat works regardless of phrasing.
     const resolveKey = (k) => (CONFIG_MAP[k] ? k : CONFIG_MAP_LOWER[String(k).toLowerCase()]?.[0]);
-    const KNOWN_SECTIONS = new Set(["screening", "management", "risk", "schedule", "llm", "strategy", "hiveMind", "api", "gmgn", "indicators", "chartIndicators", "experiments", "reports", "tokens", "darwin"]);
+    const KNOWN_SECTIONS = new Set(["screening", "management", "risk", "schedule", "llm", "strategy", "hiveMind", "api", "gmgn", "indicators", "chartIndicators", "experiments", "reports", "tokens", "darwin", "learning"]);
     if (Object.keys(changes).length === 0 && typeof path === "string" && path.trim()) {
       const rk = resolveKey(path.trim().split(".").pop());
       if (rk) changes[rk] = value;
@@ -544,6 +561,11 @@ const toolMap = {
         }
         normalizedVal = Math.max(MIN_SAFE_BINS_BELOW, Math.round(numericVal));
       }
+      // Schema gate (config-schema.js) — reject garbage before it lands in config.
+      // STRICT for sensitive keys (model id / risk / sizing / enums), LIGHT
+      // type-check for the rest. Fail-open: keys absent from the schema pass.
+      const verr = validateConfigValue(match[0], normalizedVal);
+      if (verr) { invalid.push({ key: match[0], value: val, error: verr }); continue; }
       applied[match[0]] = normalizedVal;
     }
 
@@ -568,6 +590,10 @@ const toolMap = {
     }
 
     if (Object.keys(applied).length === 0) {
+      if (invalid.length > 0) {
+        log("config", `update_config rejected invalid values: ${invalid.map((i) => `${i.key}=${JSON.stringify(i.value)} (${i.error})`).join("; ")}`);
+        return { success: false, invalid, unknown, reason };
+      }
       if (unchanged.length > 0) {
         log("config", `update_config no-op — already at requested values: ${unchanged.join(", ")}`);
         return { success: true, applied: {}, unchanged, noop: true, reason };
@@ -684,7 +710,7 @@ const toolMap = {
     }
 
     // Restart cron jobs if intervals changed
-    const intervalChanged = applied.managementIntervalMin != null || applied.screeningIntervalMin != null;
+    const intervalChanged = applied.managementIntervalMin != null || applied.screeningIntervalMin != null || applied.pnlPollIntervalSec != null;
     if (intervalChanged && _cronRestarter) {
       _cronRestarter();
       log("config", `Cron restarted — management: ${config.schedule.managementIntervalMin}m, screening: ${config.schedule.screeningIntervalMin}m`);
@@ -701,8 +727,11 @@ const toolMap = {
       addLesson(`[SELF-TUNED] Changed ${summary} — ${reason}`, ["self_tune", "config_change"]);
     }
 
+    if (invalid.length > 0) {
+      log("config", `update_config rejected invalid values (applied the rest): ${invalid.map((i) => `${i.key}=${JSON.stringify(i.value)} (${i.error})`).join("; ")}`);
+    }
     log("config", `Agent self-tuned: ${JSON.stringify(redactAppliedConfig(applied))} — ${reason}`);
-    return { success: true, applied: redactAppliedConfig(applied), unknown, unchanged, reason };
+    return { success: true, applied: redactAppliedConfig(applied), unknown, unchanged, invalid, reason };
   },
 };
 
@@ -767,7 +796,7 @@ export async function executeTool(name, args) {
       } else if (name === "deploy_position") {
         notifyDeploy({ pair: result.pool_name || args.pool_name || args.pool_address?.slice(0, 8), amountSol: args.amount_y ?? args.amount_sol ?? 0, position: result.position, tx: result.txs?.[0] ?? result.tx, priceRange: result.price_range, rangeCoverage: result.range_coverage, binStep: result.bin_step, baseFee: result.base_fee }).catch(() => {});
       } else if (name === "close_position") {
-        notifyClose({ pair: result.pool_name || args.position_address?.slice(0, 8), pnlUsd: result.pnl_usd ?? 0, pnlPct: result.pnl_pct ?? 0, reason: result.close_reason || args.reason, lesson: result.derived_lesson, feesUsd: result.fees_earned_usd ?? null }).catch(() => {});
+        notifyClose({ pair: result.pool_name || args.position_address?.slice(0, 8), pnlUsd: result.pnl_usd ?? 0, pnlPct: result.pnl_pct ?? 0, peakPnlPct: result.peak_pnl_pct ?? null, reason: result.close_reason || args.reason, lesson: result.derived_lesson, feesUsd: result.fees_earned_usd ?? null }).catch(() => {});
         // Note low-yield closes in pool memory so screener avoids redeploying
         if (args.reason && args.reason.toLowerCase().includes("yield")) {
           const poolAddr = result.pool || args.pool_address;
@@ -974,7 +1003,7 @@ async function runSafetyChecks(name, args) {
         };
       }
 
-      const minDeploy = Math.max(0.1, config.management.deployAmountSol);
+      const minDeploy = minDeployAmount(); // shared floor — see config.js
       if (amountY < minDeploy) {
         return {
           pass: false,
@@ -988,15 +1017,20 @@ async function runSafetyChecks(name, args) {
         };
       }
 
-      // Check SOL balance
+      // Check SOL balance. Reserve account rent per position (~0.057 SOL, locked
+      // on deploy, refundable on close) on top of gas when rentPerPositionSol>0,
+      // so rent never silently eats the gas reserve and the Nth position can't
+      // fail mid-fill (audit fix). rentPerPositionSol=0 (factory) → legacy check.
       if (process.env.DRY_RUN !== "true") {
         const balance = await getWalletBalances();
         const gasReserve = config.management.gasReserve;
-        const minRequired = amountY + gasReserve;
+        const rentReserve = Math.max(0, config.management.rentPerPositionSol ?? 0);
+        const minRequired = amountY + gasReserve + rentReserve;
         if (balance.sol < minRequired) {
+          const rentNote = rentReserve > 0 ? ` + ${rentReserve} rent` : "";
           return {
             pass: false,
-            reason: `Insufficient SOL: have ${balance.sol} SOL, need ${minRequired} SOL (${amountY} deploy + ${gasReserve} gas reserve).`,
+            reason: `Insufficient SOL: have ${balance.sol} SOL, need ${minRequired} SOL (${amountY} deploy + ${gasReserve} gas reserve${rentNote}).`,
           };
         }
       }

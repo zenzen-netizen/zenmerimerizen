@@ -100,6 +100,46 @@ const PERIODS = [
   { label: "30D", days: 30 },
 ];
 
+/**
+ * Optional user-chosen anchor date ("track mulai tanggal X") for the SOL tracker.
+ * Stored in the history file alongside the daily baselines. Adds a "SINCE <date>"
+ * growth row to /wallet. Display-only setting — never affects trading.
+ */
+export function getTrackStart() {
+  return load().trackStart || null;
+}
+
+export function setTrackStart(dateKey) {
+  try {
+    const data = load();
+    if (dateKey == null) { delete data.trackStart; save(data); return { ok: true, cleared: true }; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || Number.isNaN(Date.parse(`${dateKey}T00:00:00Z`))) {
+      return { ok: false, error: "format tanggal harus YYYY-MM-DD (mis. 2026-06-10)" };
+    }
+    if (dateKey > wibDateKey()) return { ok: false, error: "tanggal mulai tak boleh di masa depan" };
+    data.trackStart = dateKey;
+    save(data);
+    return { ok: true, dateKey };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+/** Growth row from the user-anchored start date to now, or null when unset. */
+function sinceStartRow(currentSol) {
+  const data = load();
+  const start = data.trackStart;
+  if (!start) return null;
+  const now = Number.isFinite(currentSol) ? currentSol : null;
+  const base = baselineFor(data.days, start);
+  if (base == null || now == null) {
+    return { anchor: start, startKey: start, startBal: null, now, deltaSol: null, deltaPct: null, partial: true };
+  }
+  const deltaSol = now - base.sol;
+  const deltaPct = base.sol > 0 ? (deltaSol / base.sol) * 100 : null;
+  return { anchor: start, startKey: base.key, startBal: base.sol, now, deltaSol, deltaPct, partial: base.key !== start };
+}
+
 /** Compute the 1d/7d/30d tracker rows against the current SOL balance. */
 export function getSolTracker(currentSol) {
   const data = load();
@@ -142,11 +182,22 @@ export function formatSolTracker(currentSol) {
       `${label} ${dot(r.deltaSol)} ${signedSol(r.deltaSol)} SOL (${signedPct(r.deltaPct)}) ← ${fmtSol(r.startBal)} @ ${labelFromKey(r.startKey)}${star}`,
     );
   }
-  if (rows.some((r) => r.partial)) {
-    lines.push("* window blm penuh — baseline = hari terlama tercatat");
+  // User-anchored "SINCE <date>" row, when set via /wallet trackstart.
+  const ss = sinceStartRow(currentSol);
+  if (ss) {
+    if (ss.startBal == null) {
+      lines.push(`SINCE ${labelFromKey(ss.anchor)} ⚪ (blm ada baseline)`);
+    } else {
+      const star = ss.partial ? " *" : "";
+      lines.push(`SINCE ${labelFromKey(ss.startKey)} ${dot(ss.deltaSol)} ${signedSol(ss.deltaSol)} SOL (${signedPct(ss.deltaPct)}) ← ${fmtSol(ss.startBal)}${star}`);
+    }
+  }
+  if (rows.some((r) => r.partial) || ss?.partial) {
+    lines.push("* window/anchor blm punya baseline pas — pakai hari terlama tercatat");
   }
   // Honesty note: this tracks raw liquid SOL, not PnL — deposits/withdrawals
   // and capital parked in positions all move it. Use /report for true PnL.
   lines.push("ℹ️ saldo SOL mentah (termasuk deposit/tarik & modal di posisi) — buat PnL murni pakai /report");
+  if (!ss) lines.push("💡 set anchor: /wallet trackstart YYYY-MM-DD");
   return lines.join("\n");
 }

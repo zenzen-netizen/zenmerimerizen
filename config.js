@@ -19,6 +19,18 @@ function readJsonIfExists(filePath) {
 
 const u = readJsonIfExists(USER_CONFIG_PATH);
 const gmgnUserConfig = readJsonIfExists(GMGN_CONFIG_PATH);
+
+// Strip dead screening-side orphans. Upstream deleted these in its setup
+// overhaul (setup.js delete block); our merge fdc0c45 swallowed the overhaul
+// but dropped the delete lines, so the keys lingered in user-config.json and
+// were still advertised to the LLM. config.js has no field for either, so this
+// is purely defensive — should one reappear in the file it can never be read.
+// The LIVE bundler/ATH gates are maxBotHoldersPct + gmgn.maxBundlerRate +
+// gmgn.athFilterPct (key gmgnAthFilterPct) — those are untouched here.
+// See notes/dev-crosscheck.md §4/§5.
+delete u.maxBundlePct;
+delete u.athFilterPct;
+
 export const MIN_SAFE_BINS_BELOW = 35;
 
 function numericConfig(value) {
@@ -146,6 +158,8 @@ export const config = {
   gmgn: {
     apiKey: nonEmptyString(gmgnUserConfig.apiKey, u.gmgnApiKey, process.env.GMGN_API_KEY),
     baseUrl: nonEmptyString(gmgnUserConfig.baseUrl, u.gmgnBaseUrl, "https://openapi.gmgn.ai"),
+    // gmgn = use GMGN /v1/token/info total_fee for global_fees_sol (minTokenFeesSol gate); jupiter = legacy Jupiter fees
+    feeSource: nonEmptyString(gmgnUserConfig.feeSource, u.gmgnFeeSource, "gmgn"),
     interval: gmgnValue("interval", "gmgnInterval", "5m"),
     orderBy: gmgnValue("orderBy", "gmgnOrderBy", "default"),
     direction: gmgnValue("direction", "gmgnDirection", "desc"),
@@ -226,6 +240,16 @@ export const config = {
     gasReserveBufferDays:  u.gasReserveBufferDays  ?? 14,
     gasReserveFloorSol:    u.gasReserveFloorSol    ?? 0.03,
     positionSizePct:       u.positionSizePct       ?? 0.35,
+    // Sizing mode: "fixed" (factory) = computeDeployAmount uses the legacy
+    // walletSol×positionSizePct formula (slot-blind). "maximize" = split the
+    // deployable wallet evenly across the REMAINING position slots, reserving
+    // gas + rent per slot, so every maxPositions slot can open without the
+    // last one failing on rent. Default "fixed" → behavior byte-identical.
+    sizingMode:            u.sizingMode            ?? "fixed",
+    // SOL locked as account rent per open DLMM position (refundable on close).
+    // 0 (factory) = balance check & sizing ignore rent (legacy). >0 (e.g. 0.057)
+    // = balance check reserves it AND "maximize" sizing reserves it per slot.
+    rentPerPositionSol:    u.rentPerPositionSol    ?? 0,
     // Trailing take-profit
     trailingTakeProfit:    u.trailingTakeProfit    ?? true,
     trailingTriggerPct:    u.trailingTriggerPct    ?? 3,    // activate trailing at X% PnL
@@ -271,6 +295,15 @@ export const config = {
     generalModel:    u.generalModel    ?? process.env.LLM_MODEL ?? "openrouter/healer-alpha",
   },
 
+  // ─── Learning / Auto-Evolve ───────────
+  // Gate for evolveThresholds (the auto-writer of minFeeActiveTvlRatio + minOrganic,
+  // fired every 5 closes). true (default) = factory behavior unchanged. false = FROZEN:
+  // the auto-write is skipped so a baseline racikan never drifts while it's being tuned.
+  // Reversible (flip back to true). Darwin (signal weights) has its OWN toggle below.
+  learning: {
+    evolveEnabled:  u.evolveEnabled     ?? true,
+  },
+
   // ─── Darwinian Signal Weighting ───────
   darwin: {
     enabled:        u.darwinEnabled     ?? true,
@@ -302,6 +335,14 @@ export const config = {
     url: nonEmptyString(u.agentMeridianApiUrl, process.env.AGENT_MERIDIAN_API_URL, DEFAULT_AGENT_MERIDIAN_API_URL),
     publicApiKey: nonEmptyString(u.publicApiKey, process.env.PUBLIC_API_KEY, DEFAULT_AGENT_MERIDIAN_PUBLIC_KEY),
     lpAgentRelayEnabled: u.lpAgentRelayEnabled ?? false,
+  },
+
+  // ─── PnL fetcher / poller (public infra: RPC + Meteora deposits + Jupiter) ──
+  pnl: {
+    rpcUrl: nonEmptyString(u.pnlRpcUrl, process.env.PNL_RPC_URL, "https://pump.helius-rpc.com"),
+    source: nonEmptyString(u.pnlSource, "rpc"), // rpc | meteora (fallback-only)
+    pollIntervalSec: Number(u.pnlPollIntervalSec ?? 3),
+    depositCacheTtlSec: Number(u.pnlDepositCacheTtlSec ?? 300),
   },
 
   jupiter: {
@@ -438,22 +479,68 @@ export const config = {
 };
 
 /**
- * Compute the optimal deploy amount for a given wallet balance.
- * Scales position size with wallet growth (compounding).
- *
- * Formula: clamp(deployable × positionSizePct, floor=deployAmountSol, ceil=maxDeployAmount)
- *
- * Examples (defaults: gasReserve=0.2, positionSizePct=0.35, floor=0.5):
- *   0.8 SOL wallet → 0.6 SOL deploy  (floor)
- *   2.0 SOL wallet → 0.63 SOL deploy
- *   3.0 SOL wallet → 0.98 SOL deploy
- *   4.0 SOL wallet → 1.33 SOL deploy
+ * Minimum SOL a single position may deploy — our sanity floor against dust
+ * positions (NOT a Meteora protocol limit; Meteora accepts smaller deposits).
+ * Shared by computeDeployAmount (maximize adaptive slots) AND the deploy safety
+ * check (executor.js) so the two can never disagree — a divergence there is what
+ * let sizing emit a sub-min amount the check then rejected (the stuck-retry bug).
  */
-export function computeDeployAmount(walletSol) {
+export function minDeployAmount() {
+  return Math.max(0.1, config.management.deployAmountSol ?? 0.1);
+}
+
+/**
+ * Compute the optimal deploy amount for a given wallet balance.
+ *
+ * Two modes (config.management.sizingMode):
+ *
+ * "fixed" (factory) — scales position size with wallet growth (compounding):
+ *   Formula: clamp(deployable × positionSizePct, floor=deployAmountSol, ceil=maxDeployAmount)
+ *   Examples (defaults: gasReserve=0.2, positionSizePct=0.35, floor=0.5):
+ *     0.8 SOL wallet → 0.6 SOL deploy (floor) · 2.0 → 0.63 · 3.0 → 0.98 · 4.0 → 1.33
+ *   Slot-blind: ignores how many position slots remain.
+ *
+ * "maximize" — fills the wallet across the REMAINING slots with ADAPTIVE slot
+ *   count, reserving gas + rent per slot so every slot opens without the last
+ *   failing on rent:
+ *     perSlot(N) = (walletSol − gasReserve − rentPerPositionSol × N) / N
+ *   Picks the LARGEST N ∈ [1..slotsRemaining] whose perSlot stays ≥ minDeployAmount,
+ *   so it opens as many positions as the wallet can size at/above the floor (small
+ *   wallet → falls back to one bigger position). If even N=1 can't clear the floor,
+ *   returns 0 (explicit "can't deploy"). Re-derived from the CURRENT wallet every
+ *   cycle (self-corrects as positions fill), floored to 3 decimals so it NEVER
+ *   over-commits the balance check, clamped to maxDeployAmount. slotsRemaining
+ *   defaults to maxPositions (fresh-start, most conservative).
+ *
+ * @param {number} walletSol  current free wallet SOL
+ * @param {{slotsRemaining?: number}} [opts]  open slots left to fill (maximize mode)
+ */
+export function computeDeployAmount(walletSol, opts = {}) {
   const reserve  = config.management.gasReserve      ?? 0.2;
-  const pct      = config.management.positionSizePct ?? 0.35;
-  const floor    = config.management.deployAmountSol;
   const ceil     = config.risk.maxDeployAmount;
+
+  if (config.management.sizingMode === "maximize") {
+    const rent     = Math.max(0, config.management.rentPerPositionSol ?? 0);
+    const maxSlots = Math.max(1, Math.floor(opts.slotsRemaining ?? config.risk.maxPositions ?? 1));
+    const min      = minDeployAmount();
+    // ADAPTIVE SLOTS. perSlot = (wallet − gas − rent×N)/N decreases monotonically
+    // as N grows (more rent reserved + a smaller share each), so the LARGEST N that
+    // still keeps every slot ≥ min opens as many positions as possible without any
+    // falling under the floor. Iterate N down from the open slots; take the first
+    // that clears min. If even a single position can't reach min (wallet too small),
+    // return 0 — an explicit "can't deploy" signal. Returning a sub-min amount was
+    // the stuck-retry bug: the deploy safety check rejects it, the LLM retries, the
+    // cycle burns. 0 lets callers skip cleanly instead.
+    for (let n = maxSlots; n >= 1; n--) {
+      const deployable = Math.max(0, walletSol - reserve - rent * n);
+      const perSlot    = Math.floor((deployable / n) * 1000) / 1000; // never round UP
+      if (perSlot >= min) return Math.min(ceil, perSlot);
+    }
+    return 0;
+  }
+
+  const pct        = config.management.positionSizePct ?? 0.35;
+  const floor      = config.management.deployAmountSol;
   const deployable = Math.max(0, walletSol - reserve);
   const dynamic    = deployable * pct;
   const result     = Math.min(ceil, Math.max(floor, dynamic));
@@ -540,6 +627,14 @@ export function reloadScreeningThresholds() {
     // Racikan prompt rules: pick up hand-edits to user-config.json without a restart.
     if (fresh.promptNotes !== undefined) config.promptNotes = normalizePromptNotes(fresh.promptNotes);
     if (fresh.activeSetup !== undefined) config.activeSetup = fresh.activeSetup;
+    // Auto-evolve freeze: hand-edits to evolveEnabled apply without a restart too.
+    if (fresh.evolveEnabled !== undefined) { if (!config.learning) config.learning = {}; config.learning.evolveEnabled = fresh.evolveEnabled; }
+    // Sizing mode + per-position rent reserve: pick up hand-edits without a restart.
+    if (fresh.sizingMode !== undefined) config.management.sizingMode = fresh.sizingMode;
+    if (fresh.rentPerPositionSol !== undefined) {
+      const rv = numericConfig(fresh.rentPerPositionSol);
+      if (rv != null) config.management.rentPerPositionSol = rv;
+    }
     const minBinsBelow = numericConfig(fresh.minBinsBelow) ?? config.strategy.minBinsBelow;
     const maxBinsBelow = numericConfig(fresh.maxBinsBelow) ?? numericConfig(fresh.binsBelow) ?? config.strategy.maxBinsBelow;
     const defaultBinsBelow = numericConfig(fresh.defaultBinsBelow) ?? numericConfig(fresh.binsBelow) ?? config.strategy.defaultBinsBelow ?? maxBinsBelow;

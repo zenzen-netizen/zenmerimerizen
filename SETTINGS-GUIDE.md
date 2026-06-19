@@ -209,6 +209,26 @@ keras" — dulu hardcoded di prompt.js, sekarang ikut racikan.
 
 ---
 
+### `sizingMode`
+| | |
+|---|---|
+| **Default** | `fixed` |
+| **Format** | Pilihan: `fixed` \| `maximize` |
+| **Penjelasan** | Cara bot menghitung jumlah deploy. **`fixed` (pabrik)** = rumus lama `(saldo − gasReserve) × positionSizePct`, lalu diclamp ke `deployAmountSol`–`maxDeployAmount`. Buta jumlah-slot: tiap deploy ambil porsi yang sama, jadi posisi terakhir bisa kehabisan SOL. **`maximize`** = bagi saldo **rata ke sisa slot posisi** sambil mencadangkan gas + `rentPerPositionSol` per slot, lalu floor 3-desimal supaya tidak pernah over-commit. Rumus: `(saldo − gasReserve − rentPerPositionSol × sisa_slot) / sisa_slot`. Tujuannya: semua `maxPositions` slot bisa kebuka tanpa yang terakhir gagal gara-gara rent. Di mode `maximize`, floor `deployAmountSol` **sengaja dilewati** (boleh deploy < `deployAmountSol`), tapi gerbang minimum `max(0.1, deployAmountSol)` di executor tetap berlaku — jadi kalau pakai `maximize`, set `deployAmountSol` ≤ ukuran per-slot terkecil (mis. 0.1). |
+| **Contoh** | Wallet 0.4, gas 0.03, rent 0.057, maxPositions 2 → tiap slot `(0.4 − 0.03 − 0.057×2)/2 = 0.128` SOL; dua-duanya kebuka, sisa ≈ gasReserve. |
+
+---
+
+### `rentPerPositionSol`
+| | |
+|---|---|
+| **Default** | `0` |
+| **Format** | Angka desimal (SOL) |
+| **Opsi** | `0` – `1.0` (rent nyata Meteora positionV2 ≈ `0.057`) |
+| **Penjelasan** | SOL yang terkunci sebagai *account rent* tiap posisi DLMM terbuka (balik lagi saat posisi ditutup / refundable). **`0` (pabrik)** = cek saldo & sizing **abaikan** rent (perilaku lama; rent diam-diam makan buffer gas, posisi ke-N bisa gagal). **`> 0`** (mis. `0.057`) = cek saldo pre-deploy mencadangkan rent **di atas** gas, DAN sizing `maximize` mencadangkan rent per slot. Memperbaiki audit `executor.js` (balance check dulu cuma `amount + gasReserve`). |
+
+---
+
 ---
 
 # GRUP 2 — ATURAN KELUAR POSISI (EXIT RULES)
@@ -1134,6 +1154,53 @@ Setiap siklus, kode (`getDeterministicCloseRule()`, bukan LLM) ngecek posisi **u
 
 ---
 
+### `pnlSource`
+| | |
+|---|---|
+| **Default** | `"rpc"` |
+| **Format** | String |
+| **Opsi** | `"rpc"` / `"meteora"` |
+| **Penjelasan** | Sumber data nilai posisi & PnL (di `config.pnl`). `rpc` (default) = baca langsung on-chain lewat RPC publik + harga Jupiter + riwayat deposit Meteora — tanpa ketergantungan LPAgent/relay, jadi poller bisa jalan agresif. Kalau jalur RPC error, otomatis jatuh ke jalur API Meteora (fail-open). `meteora` = pakai jalur API Meteora saja |
+
+---
+
+### `pnlRpcUrl`
+| | |
+|---|---|
+| **Default** | `"https://pump.helius-rpc.com"` |
+| **Format** | String (URL) |
+| **Penjelasan** | RPC endpoint khusus untuk pembacaan PnL (terpisah dari `RPC_URL` utama yang dipakai transaksi). Sengaja pakai RPC publik supaya polling rapat tidak menghabiskan kuota RPC utama. Bisa juga diset lewat env `PNL_RPC_URL` |
+
+---
+
+### `pnlPollIntervalSec`
+| | |
+|---|---|
+| **Default** | `3` |
+| **Format** | Angka (detik) |
+| **Penjelasan** | Jarak antar tick PnL poller (pemantau trailing TP / SL / close rules di antara siklus management). Dulu fix 30 detik; sekarang bisa rapat (default 3 dtk) karena jalur RPC publik. Mengubah ini lewat `/setcfg` otomatis me-restart poller — tidak perlu restart bot |
+
+---
+
+### `pnlDepositCacheTtlSec`
+| | |
+|---|---|
+| **Default** | `300` |
+| **Format** | Angka (detik) |
+| **Penjelasan** | Umur cache riwayat deposit (dari API Meteora `/pnl`) sebelum di-refresh. Cache juga di-invalidate otomatis kalau ada signature transaksi baru, jadi angka ini cuma batas atas. Makin kecil = makin sering hit API Meteora |
+
+---
+
+### `gmgnFeeSource`
+| | |
+|---|---|
+| **Default** | `"gmgn"` |
+| **Format** | String |
+| **Opsi** | `"gmgn"` / `"jupiter"` |
+| **Penjelasan** | Sumber data `global_fees_sol` (gerbang `minTokenFeesSol` di GRUP 6). `gmgn` = ambil `total_fee` dari GMGN (butuh `gmgnApiKey`; tanpa key otomatis jatuh ke Jupiter). `jupiter` = selalu pakai Jupiter. ⚠️ Beda dengan blok GMGN screening: setting ini **tetap bekerja walau `screeningSource = meteora`** |
+
+---
+
 ---
 
 # GRUP 15 — HIVEMIND (Kolektif)
@@ -1510,6 +1577,32 @@ Matikan (balik pabrik): `set usePaperHistoryWhenLive to false`
 | **Default** | `0.03` |
 | **Format** | angka (SOL) |
 | **Penjelasan** | Batas bawah `gasReserve` saat auto-tune ON — reserve tak akan pernah disetel di bawah ini (biar selalu ada gas buat transaksi) |
+
+---
+
+# GRUP 18 — LEARNING / AUTO-EVOLVE (Pembekuan Baseline)
+
+> **Analogi:** bayangkan bot itu murid yang otomatis mengubah aturan-screening-nya sendiri tiap 5 trade tutup, berdasarkan menang/kalah terakhir. Kadang kamu lagi mau **menguji satu racikan apa adanya** (baseline bersih) — kamu tidak mau si murid diam-diam mengganti aturannya di tengah ujian. `evolveEnabled` itu **gembok** untuk proses itu.
+>
+> Yang dikunci: hanya **auto-evolve threshold** (`evolveThresholds`) yang menulis-ulang `minFeeActiveTvlRatio` + `minOrganic` tiap 5 posisi tutup. **Tidak** menyentuh eksekusi trade / exit / screening. Reversible — tinggal balik ke `true`.
+>
+> **Beda dengan Darwin (GRUP 12):** Darwin mengubah *bobot sinyal* screening; ini mengubah *angka threshold* screening. Dua mekanisme beda, dua toggle beda. `evolveEnabled` TIDAK mempengaruhi Darwin (dan sebaliknya).
+
+### evolveEnabled
+
+| | |
+|---|---|
+| **Nilai sekarang** | `false` (BEKU) |
+| **Default** | `true` |
+| **Format** | `true` atau `false` (atau `off`) |
+| **Di `config.js`** | `config.learning.evolveEnabled` |
+| **Penjelasan** | `true` = perilaku pabrik: tiap 5 posisi tutup (racikan aktif), bot boleh menaikkan `minFeeActiveTvlRatio` / `minOrganic` otomatis dari data menang-kalah. `false` = **FROZEN**: auto-tulis itu dilewati total (tidak ada tulisan ke `user-config.json`, threshold tetap persis seperti kamu set). Dipakai untuk menjaga baseline (mis. **mainzen_v2**) tetap bersih saat lagi di-tuning manual. |
+
+**Contoh:** `set evolveEnabled to true` (buka kunci, balikkan auto-evolve), atau lewat `/settings` → **🧬Learn** → tombol *Auto-evolve threshold*.
+
+**Override manual sekali jalan (CLI saja):** kalau frozen tapi operator tetap mau menjalankan evolve sekali, ketik `/evolve force` di REPL — ada banner ⚠️, threshold ditulis sekali itu, toggle tetap `false`. Plain `/evolve` saat frozen akan menolak + menjelaskan.
+
+> Di `/settings` evolveEnabled ada di halaman **🧬Learn** (seksi 🧩 Add by Zen). Di `/config` muncul di sub-grup **Learning/Evolve** dengan titik 🟢 on / ⚪ off.
 
 ---
 

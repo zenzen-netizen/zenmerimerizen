@@ -5,15 +5,16 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { agentLoop } from "./agent.js";
 import { log } from "./logger.js";
-import { getMyPositions, closePosition, getActiveBin } from "./tools/dlmm.js";
+import { getMyPositions, closePosition, getActiveBin, getPositionsRentSol } from "./tools/dlmm.js";
 import { getWalletBalances, getSolMarketRegime } from "./tools/wallet.js";
 import { getTopCandidates, formatYieldToMe } from "./tools/screening.js";
 import { confirmIndicatorPreset } from "./tools/chart-indicators.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
-import { config, reloadScreeningThresholds, computeDeployAmount, persistConfigChange } from "./config.js";
+import { config, reloadScreeningThresholds, computeDeployAmount, minDeployAmount, persistConfigChange } from "./config.js";
 import { getGasStats } from "./gas-tracker.js";
-import { evolveThresholds, getPerformanceSummary, getModePerformance, listLessons, classifySession, currentWibSession } from "./lessons.js";
-import { buildTradeReport } from "./reports.js";
+import { evolveThresholds, getPerformanceSummary, getModePerformance, getSuspectCount, listLessons, classifySession, currentWibSession, getLifetimePerformance, getPerformanceForRacikan, listRacikanInPerformance } from "./lessons.js";
+import { buildTradeReport, computeCostDragPct } from "./reports.js";
+import { getLlmCostStats } from "./llm-cost-tracker.js";
 import { executeTool, registerCronRestarter } from "./tools/executor.js";
 import {
   startPolling,
@@ -29,12 +30,14 @@ import {
   createLiveMessage,
   pinMessage,
   unpinMessage,
+  escapeHtml as escapeHtmlSafe,
 } from "./telegram.js";
 import { generateBriefing, generatePeriodicBriefing } from "./briefing.js";
 import { renderGuide } from "./guide.js";
 import { getLastBriefingDate, setLastBriefingDate, getLastBriefingPinId, setLastBriefingPinId, getLastReportedMilestone, setLastReportedMilestone, getLastPeriodicBriefing, setLastPeriodicBriefing, getTrackedPosition, getTrackedPositions, setPositionInstruction, updatePnlAndCheckExits, queuePeakConfirmation, resolvePendingPeak, queueTrailingDropConfirmation, resolvePendingTrailingDrop } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
 import { listPresets, savePreset, applyPreset, getPresetDiff, deletePreset, validName, presetExists, getActiveSetupStatus, formatIdentity } from "./preset-manager.js";
+import { ORIGIN_SECTIONS, ORIGIN_NOTES, SUB_CLUSTER_META, KEY_SUBCLUSTER, L4_CHILDREN, CORE_GROUPS } from "./config-origin.js";
 import { recordPositionSnapshot, recallForPool, addPoolNote } from "./pool-memory.js";
 import { isPaperMode } from "./paper-trading.js";
 import { recordCandidateSnapshots, getCandidateMomentum, formatCandidateMomentum, recordSmartWalletCounts, getSmartWalletMomentum, formatSmartWalletMomentum } from "./candidate-memory.js";
@@ -44,7 +47,7 @@ import { stageSignals } from "./signal-tracker.js";
 import { getWeightsSummary } from "./signal-weights.js";
 import { bootstrapHiveMind, ensureAgentId, getHiveMindPullMode, isHiveMindEnabled, pullHiveMindLessons, pullHiveMindPresets, registerHiveMindAgent, startHiveMindBackgroundSync } from "./hivemind.js";
 import { appendDecision } from "./decision-log.js";
-import { formatSolTracker } from "./sol-tracker.js";
+import { formatSolTracker, setTrackStart, getTrackStart } from "./sol-tracker.js";
 import { formatPnlTracker } from "./pnl-tracker.js";
 import { getOpenRouterBalance, getOpenRouterCredits } from "./openrouter-usage.js";
 
@@ -227,19 +230,107 @@ async function maybeFireLearningReport() {
 }
 
 /**
- * On-demand /report. No arg = all-time learning report; `week`/`month`/`day` (and
- * ID synonyms) produce the richer windowed periodic digest (activity + cost too).
- * Async because the windowed digest fetches cost/wallet data.
+ * Annualized cost-drag % for the quant block: recent (gas+LLM) burn scaled to a
+ * year, over the liquid wallet capital. Uses the 30d window (falls back to the
+ * gas estimate when no real data). Returns null on any gap. Display only.
+ */
+async function computeReportCostDrag() {
+  try {
+    const since = Date.now() - 30 * 86400000;
+    const wallet = await getWalletBalances().catch(() => null);
+    const modalUsd = wallet?.total_usd || wallet?.sol_usd || null;
+    if (!modalUsd) return null;
+    const solPrice = wallet?.sol_price || 0;
+    const gasStats = getGasStats(since);
+    const gasSol = gasStats.hasData ? gasStats.sol : 0;
+    const gasUsd = gasSol && solPrice ? gasSol * solPrice : 0;
+    const llm = getLlmCostStats(since);
+    const llmUsd = llm.hasData ? llm.totalCost : 0;
+    const costUsd = gasUsd + llmUsd;
+    if (costUsd <= 0) return null;
+    return computeCostDragPct({ costUsd, windowDays: 30, modalUsd });
+  } catch { return null; }
+}
+
+/**
+ * On-demand /report — tiered:
+ *   /report                → ACTIVE racikan (getModePerformance, racikan-isolated)
+ *   /report all|lifetime   → LIFETIME (every live record + pre-baseline archive)
+ *   /report setups         → list racikan present in the log
+ *   /report <racikan-name> → that specific racikan
+ *   /report week|month|day → windowed periodic digest (activity + cost)
+ * Async: fetches cost/wallet for the windowed digest + the cost-drag quant line.
  */
 async function buildReportForArg(arg = "") {
   const a = String(arg).trim().toLowerCase();
   if (["week", "weekly", "7d", "minggu", "mingguan"].includes(a)) return generatePeriodicBriefing("week");
   if (["month", "monthly", "30d", "bulan", "bulanan"].includes(a)) return generatePeriodicBriefing("month");
   if (["day", "today", "24h", "hari", "harian"].includes(a)) return generatePeriodicBriefing("day");
+  const trendN = config.reports?.learningReportTrendN ?? 10;
+  const costDragPct = await computeReportCostDrag();
+  const quant = costDragPct != null ? { costDragPct } : {};
+
+  // List racikan present in the log.
+  if (["setups", "setup", "racikan", "racikans", "list"].includes(a)) {
+    const rows = listRacikanInPerformance();
+    if (!rows.length) return "🗂️ Belum ada racikan ber-nama di log performa (semua trade null / pra-baseline).";
+    const lines = rows.map((r, i) => `${i + 1}. <b>${escapeHtmlSafe(r.name)}</b> — ${r.count} trade${r.name === config.activeSetup ? " ✅ aktif" : ""}`);
+    return `🗂️ <b>Racikan di log performa</b>\nPakai <code>/report &lt;nama&gt;</code> buat blok stats penuh per racikan.\n────────────────\n${lines.join("\n")}`;
+  }
+
+  // LIFETIME tier — every live record + pre-baseline archive (mixed settings).
+  if (["all", "lifetime", "semua", "seumur", "everything"].includes(a)) {
+    const lifePerf = getLifetimePerformance();
+    const rep = buildTradeReport(lifePerf, {
+      title: "🎓 Trade Report — LIFETIME",
+      subtitle: "⚠️ lifetime — termasuk pra-baseline (arsip), setting CAMPUR; bukan satu racikan",
+      statsLabel: "Lifetime",
+      trendN,
+      identity: formatIdentity(),
+      quant,
+    });
+    const tracker = formatPnlTracker(lifePerf);
+    return tracker ? `${rep}\n\n${tracker}` : rep;
+  }
+
+  // Specific racikan tier.
+  if (a) {
+    const recsPerf = getPerformanceForRacikan(a);
+    if (!recsPerf.length) {
+      const known = listRacikanInPerformance().map((r) => r.name);
+      const hint = known.length ? ` Tersedia: ${known.join(", ")}.` : "";
+      return `🗂️ Racikan "<b>${escapeHtmlSafe(a)}</b>" tak punya trade tercatat.${hint}\nCoba <code>/report setups</code>, <code>/report all</code>, atau <code>/report</code> (racikan aktif).`;
+    }
+    const rep = buildTradeReport(recsPerf, {
+      title: `🎓 Trade Report — racikan ${a}`,
+      subtitle: a === (config.activeSetup || "").toLowerCase() ? "racikan AKTIF" : "racikan spesifik (non-aktif)",
+      statsLabel: `Racikan ${a}`,
+      trendN,
+      identity: formatIdentity(),
+      quant,
+    });
+    const tracker = formatPnlTracker(recsPerf);
+    return tracker ? `${rep}\n\n${tracker}` : rep;
+  }
+
+  // Default tier — ACTIVE racikan (already racikan-isolated by getModePerformance).
   const modePerf = getModePerformance();
-  const rep = buildTradeReport(modePerf, { title: "🎓 Trade Report (all-time)", statsLabel: "All-time", trendN: config.reports?.learningReportTrendN ?? 10, identity: formatIdentity() });
+  const rep = buildTradeReport(modePerf, {
+    title: "🎓 Trade Report — racikan aktif",
+    subtitle: config.activeSetup ? `racikan: ${config.activeSetup} · pakai /report all buat lifetime` : "pakai /report all buat lifetime (incl. arsip)",
+    statsLabel: "Racikan aktif",
+    trendN,
+    identity: formatIdentity(),
+    quant,
+  });
+  // Surface any SUSPECT (flagged ≤−90% non-stopLoss) closes that are being held out
+  // of the stats above until verified — so the operator knows they exist (hidden if 0).
+  const suspectN = getSuspectCount();
+  const suspectLine = suspectN > 0
+    ? `\n\n⚠️ <b>Suspect (perlu verifikasi): ${suspectN}</b>\n<i>Close ≤−90% non-stopLoss — dikecualikan dari stats di atas sampai dicek (rug asli vs bad-data).</i>`
+    : "";
   const tracker = formatPnlTracker(modePerf);
-  return tracker ? `${rep}\n\n${tracker}` : rep;
+  return `${rep}${tracker ? `\n\n${tracker}` : ""}${suspectLine}`;
 }
 
 /**
@@ -578,16 +669,29 @@ export async function runScreeningCycle({ silent = false } = {}) {
       _screeningBusy = false;
       return screenReport;
     }
-    const minRequired = config.management.deployAmountSol + config.management.gasReserve;
+    // Broke-skip: bail BEFORE any candidate fetch or the (expensive) screening LLM
+    // when we can't open a new position at the min-deploy floor. Sizing-aware: ask
+    // computeDeployAmount for the REAL per-slot amount (maximize reserves gas + rent
+    // per slot and returns 0 when the wallet can't size one slot ≥ min) and also
+    // require the wallet to actually afford that one position + gas + rent (covers
+    // fixed mode, whose floor ignores affordability). The old check compared only
+    // deployAmountSol + gasReserve — it ignored rent AND adaptive slot sizing, so a
+    // 0.334 SOL wallet sailed past it and burned the LLM on a 0.095/slot deploy the
+    // safety floor would always reject (the stuck-retry bug).
     const isDryRun = process.env.DRY_RUN === "true";
-    if (!isDryRun && preBalance.sol < minRequired) {
-      log("cron", `Screening skipped — insufficient SOL (${preBalance.sol.toFixed(3)} < ${minRequired} needed for deploy + gas)`);
-      screenReport = `Screening skipped — insufficient SOL (${preBalance.sol.toFixed(3)} < ${minRequired} needed for deploy + gas).`;
+    const slotsRemaining = Math.max(1, config.risk.maxPositions - prePositions.total_positions);
+    const plannedDeploy = computeDeployAmount(preBalance.sol, { slotsRemaining });
+    const rentReserve = Math.max(0, config.management.rentPerPositionSol ?? 0);
+    const needForOne = plannedDeploy + config.management.gasReserve + rentReserve;
+    if (!isDryRun && (plannedDeploy < minDeployAmount() || preBalance.sol < needForOne)) {
+      const needNote = (minDeployAmount() + config.management.gasReserve + rentReserve).toFixed(3);
+      log("cron", `Screening skipped — modal kurang (wallet ${preBalance.sol.toFixed(3)} SOL, sizing/slot ${plannedDeploy} < min ${minDeployAmount()}; butuh ~${needNote} SOL utk 1 posisi). No LLM call.`);
+      screenReport = `Screening skipped — modal kurang (wallet ${preBalance.sol.toFixed(3)} SOL < ~${needNote} untuk 1 posisi ≥ ${minDeployAmount()} SOL + gas + rent).`;
       appendDecision({
         type: "skip",
         actor: "SCREENER",
-        summary: "Screening skipped",
-        reason: `Insufficient SOL (${preBalance.sol.toFixed(3)} < ${minRequired})`,
+        summary: "Screening skipped — modal kurang",
+        reason: `Sizing/slot ${plannedDeploy} < min ${minDeployAmount()} (wallet ${preBalance.sol.toFixed(3)})`,
       });
       _screeningBusy = false;
       return screenReport;
@@ -637,8 +741,11 @@ export async function runScreeningCycle({ silent = false } = {}) {
   try {
     // Reuse pre-fetched balance — no extra RPC call needed
     const currentBalance = preBalance;
-    const deployAmount = computeDeployAmount(currentBalance.sol);
-    log("cron", `Computed deploy amount: ${deployAmount} SOL (wallet: ${currentBalance.sol} SOL)`);
+    // "maximize" sizing splits the wallet across the slots still open; "fixed"
+    // ignores slotsRemaining. prePositions is the fresh force:true count above.
+    const slotsRemaining = Math.max(1, config.risk.maxPositions - prePositions.total_positions);
+    const deployAmount = computeDeployAmount(currentBalance.sol, { slotsRemaining });
+    log("cron", `Computed deploy amount: ${deployAmount} SOL (wallet: ${currentBalance.sol} SOL, slots left: ${slotsRemaining}, mode: ${config.management.sizingMode})`);
 
     // Load active strategy
     const activeStrategy = getActiveStrategy();
@@ -1121,7 +1228,9 @@ Summarize the current portfolio health, total fees earned, and performance of al
     await runPeriodicBriefing("month");
   }, { timezone: 'UTC' });
 
-  // Lightweight 30s PnL poller — updates trailing TP state between management cycles, no LLM
+  // Lightweight PnL poller — updates trailing TP state between management cycles, no LLM.
+  // Runs on public infra (RPC + Jupiter + Meteora deposits) so it can poll aggressively.
+  const pnlPollMs = Math.max(1, Number(config.pnl.pollIntervalSec ?? 3)) * 1000;
   let _pnlPollBusy = false;
   const pnlPollInterval = setInterval(async () => {
     if (_managementBusy || _screeningBusy || _pnlPollBusy) return;
@@ -1174,7 +1283,7 @@ Summarize the current portfolio health, total fees earned, and performance of al
     } finally {
       _pnlPollBusy = false;
     }
-  }, 30_000);
+  }, pnlPollMs);
 
   _cronTasks = [mgmtTask, screenTask, healthTask, briefingTask, briefingWatchdog, weeklyTask, monthlyTask];
   // Store interval ref so stopCronJobs can clear it
@@ -1253,6 +1362,8 @@ function formatCandidates(candidates) {
 function getDeterministicCloseRule(position, managementConfig) {
   const tracked = getTrackedPosition(position.position);
   const pnlSuspect = (() => {
+    // Couldn't-price-this-tick flag (e.g. Jupiter outage) — never act on PnL rules.
+    if (position.pnl_pct_suspicious) return true;
     if (position.pnl_pct == null) return false;
     if (position.pnl_pct > -90) return false;
     if (tracked?.amount_sol && (position.total_value_usd ?? 0) > 0.01) {
@@ -1378,6 +1489,7 @@ let _latestCandidates = [];
 let _latestCandidatesAt = null;
 let _pendingInput = null; // { key, page, menuMsgId }
 let _pendingConfirmation = null; // { promise, resolve, timer, messageId, signature }
+let _settingsView = "main"; // last-rendered /settings page token (e.g. "main" | "dev" | "zen-gmgn~2"), so edits re-render the SAME state
 
 function setLatestCandidates(candidates = []) {
   _latestCandidates = Array.isArray(candidates) ? candidates : [];
@@ -1405,17 +1517,77 @@ function describeLatestCandidates(limit = 5) {
   return `Latest candidates (${_latestCandidates.length}) — updated ${age}\n\n${lines.join("\n")}`;
 }
 
-function formatWalletStatus(wallet, positions) {
-  const deployAmount = computeDeployAmount(wallet.sol);
+// Compact age label from minutes: <60 → "Xm", else "Y.yh".
+function fmtAgeMin(m) {
+  if (m == null || !Number.isFinite(m)) return "?";
+  return m >= 60 ? `${(m / 60).toFixed(1)}h` : `${m}m`;
+}
+
+/**
+ * RENDER-ONLY range-efficiency lines for /pool, derived from live position data
+ * (lower/upper/active bin, in_range, age, current OOR spell) + the tracked record
+ * (bin_step). Shows the bin range + width, where active sits within it (a bar +
+ * distance to each edge), the live in/OOR state, and a live in-range estimate.
+ * NOTE: minutes_out_of_range is the CURRENT OOR spell only (state resets it on
+ * re-entry), so the live in-range % is labelled an approximation (see
+ * notes/routput-progress.md RECON range-tracking).
+ */
+function buildRangeEfficiencyLines(pos, tracked) {
+  const out = [];
+  const lo = pos.lower_bin, hi = pos.upper_bin, act = pos.active_bin;
+  const binStep = tracked?.bin_step ?? null;
+  if (Number.isFinite(lo) && Number.isFinite(hi)) {
+    const width = hi - lo + 1;
+    const stepStr = binStep != null ? ` · bin_step ${binStep}` : "";
+    out.push(`Range bins: ${lo} → ${hi} (${width} bins${stepStr})`);
+    if (Number.isFinite(act)) {
+      // Position of active bin within the range (0% = lower edge, 100% = upper).
+      const span = hi - lo;
+      const posPct = span > 0 ? Math.max(0, Math.min(100, ((act - lo) / span) * 100)) : (act >= hi ? 100 : 0);
+      const filled = Math.round((posPct / 100) * 20);
+      const bar = "█".repeat(Math.max(0, Math.min(20, filled))) + "░".repeat(Math.max(0, 20 - filled));
+      out.push(`Active bin ${act}: [${bar}] ${posPct.toFixed(0)}% (${act - lo} dari bawah / ${hi - act} ke atas)`);
+    }
+  } else {
+    out.push(`Range bins: ${lo ?? "?"} → ${hi ?? "?"} | active ${act ?? "?"}`);
+  }
+  // Live state (exact) + a live in-range estimate from age & current OOR spell.
+  const state = pos.in_range ? "✅ IN RANGE" : `⚠️ OOR ${pos.minutes_out_of_range ?? 0}m`;
+  out.push(`State: ${state}`);
+  const age = pos.age_minutes, oor = pos.minutes_out_of_range ?? 0;
+  if (Number.isFinite(age) && age > 0) {
+    const inRangePct = Math.max(0, Math.min(100, ((age - oor) / age) * 100));
+    out.push(`In-range (approx): ~${inRangePct.toFixed(0)}% · in ~${fmtAgeMin(Math.max(0, age - oor))} / OOR-spell ${fmtAgeMin(oor)}`);
+  }
+  return out;
+}
+
+function formatWalletStatus(wallet, positions, rent = null) {
+  const slotsRemaining = Math.max(1, config.risk.maxPositions - (positions?.total_positions ?? 0));
+  const deployAmount = computeDeployAmount(wallet.sol, { slotsRemaining });
   const hive = isHiveMindEnabled() ? "on" : "off";
-  return [
+  const gasReserve = config.management?.gasReserve ?? 0;
+  const lines = [
     `Wallet: ${wallet.sol} SOL ($${wallet.sol_usd})`,
     `SOL price: $${wallet.sol_price}`,
     `Open positions: ${positions.total_positions}/${config.risk.maxPositions}`,
-    `Next deploy amount: ${deployAmount} SOL`,
+    `📦 Real deploy/slot: ${deployAmount} SOL  (ukuran per posisi baru)`,
+  ];
+  // Liquid SOL = wallet − gasReserve. Rent is NOT subtracted: it already left the
+  // wallet into the on-chain position accounts (it's not part of wallet.sol), so
+  // deducting it here double-counted. Held rent is shown as info — it refunds to
+  // the wallet on close, it isn't an extra reservation against today's balance.
+  const free = wallet.sol - gasReserve;
+  lines.push(`🟢 Bebas (cair): ~${free.toFixed(3)} SOL  (wallet − gasReserve ${gasReserve})`);
+  const held = rent?.totalRentSol ?? 0;
+  if (held > 0) {
+    lines.push(`🔒 Tertahan (rent ${positions.total_positions} posisi): ~${held.toFixed(3)} SOL${rent?.estimated ? " (sebagian est)" : ""} — info: sudah keluar wallet, balik saat close`);
+  }
+  lines.push(
     `Dry run: ${process.env.DRY_RUN === "true" ? "yes" : "no"}`,
     `HiveMind: ${hive}`,
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 // Condense a learning rule into a short, COMPLETE one-liner for /status.
@@ -1440,25 +1612,6 @@ function condenseRule(rule) {
   return s;
 }
 
-function formatConfigSnapshot() {
-  return [
-    "Config snapshot",
-    "",
-    `Screening source: ${config.screening.source}`,
-    `Strategy: ${config.strategy.strategy}${(config.strategy.strategyLock ?? "default") !== "default" ? ` 🔒(lock: ${config.strategy.strategyLock})` : ""} | bins: [${config.strategy.minBinsBelow}–${config.strategy.maxBinsBelow}] (volatility-scaled)`,
-    `Deploy: ${config.management.deployAmountSol} SOL | gasReserve: ${config.management.gasReserve} | maxPositions: ${config.risk.maxPositions}`,
-    `Stop loss: ${config.management.stopLossPct}% | take profit: ${config.management.takeProfitPct}%`,
-    `Trailing: ${config.management.trailingTakeProfit ? "on" : "off"} | trigger ${config.management.trailingTriggerPct}% | drop ${config.management.trailingDropPct}%`,
-    `OOR: ${config.management.outOfRangeWaitMinutes}m | cooldown ${config.management.oorCooldownTriggerCount}x / ${config.management.oorCooldownHours}h`,
-    `Repeat deploy cooldown: ${config.management.repeatDeployCooldownEnabled ? "on" : "off"} | ${config.management.repeatDeployCooldownTriggerCount}x / ${config.management.repeatDeployCooldownHours}h | min fee earned ${config.management.repeatDeployCooldownMinFeeEarnedPct}% | ${config.management.repeatDeployCooldownScope}`,
-    `Yield floor: ${config.management.minFeePerTvl24h}% | min age ${config.management.minAgeBeforeYieldCheck}m`,
-    `Screening: ${config.screening.category} / ${config.screening.timeframe} | TVL ${config.screening.minTvl}-${config.screening.maxTvl}`,
-    `GMGN interval: ${config.gmgn.interval} | OrderBy: ${config.gmgn.orderBy} | Dir: ${config.gmgn.direction}`,
-    `Intervals: manage ${config.schedule.managementIntervalMin}m | screen ${config.schedule.screeningIntervalMin}m`,
-    `HiveMind: ${isHiveMindEnabled() ? "enabled" : "disabled"}${config.hiveMind.agentId ? ` | ${config.hiveMind.agentId}` : ""}`,
-  ].join("\n");
-}
-
 // Full runtime config, grouped to match SETTINGS-GUIDE.md (GRUP 1–15) + GMGN.
 // /config shows the complete surface; long output is auto-split by sendMessage.
 // 🧬 Profil + 🗂️ Racikan identity — canonical formatter lives in preset-manager
@@ -1467,219 +1620,333 @@ function formatIdentityLines() {
   try { return formatIdentity(); } catch { return "🧬 Profil: —\n🗂️ Racikan: —"; }
 }
 
-export function formatFullConfig() {
+// RENDER-ONLY. Grouped by ORIGIN ("⚙️ Origin Dev" vs "🧩 Add by zen") per
+// config-origin.js (derived from notes/divergence-map.md). This function still
+// owns every live value + its formatting; config-origin.js owns only WHERE each
+// row lands. rowMap keys must match the keys listed in ORIGIN_SECTIONS — any
+// computed row not placed by the layout falls into a visible "review" bucket, so
+// no key is ever silently dropped (old key count == new key count).
+// Builds the rowMap (unique key → [displayLabel, valueString]) shared by the
+// full /config and /config core views. RENDER-ONLY: owns every live value + its
+// formatting; config-origin.js owns WHERE each row lands. Boolean settings
+// render as 🟢 on / ⚪ off (number settings stay plain).
+function buildConfigRowMap() {
   const c = config;
   const fmt = (v) => {
     if (v === null || v === undefined) return "off";
-    if (typeof v === "boolean") return v ? "on" : "off";
+    if (typeof v === "boolean") return v ? "🟢 on" : "⚪ off";
     if (Array.isArray(v)) return v.length ? v.join(", ") : "—";
     return String(v);
   };
   const secret = (v) => (v && String(v).length ? "(set)" : "(unset)");
-  const group = (title, rows) => [title, ...rows.map(([k, v]) => `  ${k}: ${v}`)].join("\n");
   const ir = c.gmgn.indicatorRules || {};
-  const gmgnActive = String(c.screening.source).toLowerCase() === "gmgn";
 
-  const blocks = [
-    group("━ GRUP 1 — Risiko & Modal", [
-      ["dryRun", fmt(String(process.env.DRY_RUN || "").toLowerCase() === "true")],
-      ["maxPositions", fmt(c.risk.maxPositions)],
-      ["maxDeployAmount", fmt(c.risk.maxDeployAmount)],
-      ["deployAmountSol", fmt(c.management.deployAmountSol)],
-      ["positionSizePct", fmt(c.management.positionSizePct)],
-      ["minSolToOpen", fmt(c.management.minSolToOpen)],
-      ["gasReserve", `${fmt(c.management.gasReserve)}${c.management.gasReserveAutoTune ? " (auto-tune ON)" : " (manual)"}`],
-      ["gasReserveAutoTune", fmt(c.management.gasReserveAutoTune)],
-      ["gasReserveBufferDays", fmt(c.management.gasReserveBufferDays)],
-      ["gasReserveFloorSol", fmt(c.management.gasReserveFloorSol)],
-    ]),
-    group("━ GRUP 2 — Exit Rules", [
-      ["stopLossPct", fmt(c.management.stopLossPct)],
-      ["takeProfitPct", fmt(c.management.takeProfitPct)],
-      ["trailingTakeProfit", fmt(c.management.trailingTakeProfit)],
-      ["trailingTriggerPct", fmt(c.management.trailingTriggerPct)],
-      ["trailingDropPct", fmt(c.management.trailingDropPct)],
-      ["pnlSanityMaxDiffPct", fmt(c.management.pnlSanityMaxDiffPct)],
-    ]),
-    group("━ GRUP 3 — Out Of Range (OOR)", [
-      ["outOfRangeBinsToClose", fmt(c.management.outOfRangeBinsToClose)],
-      ["outOfRangeWaitMinutes", fmt(c.management.outOfRangeWaitMinutes)],
-      ["oorCooldownTriggerCount", fmt(c.management.oorCooldownTriggerCount)],
-      ["oorCooldownHours", fmt(c.management.oorCooldownHours)],
-    ]),
-    group("━ GRUP 4 — Yield Check", [
-      ["minFeePerTvl24h", fmt(c.management.minFeePerTvl24h)],
-      ["minAgeBeforeYieldCheck", fmt(c.management.minAgeBeforeYieldCheck)],
-      ["minVolumeToRebalance", fmt(c.management.minVolumeToRebalance)],
-    ]),
-    group("━ GRUP 5 — Claim & Cooldown Deploy Ulang", [
-      ["minClaimAmount", fmt(c.management.minClaimAmount)],
-      ["autoSwapAfterClaim", fmt(c.management.autoSwapAfterClaim)],
-      ["repeatDeployCooldownEnabled", fmt(c.management.repeatDeployCooldownEnabled)],
-      ["repeatDeployCooldownTriggerCount", fmt(c.management.repeatDeployCooldownTriggerCount)],
-      ["repeatDeployCooldownHours", fmt(c.management.repeatDeployCooldownHours)],
-      ["repeatDeployCooldownScope", fmt(c.management.repeatDeployCooldownScope)],
-      ["repeatDeployCooldownMinFeeEarnedPct", fmt(c.management.repeatDeployCooldownMinFeeEarnedPct)],
-    ]),
-    group("━ GRUP 6 — Screening (Filter Pool)", [
-      ["screeningSource", fmt(c.screening.source)],
-      ["timeframe", fmt(c.screening.timeframe)],
-      ["category", fmt(c.screening.category)],
-      ["screeningCategories", fmt(c.screening.categories)],
-      ["minTvl", fmt(c.screening.minTvl)],
-      ["maxTvl", fmt(c.screening.maxTvl)],
-      ["minVolume", fmt(c.screening.minVolume)],
-      ["minFeeActiveTvlRatio", fmt(c.screening.minFeeActiveTvlRatio)],
-      ["minTokenFeesSol", fmt(c.screening.minTokenFeesSol)],
-      ["minOrganic", fmt(c.screening.minOrganic)],
-      ["minQuoteOrganic", fmt(c.screening.minQuoteOrganic)],
-      ["minMcap", fmt(c.screening.minMcap)],
-      ["maxMcap", fmt(c.screening.maxMcap)],
-      ["minHolders", fmt(c.screening.minHolders)],
-      ["minTokenAgeHours", fmt(c.screening.minTokenAgeHours)],
-      ["maxTokenAgeHours", fmt(c.screening.maxTokenAgeHours)],
-      ["athFilterPct", fmt(c.screening.athFilterPct)],
-      ["minBinStep", fmt(c.screening.minBinStep)],
-      ["maxBinStep", fmt(c.screening.maxBinStep)],
-      ["excludeHighSupplyConcentration", fmt(c.screening.excludeHighSupplyConcentration)],
-    ]),
-    group("━ GRUP 7 — Keamanan Token", [
-      ["maxBundlePct", fmt(c.screening.maxBundlePct)],
-      ["maxBotHoldersPct", fmt(c.screening.maxBotHoldersPct)],
-      ["maxTop10Pct", fmt(c.screening.maxTop10Pct)],
-      ["avoidPvpSymbols", fmt(c.screening.avoidPvpSymbols)],
-      ["blockPvpSymbols", fmt(c.screening.blockPvpSymbols)],
-      ["allowedLaunchpads", fmt(c.screening.allowedLaunchpads)],
-      ["blockedLaunchpads", fmt(c.screening.blockedLaunchpads)],
-    ]),
-    group("━ GRUP 8 — Sinyal Tambahan", [
-      ["useDiscordSignals", fmt(c.screening.useDiscordSignals)],
-      ["discordSignalMode", fmt(c.screening.discordSignalMode)],
-    ]),
-    group("━ GRUP 9 — Strategi Range (Bins)", [
-      ["strategy", fmt(c.strategy.strategy)],
-      ["strategyLock", fmt(c.strategy.strategyLock ?? "default")],
-      ["minBinsBelow", fmt(c.strategy.minBinsBelow)],
-      ["maxBinsBelow", fmt(c.strategy.maxBinsBelow)],
-      ["defaultBinsBelow", fmt(c.strategy.defaultBinsBelow)],
-    ]),
-    group("━ GRUP 10 — Jadwal Bot", [
-      ["managementIntervalMin", fmt(c.schedule.managementIntervalMin)],
-      ["screeningIntervalMin", fmt(c.schedule.screeningIntervalMin)],
-      ["adaptiveScreening", fmt(c.schedule.adaptiveScreening)],
-      ["maxScreeningIntervalMin", fmt(c.schedule.maxScreeningIntervalMin)],
-      ["healthCheckIntervalMin", fmt(c.schedule.healthCheckIntervalMin)],
-    ]),
-    group("━ GRUP 11 — Model AI (LLM)", [
-      ["managementModel", fmt(c.llm.managementModel)],
-      ["screeningModel", fmt(c.llm.screeningModel)],
-      ["generalModel", fmt(c.llm.generalModel)],
-      ["temperature", fmt(c.llm.temperature)],
-      ["maxTokens", fmt(c.llm.maxTokens)],
-      ["generalMaxTokens", fmt(c.llm.generalMaxTokens)],
-      ["maxSteps", fmt(c.llm.maxSteps)],
-    ]),
-    group("━ GRUP 12 — Darwin (Bobot Sinyal)", [
-      ["darwinEnabled", fmt(c.darwin.enabled)],
-      ["darwinWindowDays", fmt(c.darwin.windowDays)],
-      ["darwinRecalcEvery", fmt(c.darwin.recalcEvery)],
-      ["darwinBoost", fmt(c.darwin.boostFactor)],
-      ["darwinDecay", fmt(c.darwin.decayFactor)],
-      ["darwinFloor", fmt(c.darwin.weightFloor)],
-      ["darwinCeiling", fmt(c.darwin.weightCeiling)],
-      ["darwinMinSamples", fmt(c.darwin.minSamples)],
-    ]),
-    group("━ GRUP 13 — Chart Indicators", [
-      ["enabled", fmt(c.indicators.enabled)],
-      ["entryPreset", fmt(c.indicators.entryPreset)],
-      ["exitPreset", fmt(c.indicators.exitPreset)],
-      ["exitEnabled", fmt(c.indicators.exitEnabled)],
-      ["rejectAlreadyAtBottom", fmt(c.indicators.rejectAlreadyAtBottom)],
-      ["rsiLength", fmt(c.indicators.rsiLength)],
-      ["intervals", fmt(c.indicators.intervals)],
-      ["candles", fmt(c.indicators.candles)],
-      ["rsiOversold", fmt(c.indicators.rsiOversold)],
-      ["rsiOverbought", fmt(c.indicators.rsiOverbought)],
-      ["requireAllIntervals", fmt(c.indicators.requireAllIntervals)],
-      ["smiPdLookback", fmt(c.indicators.smiPdLookback)],
-      ["smiPaLookback", fmt(c.indicators.smiPaLookback)],
-      ["smiCrossWindow", fmt(c.indicators.smiCrossWindow)],
-    ]),
-    group("━ GRUP 14 — Koneksi & Relay", [
-      ["lpAgentRelayEnabled", fmt(c.api.lpAgentRelayEnabled)],
-      ["solMode", fmt(c.management.solMode)],
-      ["agentId", fmt(c.hiveMind.agentId)],
-      ["publicApiKey", secret(c.api.publicApiKey)],
-    ]),
-    group("━ GRUP 15 — HiveMind", [
-      ["status", isHiveMindEnabled() ? "enabled" : "disabled"],
-      ["hiveMindPullMode", fmt(c.hiveMind.pullMode)],
-      ["hiveMindUrl", fmt(c.hiveMind.url)],
-    ]),
-    group("━ 🧪 GRUP 16 — Eksperimen (default OFF = pabrik)", [
-      ["exitLiquidityCheck", fmt(c.experiments?.exitLiquidityCheck)],
-      ["exitLiquidityMaxSlippagePct", fmt(c.experiments?.exitLiquidityMaxSlippagePct)],
-      ["marketRegimeGate", fmt(c.experiments?.marketRegimeGate)],
-      ["marketRegimeMaxDrop24hPct", fmt(c.experiments?.marketRegimeMaxDrop24hPct)],
-      ["candidateMomentum", fmt(c.experiments?.candidateMomentum)],
-      ["narrativeProfileSignal", fmt(c.experiments?.narrativeProfileSignal)],
-      ["expectedYieldSignal", fmt(c.experiments?.expectedYieldSignal)],
-      ["convictionSizing", fmt(c.experiments?.convictionSizing)],
-      ["convictionSizingMaxAdjustPct", fmt(c.experiments?.convictionSizingMaxAdjustPct)],
-      ["counterfactualReview", fmt(c.experiments?.counterfactualReview)],
-      ["counterfactualMinMcapGainPct", fmt(c.experiments?.counterfactualMinMcapGainPct)],
-      ["smartWalletMomentum", fmt(c.experiments?.smartWalletMomentum)],
-      ["idleScreeningCooldown", fmt(c.experiments?.idleScreeningCooldown)],
-      ["idleScreeningCooldownMin", fmt(c.experiments?.idleScreeningCooldownMin)],
-      ["paperTrading", `${fmt(c.experiments?.paperTrading)}${c.experiments?.paperTrading ? " (DRY-RUN sim)" : ""}`],
-      ["usePaperHistoryWhenLive", `${fmt(c.experiments?.usePaperHistoryWhenLive)}${c.experiments?.usePaperHistoryWhenLive ? " (live: paper=soft ref)" : ""}`],
-    ]),
-    group("━ GRUP 17 — Laporan", [
-      ["learningReportEvery", `${fmt(c.reports?.learningReportEvery)}${c.reports?.learningReportEvery > 0 ? " (ON)" : " (OFF)"}`],
-      ["learningReportTrendN", fmt(c.reports?.learningReportTrendN)],
-    ]),
-    group(`━ GMGN — ${gmgnActive ? "AKTIF (source=gmgn)" : `tidak aktif (source=${c.screening.source}, blok ini diabaikan)`}`, [
-      ["interval", fmt(c.gmgn.interval)],
-      ["orderBy", fmt(c.gmgn.orderBy)],
-      ["direction", fmt(c.gmgn.direction)],
-      ["platforms", fmt(c.gmgn.platforms)],
-      ["filters", fmt(c.gmgn.filters)],
-      ["minMcap", fmt(c.gmgn.minMcap)],
-      ["maxMcap", fmt(c.gmgn.maxMcap)],
-      ["minTvl", fmt(c.gmgn.minTvl)],
-      ["minVolume", fmt(c.gmgn.minVolume)],
-      ["minHolders", fmt(c.gmgn.minHolders)],
-      ["minTokenAgeHours", fmt(c.gmgn.minTokenAgeHours)],
-      ["maxTokenAgeHours", fmt(c.gmgn.maxTokenAgeHours)],
-      ["athFilterPct", fmt(c.gmgn.athFilterPct)],
-      ["minTotalFeeSol", fmt(c.gmgn.minTotalFeeSol)],
-      ["requireKol", fmt(c.gmgn.requireKol)],
-      ["minKolCount", fmt(c.gmgn.minKolCount)],
-      ["minSmartDegenCount", fmt(c.gmgn.minSmartDegenCount)],
-      ["maxRugRatio", fmt(c.gmgn.maxRugRatio)],
-      ["maxBundlerRate", fmt(c.gmgn.maxBundlerRate)],
-      ["maxRatTraderRate", fmt(c.gmgn.maxRatTraderRate)],
-      ["maxFreshWalletRate", fmt(c.gmgn.maxFreshWalletRate)],
-      ["maxDevTeamHoldRate", fmt(c.gmgn.maxDevTeamHoldRate)],
-      ["maxBotDegenRate", fmt(c.gmgn.maxBotDegenRate)],
-      ["maxSniperCount", fmt(c.gmgn.maxSniperCount)],
-      ["maxSniperHoldRate", fmt(c.gmgn.maxSniperHoldRate)],
-      ["preferredKolNames", fmt(c.gmgn.preferredKolNames)],
-      ["preferredKolMinHoldPct", fmt(c.gmgn.preferredKolMinHoldPct)],
-      ["dumpKolNames", fmt(c.gmgn.dumpKolNames)],
-      ["dumpKolMinHoldPct", fmt(c.gmgn.dumpKolMinHoldPct)],
-      ["indicatorFilter", fmt(c.gmgn.indicatorFilter)],
-      ["indicatorInterval", fmt(c.gmgn.indicatorInterval)],
-      ["rules.requireBullishSupertrend", fmt(ir.requireBullishSupertrend)],
-      ["rules.rejectAlreadyAtBottom", fmt(ir.rejectAlreadyAtBottom)],
-      ["rules.requireAboveSupertrend", fmt(ir.requireAboveSupertrend)],
-      ["rules.minRsi", fmt(ir.minRsi)],
-      ["rules.maxRsi", fmt(ir.maxRsi)],
-      ["rules.requireBbPosition", fmt(ir.requireBbPosition)],
-    ]),
-  ];
+  // rowMap: unique key → [displayLabel, valueString]. GMGN screening rows are
+  // namespaced "gmgn." so they don't collide with their screening twins; their
+  // visible label stays the short form (interval, minTvl, …) as before.
+  const rowMap = {
+    // ── Screening (dev) ──
+    timeframe: ["timeframe", fmt(c.screening.timeframe)],
+    category: ["category", fmt(c.screening.category)],
+    minTvl: ["minTvl", fmt(c.screening.minTvl)],
+    maxTvl: ["maxTvl", fmt(c.screening.maxTvl)],
+    minVolume: ["minVolume", fmt(c.screening.minVolume)],
+    minFeeActiveTvlRatio: ["minFeeActiveTvlRatio", fmt(c.screening.minFeeActiveTvlRatio)],
+    minTokenFeesSol: ["minTokenFeesSol", fmt(c.screening.minTokenFeesSol)],
+    minOrganic: ["minOrganic", fmt(c.screening.minOrganic)],
+    minQuoteOrganic: ["minQuoteOrganic", fmt(c.screening.minQuoteOrganic)],
+    minMcap: ["minMcap", fmt(c.screening.minMcap)],
+    maxMcap: ["maxMcap", fmt(c.screening.maxMcap)],
+    minHolders: ["minHolders", fmt(c.screening.minHolders)],
+    minTokenAgeHours: ["minTokenAgeHours", fmt(c.screening.minTokenAgeHours)],
+    maxTokenAgeHours: ["maxTokenAgeHours", fmt(c.screening.maxTokenAgeHours)],
+    minBinStep: ["minBinStep", fmt(c.screening.minBinStep)],
+    maxBinStep: ["maxBinStep", fmt(c.screening.maxBinStep)],
+    excludeHighSupplyConcentration: ["excludeHighSupplyConcentration", fmt(c.screening.excludeHighSupplyConcentration)],
+    maxBotHoldersPct: ["maxBotHoldersPct", fmt(c.screening.maxBotHoldersPct)],
+    maxTop10Pct: ["maxTop10Pct", fmt(c.screening.maxTop10Pct)],
+    avoidPvpSymbols: ["avoidPvpSymbols", fmt(c.screening.avoidPvpSymbols)],
+    blockPvpSymbols: ["blockPvpSymbols", fmt(c.screening.blockPvpSymbols)],
+    allowedLaunchpads: ["allowedLaunchpads", fmt(c.screening.allowedLaunchpads)],
+    blockedLaunchpads: ["blockedLaunchpads", fmt(c.screening.blockedLaunchpads)],
+    useDiscordSignals: ["useDiscordSignals", fmt(c.screening.useDiscordSignals)],
+    discordSignalMode: ["discordSignalMode", fmt(c.screening.discordSignalMode)],
 
-  return `⚙️ Config lengkap (semua grup)\n\n${formatIdentityLines()}\n\n${blocks.join("\n\n")}\n\nUbah lewat /settings (menu tombol) atau chat biasa. Detail tiap setting: SETTINGS-GUIDE.md`;
+    // ── Management & Risk (dev) ──
+    dryRun: ["dryRun", fmt(String(process.env.DRY_RUN || "").toLowerCase() === "true")],
+    maxPositions: ["maxPositions", fmt(c.risk.maxPositions)],
+    maxDeployAmount: ["maxDeployAmount", fmt(c.risk.maxDeployAmount)],
+    deployAmountSol: ["deployAmountSol", fmt(c.management.deployAmountSol)],
+    positionSizePct: ["positionSizePct", fmt(c.management.positionSizePct)],
+    minSolToOpen: ["minSolToOpen", fmt(c.management.minSolToOpen)],
+    gasReserve: ["gasReserve", `${fmt(c.management.gasReserve)}${c.management.gasReserveAutoTune ? " (auto-tune ON)" : " (manual)"}`],
+    stopLossPct: ["stopLossPct", fmt(c.management.stopLossPct)],
+    takeProfitPct: ["takeProfitPct", fmt(c.management.takeProfitPct)],
+    trailingTakeProfit: ["trailingTakeProfit", fmt(c.management.trailingTakeProfit)],
+    trailingTriggerPct: ["trailingTriggerPct", fmt(c.management.trailingTriggerPct)],
+    trailingDropPct: ["trailingDropPct", fmt(c.management.trailingDropPct)],
+    outOfRangeBinsToClose: ["outOfRangeBinsToClose", fmt(c.management.outOfRangeBinsToClose)],
+    outOfRangeWaitMinutes: ["outOfRangeWaitMinutes", fmt(c.management.outOfRangeWaitMinutes)],
+    oorCooldownTriggerCount: ["oorCooldownTriggerCount", fmt(c.management.oorCooldownTriggerCount)],
+    oorCooldownHours: ["oorCooldownHours", fmt(c.management.oorCooldownHours)],
+    minFeePerTvl24h: ["minFeePerTvl24h", fmt(c.management.minFeePerTvl24h)],
+    minAgeBeforeYieldCheck: ["minAgeBeforeYieldCheck", fmt(c.management.minAgeBeforeYieldCheck)],
+    minVolumeToRebalance: ["minVolumeToRebalance", fmt(c.management.minVolumeToRebalance)],
+    minClaimAmount: ["minClaimAmount", fmt(c.management.minClaimAmount)],
+    autoSwapAfterClaim: ["autoSwapAfterClaim", fmt(c.management.autoSwapAfterClaim)],
+    repeatDeployCooldownEnabled: ["repeatDeployCooldownEnabled", fmt(c.management.repeatDeployCooldownEnabled)],
+    repeatDeployCooldownTriggerCount: ["repeatDeployCooldownTriggerCount", fmt(c.management.repeatDeployCooldownTriggerCount)],
+    repeatDeployCooldownHours: ["repeatDeployCooldownHours", fmt(c.management.repeatDeployCooldownHours)],
+    repeatDeployCooldownScope: ["repeatDeployCooldownScope", fmt(c.management.repeatDeployCooldownScope)],
+    repeatDeployCooldownMinFeeEarnedPct: ["repeatDeployCooldownMinFeeEarnedPct", fmt(c.management.repeatDeployCooldownMinFeeEarnedPct)],
+    solMode: ["solMode", fmt(c.management.solMode)],
+
+    // ── Strategy & Bins (dev) ──
+    strategy: ["strategy", fmt(c.strategy.strategy)],
+    minBinsBelow: ["minBinsBelow", fmt(c.strategy.minBinsBelow)],
+    maxBinsBelow: ["maxBinsBelow", fmt(c.strategy.maxBinsBelow)],
+    defaultBinsBelow: ["defaultBinsBelow", fmt(c.strategy.defaultBinsBelow)],
+
+    // ── Schedule (dev) ──
+    managementIntervalMin: ["managementIntervalMin", fmt(c.schedule.managementIntervalMin)],
+    screeningIntervalMin: ["screeningIntervalMin", fmt(c.schedule.screeningIntervalMin)],
+    healthCheckIntervalMin: ["healthCheckIntervalMin", fmt(c.schedule.healthCheckIntervalMin)],
+
+    // ── LLM (dev) ──
+    managementModel: ["managementModel", fmt(c.llm.managementModel)],
+    screeningModel: ["screeningModel", fmt(c.llm.screeningModel)],
+    generalModel: ["generalModel", fmt(c.llm.generalModel)],
+    temperature: ["temperature", fmt(c.llm.temperature)],
+    maxTokens: ["maxTokens", fmt(c.llm.maxTokens)],
+    maxSteps: ["maxSteps", fmt(c.llm.maxSteps)],
+
+    // ── Darwin (dev) ──
+    darwinEnabled: ["darwinEnabled", fmt(c.darwin.enabled)],
+    darwinWindowDays: ["darwinWindowDays", fmt(c.darwin.windowDays)],
+    darwinRecalcEvery: ["darwinRecalcEvery", fmt(c.darwin.recalcEvery)],
+    darwinBoost: ["darwinBoost", fmt(c.darwin.boostFactor)],
+    darwinDecay: ["darwinDecay", fmt(c.darwin.decayFactor)],
+    darwinFloor: ["darwinFloor", fmt(c.darwin.weightFloor)],
+    darwinCeiling: ["darwinCeiling", fmt(c.darwin.weightCeiling)],
+    darwinMinSamples: ["darwinMinSamples", fmt(c.darwin.minSamples)],
+
+    // ── Indicators (dev) ──
+    enabled: ["enabled", fmt(c.indicators.enabled)],
+    entryPreset: ["entryPreset", fmt(c.indicators.entryPreset)],
+    exitPreset: ["exitPreset", `${fmt(c.indicators.exitPreset)}${c.indicators.exitEnabled ? "" : " (gerbang exit ⚪ off — preset ini belum aktif)"}`],
+    rsiLength: ["rsiLength", fmt(c.indicators.rsiLength)],
+    intervals: ["intervals", fmt(c.indicators.intervals)],
+    candles: ["candles", fmt(c.indicators.candles)],
+    rsiOversold: ["rsiOversold", fmt(c.indicators.rsiOversold)],
+    rsiOverbought: ["rsiOverbought", fmt(c.indicators.rsiOverbought)],
+    requireAllIntervals: ["requireAllIntervals", fmt(c.indicators.requireAllIntervals)],
+
+    // ── Infra/Meridian (dev) ──
+    lpAgentRelayEnabled: ["lpAgentRelayEnabled", fmt(c.api.lpAgentRelayEnabled)],
+    agentId: ["agentId", fmt(c.hiveMind.agentId)],
+    publicApiKey: ["publicApiKey", secret(c.api.publicApiKey)],
+    pnlSource: ["pnlSource", fmt(c.pnl.source)],
+    pnlRpcUrl: ["pnlRpcUrl", fmt(c.pnl.rpcUrl)],
+    pnlPollIntervalSec: ["pnlPollIntervalSec", fmt(c.pnl.pollIntervalSec)],
+    pnlDepositCacheTtlSec: ["pnlDepositCacheTtlSec", fmt(c.pnl.depositCacheTtlSec)],
+    pnlSanityMaxDiffPct: ["pnlSanityMaxDiffPct", fmt(c.management.pnlSanityMaxDiffPct)],
+    gmgnFeeSource: ["gmgnFeeSource", fmt(c.gmgn.feeSource)],
+    hiveMindStatus: ["status", isHiveMindEnabled() ? "enabled" : "disabled"],
+    hiveMindPullMode: ["hiveMindPullMode", fmt(c.hiveMind.pullMode)],
+    hiveMindUrl: ["hiveMindUrl", fmt(c.hiveMind.url)],
+
+    // ── Screening+ (zen) ──
+    screeningSource: ["screeningSource", fmt(c.screening.source)],
+    screeningCategories: ["screeningCategories", fmt(c.screening.categories)],
+
+    // ── Screening-GMGN (zen) ──
+    "gmgn.interval": ["interval", fmt(c.gmgn.interval)],
+    "gmgn.orderBy": ["orderBy", fmt(c.gmgn.orderBy)],
+    "gmgn.direction": ["direction", fmt(c.gmgn.direction)],
+    "gmgn.platforms": ["platforms", fmt(c.gmgn.platforms)],
+    "gmgn.filters": ["filters", fmt(c.gmgn.filters)],
+    "gmgn.minMcap": ["minMcap", fmt(c.gmgn.minMcap)],
+    "gmgn.maxMcap": ["maxMcap", fmt(c.gmgn.maxMcap)],
+    "gmgn.minTvl": ["minTvl", fmt(c.gmgn.minTvl)],
+    "gmgn.minVolume": ["minVolume", fmt(c.gmgn.minVolume)],
+    "gmgn.minHolders": ["minHolders", fmt(c.gmgn.minHolders)],
+    "gmgn.minTokenAgeHours": ["minTokenAgeHours", fmt(c.gmgn.minTokenAgeHours)],
+    "gmgn.maxTokenAgeHours": ["maxTokenAgeHours", fmt(c.gmgn.maxTokenAgeHours)],
+    "gmgn.athFilterPct": ["athFilterPct", fmt(c.gmgn.athFilterPct)],
+    "gmgn.minTotalFeeSol": ["minTotalFeeSol", fmt(c.gmgn.minTotalFeeSol)],
+    "gmgn.requireKol": ["requireKol", fmt(c.gmgn.requireKol)],
+    "gmgn.minKolCount": ["minKolCount", fmt(c.gmgn.minKolCount)],
+    "gmgn.minSmartDegenCount": ["minSmartDegenCount", fmt(c.gmgn.minSmartDegenCount)],
+    "gmgn.maxRugRatio": ["maxRugRatio", fmt(c.gmgn.maxRugRatio)],
+    "gmgn.maxBundlerRate": ["maxBundlerRate", fmt(c.gmgn.maxBundlerRate)],
+    "gmgn.maxRatTraderRate": ["maxRatTraderRate", fmt(c.gmgn.maxRatTraderRate)],
+    "gmgn.maxFreshWalletRate": ["maxFreshWalletRate", fmt(c.gmgn.maxFreshWalletRate)],
+    "gmgn.maxDevTeamHoldRate": ["maxDevTeamHoldRate", fmt(c.gmgn.maxDevTeamHoldRate)],
+    "gmgn.maxBotDegenRate": ["maxBotDegenRate", fmt(c.gmgn.maxBotDegenRate)],
+    "gmgn.maxSniperCount": ["maxSniperCount", fmt(c.gmgn.maxSniperCount)],
+    "gmgn.maxSniperHoldRate": ["maxSniperHoldRate", fmt(c.gmgn.maxSniperHoldRate)],
+    "gmgn.preferredKolNames": ["preferredKolNames", fmt(c.gmgn.preferredKolNames)],
+    "gmgn.preferredKolMinHoldPct": ["preferredKolMinHoldPct", fmt(c.gmgn.preferredKolMinHoldPct)],
+    "gmgn.dumpKolNames": ["dumpKolNames", fmt(c.gmgn.dumpKolNames)],
+    "gmgn.dumpKolMinHoldPct": ["dumpKolMinHoldPct", fmt(c.gmgn.dumpKolMinHoldPct)],
+    "gmgn.indicatorFilter": ["indicatorFilter", fmt(c.gmgn.indicatorFilter)],
+    "gmgn.indicatorInterval": ["indicatorInterval", fmt(c.gmgn.indicatorInterval)],
+    "gmgn.rules.requireBullishSupertrend": ["rules.requireBullishSupertrend", fmt(ir.requireBullishSupertrend)],
+    "gmgn.rules.rejectAlreadyAtBottom": ["rules.rejectAlreadyAtBottom", fmt(ir.rejectAlreadyAtBottom)],
+    "gmgn.rules.requireAboveSupertrend": ["rules.requireAboveSupertrend", fmt(ir.requireAboveSupertrend)],
+    "gmgn.rules.minRsi": ["rules.minRsi", fmt(ir.minRsi)],
+    "gmgn.rules.maxRsi": ["rules.maxRsi", fmt(ir.maxRsi)],
+    "gmgn.rules.requireBbPosition": ["rules.requireBbPosition", fmt(ir.requireBbPosition)],
+
+    // ── Management+ (zen) ──
+    sizingMode: ["sizingMode", `${fmt(c.management.sizingMode)}${c.management.sizingMode === "maximize" ? " (bagi modal rata across slot)" : " (pabrik: pct×wallet)"}`],
+    rentPerPositionSol: ["rentPerPositionSol", `${fmt(c.management.rentPerPositionSol)}${(c.management.rentPerPositionSol ?? 0) > 0 ? " 🟢 (dicadangkan/posisi)" : " ⚪ (off)"}`],
+    gasReserveAutoTune: ["gasReserveAutoTune", fmt(c.management.gasReserveAutoTune)],
+    gasReserveBufferDays: ["gasReserveBufferDays", fmt(c.management.gasReserveBufferDays)],
+    gasReserveFloorSol: ["gasReserveFloorSol", fmt(c.management.gasReserveFloorSol)],
+
+    // ── Strategy+ (zen) ──
+    strategyLock: ["strategyLock", fmt(c.strategy.strategyLock ?? "default")],
+
+    // ── Schedule+ (zen) ──
+    adaptiveScreening: ["adaptiveScreening", fmt(c.schedule.adaptiveScreening)],
+    maxScreeningIntervalMin: ["maxScreeningIntervalMin", fmt(c.schedule.maxScreeningIntervalMin)],
+
+    // ── LLM+ (zen) ──
+    generalMaxTokens: ["generalMaxTokens", fmt(c.llm.generalMaxTokens)],
+
+    // ── Indicators+ (zen) ──
+    exitEnabled: ["exitEnabled", fmt(c.indicators.exitEnabled)],
+    rejectAlreadyAtBottom: ["rejectAlreadyAtBottom", fmt(c.indicators.rejectAlreadyAtBottom)],
+    smiPdLookback: ["smiPdLookback", fmt(c.indicators.smiPdLookback)],
+    smiPaLookback: ["smiPaLookback", fmt(c.indicators.smiPaLookback)],
+    smiCrossWindow: ["smiCrossWindow", fmt(c.indicators.smiCrossWindow)],
+
+    // ── Reports (zen) ──
+    learningReportEvery: ["learningReportEvery", `${fmt(c.reports?.learningReportEvery)}${c.reports?.learningReportEvery > 0 ? " 🟢 (ON)" : " ⚪ (OFF)"}`],
+    learningReportTrendN: ["learningReportTrendN", fmt(c.reports?.learningReportTrendN)],
+
+    // ── Learning/Evolve (zen) ──
+    evolveEnabled: ["evolveEnabled", `${fmt(c.learning?.evolveEnabled)}${c.learning?.evolveEnabled === false ? " (auto-evolve BEKU — threshold manual)" : " (auto-evolve aktif)"}`],
+
+    // ── 🧪 Experiments (zen) ──
+    exitLiquidityCheck: ["exitLiquidityCheck", fmt(c.experiments?.exitLiquidityCheck)],
+    exitLiquidityMaxSlippagePct: ["exitLiquidityMaxSlippagePct", fmt(c.experiments?.exitLiquidityMaxSlippagePct)],
+    marketRegimeGate: ["marketRegimeGate", fmt(c.experiments?.marketRegimeGate)],
+    marketRegimeMaxDrop24hPct: ["marketRegimeMaxDrop24hPct", fmt(c.experiments?.marketRegimeMaxDrop24hPct)],
+    candidateMomentum: ["candidateMomentum", fmt(c.experiments?.candidateMomentum)],
+    narrativeProfileSignal: ["narrativeProfileSignal", fmt(c.experiments?.narrativeProfileSignal)],
+    expectedYieldSignal: ["expectedYieldSignal", fmt(c.experiments?.expectedYieldSignal)],
+    convictionSizing: ["convictionSizing", fmt(c.experiments?.convictionSizing)],
+    convictionSizingMaxAdjustPct: ["convictionSizingMaxAdjustPct", fmt(c.experiments?.convictionSizingMaxAdjustPct)],
+    counterfactualReview: ["counterfactualReview", fmt(c.experiments?.counterfactualReview)],
+    counterfactualMinMcapGainPct: ["counterfactualMinMcapGainPct", fmt(c.experiments?.counterfactualMinMcapGainPct)],
+    smartWalletMomentum: ["smartWalletMomentum", fmt(c.experiments?.smartWalletMomentum)],
+    idleScreeningCooldown: ["idleScreeningCooldown", fmt(c.experiments?.idleScreeningCooldown)],
+    idleScreeningCooldownMin: ["idleScreeningCooldownMin", fmt(c.experiments?.idleScreeningCooldownMin)],
+    paperTrading: ["paperTrading", `${fmt(c.experiments?.paperTrading)}${c.experiments?.paperTrading ? " (DRY-RUN sim)" : ""}`],
+    usePaperHistoryWhenLive: ["usePaperHistoryWhenLive", `${fmt(c.experiments?.usePaperHistoryWhenLive)}${c.experiments?.usePaperHistoryWhenLive ? " (live: paper=soft ref)" : ""}`],
+  };
+
+  return rowMap;
+}
+
+// Render one subgroup's rows: bucket keys by sub-cluster (first-seen order), emit
+// an L3 header per cluster when the subgroup spans >1, and indent the L4 children
+// (beranak anak) under their induk. SHARED by /config (formatFullConfig) and the
+// /settings group pages so both group identical keys the same way — single source
+// of truth for the sub-cluster layout. Returns the text + the keys it placed (the
+// caller uses `placed` for /config's orphan safety net).
+function renderSubclusterRows(keys, rowMap) {
+  const note = (k) => (ORIGIN_NOTES[k] ? ` ${ORIGIN_NOTES[k]}` : "");
+  const dash = "┈┈┈┈┈┈┈┈┈┈";
+  const order = [];
+  const members = {};
+  for (const k of keys) {
+    if (!rowMap[k]) continue;
+    const cl = KEY_SUBCLUSTER[k] || "_misc";
+    if (!members[cl]) { members[cl] = []; order.push(cl); }
+    members[cl].push(k);
+  }
+  const showL3 = order.length > 1;
+  const out = [];
+  const placed = [];
+  for (const cl of order) {
+    const meta = SUB_CLUSTER_META[cl];
+    if (showL3 && meta) {
+      out.push(`  ${meta.emoji} ${meta.label}`);
+      out.push(`  ${dash}`);
+    }
+    for (const k of members[cl]) {
+      placed.push(k);
+      const [label, value] = rowMap[k];
+      const indent = L4_CHILDREN.has(k) ? "      ↳ " : "    ";
+      out.push(`${indent}${label}: ${value}${note(k)}`);
+    }
+  }
+  return { text: out.join("\n"), placed };
+}
+
+// Dynamic per-subgroup description (GMGN block flips with screeningSource).
+function subgroupDesc(sg) {
+  if (sg.id !== "zen-gmgn") return sg.desc;
+  return String(config.screening.source).toLowerCase() === "gmgn"
+    ? "Pipeline screening GMGN AKTIF (source=gmgn)."
+    : `Pipeline screening GMGN tidak aktif (source=${config.screening.source}, blok ini diabaikan).`;
+}
+
+// RENDER-ONLY 4-layer /config: L1 origin section (⚙️ Origin Dev / 🧩 Add by zen)
+// → L2 grup (▸) → L3 sub-cluster (emoji + ┈ line, shown when a grup has >1
+// cluster) → L4 mini-grup (the four beranak families indent their anak under the
+// induk via ↳). Layout/placement lives in config-origin.js; this owns no values.
+export function formatFullConfig() {
+  const rowMap = buildConfigRowMap();
+  const placed = new Set();
+
+  const sectionBlocks = ORIGIN_SECTIONS.map((sec) => {
+    const subBlocks = sec.subgroups.map((sg) => {
+      // Racikan/Identitas sub-group renders the identity banner, not key rows.
+      if (sg.identity) {
+        const body = formatIdentityLines().split("\n").map((l) => `    ${l}`).join("\n");
+        return `▸ ${sg.title} · ${sg.desc}\n${body}`;
+      }
+      const { text, placed: pl } = renderSubclusterRows(sg.keys, rowMap);
+      pl.forEach((k) => placed.add(k));
+      return `▸ ${sg.title} · ${subgroupDesc(sg)}\n${text}`;
+    });
+    const bar = "━━━━━━━━━━━━━━━━━━━━━━";
+    return `${bar}\n${sec.title} — ${sec.blurb}\n${bar}\n\n${subBlocks.join("\n\n")}`;
+  });
+
+  // Safety net: any computed row the layout did not place is surfaced (never
+  // dropped) so old key count == new key count even if a key is mis-listed.
+  const orphans = Object.keys(rowMap).filter((k) => !placed.has(k));
+  if (orphans.length) {
+    const rows = orphans.map((k) => { const [label, value] = rowMap[k]; return `    ${label}: ${value}`; });
+    sectionBlocks.push(`▸ ❓ Belum terpetakan (auto — cek config-origin.js)\n${rows.join("\n")}`);
+  }
+
+  const intro = "⚙️ Config lengkap — per ASAL (⚙️ Origin Dev vs 🧩 Add by zen)\nLegenda: 🟢 on · ⚪ off · ↳ anak setelan · ringkas → /config core";
+  const outro = "Ubah lewat /settings (menu tombol) atau chat biasa. Detail tiap setting: ketik /guide";
+  return `${intro}\n\n${sectionBlocks.join("\n\n\n")}\n\n${outro}`;
+}
+
+// /config core — compact view: only the core-tagged keys (full key names), 2 per
+// line joined with " · ", grouped, plus the active racikan banner. Registered as
+// an explicit sub-command so it never falls through to the casual-chat LLM.
+export function formatCoreConfig() {
+  const rowMap = buildConfigRowMap();
+  const blocks = CORE_GROUPS.map((g) => {
+    const items = g.keys.filter(([k]) => rowMap[k]).map(([k, name]) => `${name}: ${rowMap[k][1]}`);
+    const lines = [];
+    for (let i = 0; i < items.length; i += 2) lines.push("  " + items.slice(i, i + 2).join("  ·  "));
+    return `${g.emoji} ${g.title}\n${lines.join("\n")}`;
+  });
+  let racikan;
+  try { racikan = formatIdentityLines(); } catch { racikan = "🧬 Profil: —\n🗂️ Racikan: —"; }
+  const head = "⚙️ Config inti (core) · 🟢 on · ⚪ off";
+  const tail = "(ketik /config buat lihat semua)";
+  return `${head}\n\n${racikan}\n\n${blocks.join("\n\n")}\n\n${tail}`;
 }
 
 function parseConfigValue(raw) {
@@ -1724,6 +1991,11 @@ function settingValue(key) {
     gmgnMinKolCount: config.gmgn.minKolCount,
     gmgnMinTotalFeeSol: config.gmgn.minTotalFeeSol,
     gmgnMinHolders: config.gmgn.minHolders,
+    gmgnFeeSource: config.gmgn.feeSource,
+    pnlSource: config.pnl.source,
+    pnlRpcUrl: config.pnl.rpcUrl,
+    pnlPollIntervalSec: config.pnl.pollIntervalSec,
+    pnlDepositCacheTtlSec: config.pnl.depositCacheTtlSec,
     strategy: config.strategy.strategy,
     strategyLock: config.strategy.strategyLock,
     minBinsBelow: config.strategy.minBinsBelow,
@@ -1771,12 +2043,78 @@ function settingValue(key) {
     idleScreeningCooldownMin: config.experiments.idleScreeningCooldownMin,
     paperTrading: config.experiments.paperTrading,
     usePaperHistoryWhenLive: config.experiments.usePaperHistoryWhenLive,
+    // 🧬 Learning / Auto-Evolve freeze
+    evolveEnabled: config.learning.evolveEnabled,
     // 📊 GRUP 17 — Reports & Gas
     learningReportEvery: config.reports.learningReportEvery,
     learningReportTrendN: config.reports.learningReportTrendN,
     gasReserveAutoTune: config.management.gasReserveAutoTune,
     gasReserveBufferDays: config.management.gasReserveBufferDays,
     gasReserveFloorSol: config.management.gasReserveFloorSol,
+    sizingMode: config.management.sizingMode,
+    rentPerPositionSol: config.management.rentPerPositionSol,
+    // ── menu-editable additions (cascade /settings: cover remaining CONFIG_MAP keys) ──
+    // screening
+    minTvl: config.screening.minTvl,
+    maxTvl: config.screening.maxTvl,
+    minVolume: config.screening.minVolume,
+    minFeeActiveTvlRatio: config.screening.minFeeActiveTvlRatio,
+    minTokenFeesSol: config.screening.minTokenFeesSol,
+    minOrganic: config.screening.minOrganic,
+    minQuoteOrganic: config.screening.minQuoteOrganic,
+    minMcap: config.screening.minMcap,
+    maxMcap: config.screening.maxMcap,
+    minHolders: config.screening.minHolders,
+    minTokenAgeHours: config.screening.minTokenAgeHours,
+    maxTokenAgeHours: config.screening.maxTokenAgeHours,
+    minBinStep: config.screening.minBinStep,
+    maxBinStep: config.screening.maxBinStep,
+    maxBotHoldersPct: config.screening.maxBotHoldersPct,
+    maxTop10Pct: config.screening.maxTop10Pct,
+    excludeHighSupplyConcentration: config.screening.excludeHighSupplyConcentration,
+    avoidPvpSymbols: config.screening.avoidPvpSymbols,
+    timeframe: config.screening.timeframe,
+    category: config.screening.category,
+    discordSignalMode: config.screening.discordSignalMode,
+    // management
+    minSolToOpen: config.management.minSolToOpen,
+    positionSizePct: config.management.positionSizePct,
+    outOfRangeBinsToClose: config.management.outOfRangeBinsToClose,
+    outOfRangeWaitMinutes: config.management.outOfRangeWaitMinutes,
+    oorCooldownTriggerCount: config.management.oorCooldownTriggerCount,
+    oorCooldownHours: config.management.oorCooldownHours,
+    minFeePerTvl24h: config.management.minFeePerTvl24h,
+    minAgeBeforeYieldCheck: config.management.minAgeBeforeYieldCheck,
+    minVolumeToRebalance: config.management.minVolumeToRebalance,
+    minClaimAmount: config.management.minClaimAmount,
+    autoSwapAfterClaim: config.management.autoSwapAfterClaim,
+    repeatDeployCooldownScope: config.management.repeatDeployCooldownScope,
+    pnlSanityMaxDiffPct: config.management.pnlSanityMaxDiffPct,
+    // strategy / schedule
+    defaultBinsBelow: config.strategy.defaultBinsBelow,
+    healthCheckIntervalMin: config.schedule.healthCheckIntervalMin,
+    // llm
+    temperature: config.llm.temperature,
+    maxTokens: config.llm.maxTokens,
+    maxSteps: config.llm.maxSteps,
+    generalMaxTokens: config.llm.generalMaxTokens,
+    // indicators
+    indicatorCandles: config.indicators.candles,
+    rsiOversold: config.indicators.rsiOversold,
+    rsiOverbought: config.indicators.rsiOverbought,
+    // infra
+    hiveMindPullMode: config.hiveMind.pullMode,
+    // gmgn
+    gmgnMinMcap: config.gmgn.minMcap,
+    gmgnMaxMcap: config.gmgn.maxMcap,
+    gmgnAthFilterPct: config.gmgn.athFilterPct,
+    gmgnMinSmartDegenCount: config.gmgn.minSmartDegenCount,
+    gmgnMaxRatTraderRate: config.gmgn.maxRatTraderRate,
+    gmgnMaxFreshWalletRate: config.gmgn.maxFreshWalletRate,
+    gmgnMaxDevTeamHoldRate: config.gmgn.maxDevTeamHoldRate,
+    gmgnMaxBotDegenRate: config.gmgn.maxBotDegenRate,
+    gmgnMaxSniperCount: config.gmgn.maxSniperCount,
+    gmgnMaxSniperHoldRate: config.gmgn.maxSniperHoldRate,
   };
   return values[key];
 }
@@ -1790,7 +2128,70 @@ function getConfigValue(key) {
   return undefined;
 }
 
+// One-line human summary of a trade action for the confirmation prompt. Pure/defensive:
+// any odd arg shape still produces a readable line (never throws).
+function summarizeTradeAction(toolName, args = {}) {
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+  const shortAddr = (a) => (typeof a === "string" && a.length > 12 ? `${a.slice(0, 4)}…${a.slice(-4)}` : (a ?? "?"));
+  if (toolName === "deploy_position") {
+    const amt = num(args.amount_y) ?? num(args.amount_sol) ?? num(args.amount_x);
+    const strat = args.strategy ? ` | ${args.strategy}` : "";
+    return `🚀 BUKA POSISI (deploy)\n  pool: ${shortAddr(args.pool_address)}\n  ◎ ${amt ?? "?"} SOL${strat}`;
+  }
+  if (toolName === "close_position") {
+    return `🔻 TUTUP POSISI (close)\n  position: ${shortAddr(args.position_address)}${args.reason ? `\n  reason: ${args.reason}` : ""}`;
+  }
+  if (toolName === "claim_fees") {
+    return `💰 CLAIM FEES\n  position: ${shortAddr(args.position_address)}`;
+  }
+  if (toolName === "swap_token") {
+    return `🔁 SWAP TOKEN\n  ${num(args.amount) ?? "?"} ${shortAddr(args.input_mint)} → ${shortAddr(args.output_mint)}`;
+  }
+  return `${toolName}\n  ${JSON.stringify(args).slice(0, 200)}`;
+}
+
+// Confirm a real-capital / live-position action (deploy/close/claim/swap) in the interactive
+// path. Unlike update_config there is no diff to compute and no "no-op" to skip — the action
+// itself is what needs the operator's yes/no, so we ALWAYS prompt. Shares the single-flight
+// slot, 30s timeout, and confirm:yes/no callback with the config-confirmation path.
+async function requestActionConfirmation(toolName, args) {
+  const summary = summarizeTradeAction(toolName, args);
+  const signature = `${toolName}:${JSON.stringify(args ?? {})}`;
+
+  // Single-flight: collapse identical duplicate calls onto the same pending prompt; deny a
+  // different action while one is already pending (mirrors the config path).
+  if (_pendingConfirmation) {
+    return _pendingConfirmation.signature === signature ? _pendingConfirmation.promise : false;
+  }
+
+  let resolveFn;
+  const promise = new Promise((resolve) => { resolveFn = resolve; });
+  const pending = { promise, resolve: resolveFn, timer: null, messageId: null, signature };
+  _pendingConfirmation = pending; // claim the slot before awaiting the Telegram send
+
+  pending.timer = setTimeout(async () => {
+    if (_pendingConfirmation === pending) _pendingConfirmation = null;
+    if (pending.messageId) await editMessage("⏰ Expired — no action taken.", pending.messageId).catch(() => {});
+    resolveFn(false);
+  }, 30_000);
+
+  const sent = await sendMessageWithButtons(`⚠️ Konfirmasi aksi ini?\n${summary}`, [
+    [
+      { text: "✅ Ya", callback_data: "confirm:yes" },
+      { text: "❌ Batal", callback_data: "confirm:no" },
+    ],
+  ]);
+  pending.messageId = sent?.result?.message_id ?? null;
+
+  return promise;
+}
+
 async function requestConfirmation(toolName, args) {
+  // Trade-action tools (move real capital / live positions) take a plain action prompt — the
+  // config-diff machinery below only applies to update_config (where there's a before→after
+  // value to show and a no-op to skip).
+  if (toolName !== "update_config") return requestActionConfirmation(toolName, args);
+
   // Recover EVERY arg shape the executor's update_config accepts, so the
   // confirmation gate never lets one slip through unprompted. Weak models invent:
   //   { changes: {...} } | { key, value } | { path: "a.b", value }
@@ -1809,7 +2210,7 @@ async function requestConfirmation(toolName, args) {
     return v;
   };
   const RESERVED = new Set(["changes", "key", "value", "path", "reason"]);
-  const KNOWN_SECTIONS = new Set(["screening", "management", "risk", "schedule", "llm", "strategy", "hiveMind", "api", "gmgn", "indicators", "chartIndicators", "experiments", "reports", "tokens", "darwin"]);
+  const KNOWN_SECTIONS = new Set(["screening", "management", "risk", "schedule", "llm", "strategy", "hiveMind", "api", "gmgn", "indicators", "chartIndicators", "experiments", "reports", "tokens", "darwin", "learning"]);
   const raw = {};
   if (args.changes && typeof args.changes === "object") Object.assign(raw, args.changes);
   if (typeof args.key === "string" && args.key.trim()) raw[args.key.trim()] = args.value;
@@ -1876,7 +2277,7 @@ async function requestConfirmation(toolName, args) {
 
 function fmtSettingValue(value) {
   if (Array.isArray(value)) return value.join(",");
-  if (typeof value === "boolean") return value ? "on" : "off";
+  if (typeof value === "boolean") return value ? "🟢 on" : "⚪ off";
   return String(value);
 }
 
@@ -1912,256 +2313,571 @@ function inputButton(key, label, { digits = 0 } = {}) {
   return [settingButton(`${label}: ${shown} ✏`, `cfg:input:${key}`)];
 }
 
-// Which settings page a given key lives on — used to return to the right page after
-// a toggle/step/set/input. Single source of truth (was duplicated in two callbacks).
-function pageForKey(key) {
-  if (["gmgnPreferredKolNames", "gmgnPreferredKolMinHoldPct", "gmgnDumpKolNames", "gmgnDumpKolMinHoldPct"].includes(key)) return "kol";
-  if (["gmgnMinVolume", "gmgnMaxBundlerRate", "gmgnMinTokenAgeHours", "gmgnMaxTokenAgeHours"].includes(key)) return "screen";
-  if (key.startsWith("gmgn") && key !== "gmgnRequireKol") return "gmgn";
-  if (key.startsWith("indicator") || key.startsWith("smi") || key === "chartIndicatorsEnabled" || key === "rsiLength" || key === "requireAllIntervals") return "indicators";
-  if (["minBinsBelow", "maxBinsBelow", "strategy", "strategyLock"].includes(key)) return "strategy";
-  if (["useDiscordSignals", "blockPvpSymbols", "managementIntervalMin", "screeningIntervalMin", "maxScreeningIntervalMin", "adaptiveScreening", "screeningSource", "screeningCategories", "gmgnRequireKol"].includes(key)) return "screen";
-  if (["candidateMomentum", "smartWalletMomentum", "expectedYieldSignal", "narrativeProfileSignal", "counterfactualReview", "counterfactualMinMcapGainPct", "exitLiquidityCheck", "exitLiquidityMaxSlippagePct", "marketRegimeGate", "marketRegimeMaxDrop24hPct", "convictionSizing", "convictionSizingMaxAdjustPct", "idleScreeningCooldown", "idleScreeningCooldownMin", "paperTrading", "usePaperHistoryWhenLive"].includes(key)) return "experiments";
-  if (["learningReportEvery", "learningReportTrendN", "gasReserveAutoTune", "gasReserveBufferDays", "gasReserveFloorSol"].includes(key)) return "reports";
-  return "risk";
+// ── Cascade /settings (breadcrumb) display data ──────────────────────────────
+// Short T1 section labels + T2 group names so all three levels (header → group →
+// settings) fit on screen at once. RENDER-ONLY metadata; the canonical grouping
+// stays in config-origin.js. Falls back to the full title when a short is missing.
+const MENU_SECTION_LABEL = { dev: "⚙️ Origin Dev", zen: "🧩 Add by Zen" };
+const MENU_GROUP_SHORT = {
+  "dev-screening": "Screen", "dev-management": "Risk", "dev-strategy": "Strat",
+  "dev-schedule": "Jadwal", "dev-llm": "LLM", "dev-darwin": "Darwin",
+  "dev-indicators": "Indik", "dev-infra": "Infra",
+  "zen-screening": "Screen+", "zen-gmgn": "GMGN", "zen-management": "Mgmt+",
+  "zen-strategy": "Strat+", "zen-schedule": "Jadwal+", "zen-llm": "LLM+",
+  "zen-indicators": "Indik+", "zen-reports": "Report", "zen-learning": "🧬Learn",
+  "zen-experiments": "🧪Exp", "zen-racikan": "Racikan",
+};
+// Max editable T3 rows per page; groups with more paginate (T1+T2 stay visible).
+const MAX_T3_ROWS = 8;
+const chunkRows = (arr, n) => {
+  const out = [];
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
+};
+
+// Build a MENU_CONTROLS "cycle" entry for a small, KNOWN enum: a noop showing the
+// current value + one `cfg:set` button per option (reuses the existing set
+// mechanic + callback_data — no new edit mechanic). `opts` are the literal valid
+// config values; perRow controls wrapping.
+function cycleControl(settingKey, label, opts, perRow = 3) {
+  return {
+    pageKeys: [settingKey],
+    build: () => {
+      const cur = fmtSettingValue(settingValue(settingKey));
+      const rows = [[settingButton(`${label}: ${cur}`, "cfg:noop")]];
+      for (let i = 0; i < opts.length; i += perRow) {
+        rows.push(opts.slice(i, i + perRow).map((o) => settingButton(String(o), `cfg:set:${settingKey}:${o}`)));
+      }
+      return rows;
+    },
+  };
 }
 
-function renderSettingsMenu(page = "main") {
-  const title = page === "main" ? "Settings menu" : `Settings: ${page}`;
-  const identityLine = (() => { try { return formatIdentity({ compact: true }); } catch { return "🧬 Profil: — · 🗂️ Racikan: —"; } })();
-  const summary = [
-    title,
-    "",
-    identityLine,
-    `Mode: ${config.management.solMode ? "SOL" : "USD"} | Relay: ${config.api.lpAgentRelayEnabled ? "on" : "off"}`,
-    `Screening: ${config.screening.source} | cats ${Array.isArray(config.screening.categories) && config.screening.categories.length ? config.screening.categories.join(",") : `single (${config.screening.category})`} | GMGN KOL ${config.gmgn.requireKol ? "required" : "preferred"}`,
-    `Strategy: ${config.strategy.strategy}${(config.strategy.strategyLock ?? "default") !== "default" ? ` 🔒${config.strategy.strategyLock}` : ""} | deploy ${config.management.deployAmountSol} SOL | max pos ${config.risk.maxPositions}`,
-    `TP/SL: ${config.management.takeProfitPct}% / ${config.management.stopLossPct}% | trailing ${config.management.trailingTakeProfit ? "on" : "off"}`,
-    `Indicators: ${config.indicators.enabled ? "on" : "off"} | entry ${config.indicators.entryPreset} | ${fmtSettingValue(config.indicators.intervals)}`,
-    `🧪 Experiments ON: ${Object.entries(config.experiments).filter(([, v]) => v === true).map(([k]) => k).join(", ") || "none"}`,
-  ].join("\n");
-  let bodyText = summary;
-
-  const nav = [
-    [
-      settingButton("Main", "cfg:page:main"),
-      settingButton("Risk", "cfg:page:risk"),
-      settingButton("Strategy", "cfg:page:strategy"),
-    ],
-    [
-      settingButton("Screen", "cfg:page:screen"),
-      settingButton("Indicators", "cfg:page:indicators"),
-      settingButton("GMGN", "cfg:page:gmgn"),
-      settingButton("KOL", "cfg:page:kol"),
-    ],
-    [
-      settingButton("🧪 Experiments", "cfg:page:experiments"),
-      settingButton("📊 Reports", "cfg:page:reports"),
-      settingButton("🗂️ Racikan", "cfg:page:presets"),
-    ],
-  ];
-
-  const footer = [
-    [
-      settingButton("Refresh", `cfg:page:${page}`),
-      settingButton("Close", "cfg:close"),
-    ],
-  ];
-
-  let rows;
-  if (page === "risk") {
-    rows = [
-      inputButton("deployAmountSol", "Deploy SOL", { digits: 2 }),
-      inputButton("gasReserve", "Gas reserve", { digits: 2 }),
-      inputButton("maxPositions", "Max positions"),
-      inputButton("maxDeployAmount", "Max SOL"),
-      inputButton("takeProfitPct", "TP %"),
-      inputButton("stopLossPct", "SL %"),
-      [toggleButton("trailingTakeProfit", "Trailing TP")],
-      inputButton("trailingTriggerPct", "Trail trigger", { digits: 1 }),
-      inputButton("trailingDropPct", "Trail drop", { digits: 1 }),
-      [toggleButton("repeatDeployCooldownEnabled", "Repeat cooldown")],
-      inputButton("repeatDeployCooldownTriggerCount", "Repeat count"),
-      inputButton("repeatDeployCooldownHours", "Repeat hrs"),
-      inputButton("repeatDeployCooldownMinFeeEarnedPct", "Min fee earned %", { digits: 1 }),
-    ];
-  } else if (page === "screen") {
-    rows = [
-      [
-        settingButton("Source: Meteora", "cfg:set:screeningSource:meteora"),
-        settingButton("Source: GMGN", "cfg:set:screeningSource:gmgn"),
-      ],
-      [
-        categoryButton("trending"),
-        categoryButton("top"),
-        categoryButton("new"),
-      ],
-      [toggleButton("gmgnRequireKol", "GMGN require KOL")],
-      [toggleButton("useDiscordSignals", "Discord signals"), toggleButton("blockPvpSymbols", "PVP hard block")],
-      [
-        settingButton("5m", "cfg:set:gmgnInterval:5m"),
-        settingButton("1h", "cfg:set:gmgnInterval:1h"),
-        settingButton("6h", "cfg:set:gmgnInterval:6h"),
-        settingButton("24h", "cfg:set:gmgnInterval:24h"),
-      ],
-      [
-        inputButton("gmgnMinVolume", "Min volume")[0],
-        inputButton("gmgnMinTokenAgeHours", "Min token age (h)")[0],
-      ],
-      [
-        inputButton("gmgnMaxTokenAgeHours", "Max token age (h)")[0],
-        inputButton("gmgnMaxBundlerRate", "Max bundler %")[0],
-      ],
-      [settingButton("KOL settings", "cfg:page:kol")],
-      inputButton("managementIntervalMin", "Manage interval (min)"),
-      inputButton("screeningIntervalMin", "Screen interval — min/floor (min)"),
-      [toggleButton("adaptiveScreening", "Adaptive screening")],
-      inputButton("maxScreeningIntervalMin", "Screen interval — max/ceil (min)"),
-    ];
-  } else if (page === "strategy") {
-    rows = [
-      [
-        settingButton("spot", "cfg:set:strategy:spot"),
-        settingButton("bid_ask", "cfg:set:strategy:bid_ask"),
-      ],
-      // strategyLock: default = flexible (factory), spot/bid_ask = mechanical lock
-      // enforced in executor on every deploy (like mainzen_v2's bid_ask lock).
-      [
-        settingButton(`🔒 lock: ${fmtSettingValue(settingValue("strategyLock") ?? "default")}`, "cfg:page:strategy"),
-      ],
-      [
-        settingButton("default", "cfg:set:strategyLock:default"),
-        settingButton("lock spot", "cfg:set:strategyLock:spot"),
-        settingButton("lock bid_ask", "cfg:set:strategyLock:bid_ask"),
-      ],
-      inputButton("minBinsBelow", "Min bins"),
-      inputButton("maxBinsBelow", "Max bins"),
-    ];
-  } else if (page === "gmgn") {
-    rows = [
-      [toggleButton("gmgnIndicatorFilter", "Indicator filter"), toggleButton("gmgnRequireKol", "Require KOL")],
-      [
-        settingButton("TF: 5m", "cfg:set:gmgnIndicatorInterval:5_MINUTE"),
-        settingButton("TF: 15m", "cfg:set:gmgnIndicatorInterval:15_MINUTE"),
-        settingButton("TF: 1h", "cfg:set:gmgnIndicatorInterval:1h"),
-      ],
-      [toggleButton("gmgnRequireBullishSt", "Bullish ST"), toggleButton("gmgnRejectAtBottom", "Reject at bottom"), toggleButton("gmgnRequireAboveSt", "Above ST")],
-      inputButton("gmgnMinRsi", "Min RSI"),
-      inputButton("gmgnMaxRsi", "Max RSI"),
-      inputButton("gmgnMinKolCount", "Min KOL"),
-      inputButton("gmgnMinTotalFeeSol", "Min fee SOL"),
-      inputButton("gmgnMinHolders", "Min holders"),
-      [settingButton("KOL settings", "cfg:page:kol")],
-    ];
-  } else if (page === "kol") {
-    rows = [
-      inputButton("gmgnPreferredKolNames", "Preferred KOL (comma-sep)"),
-      inputButton("gmgnPreferredKolMinHoldPct", "Preferred KOL min hold %"),
-      inputButton("gmgnDumpKolNames", "Dump KOL (comma-sep)"),
-      inputButton("gmgnDumpKolMinHoldPct", "Dump KOL min hold %"),
-    ];
-  } else if (page === "indicators") {
-    rows = [
-      [toggleButton("chartIndicatorsEnabled", "Chart indicators"), toggleButton("requireAllIntervals", "Require all TF")],
-      [
-        settingButton("TF: 5m", "cfg:set:indicatorIntervals:5_MINUTE"),
-        settingButton("TF: 15m", "cfg:set:indicatorIntervals:15_MINUTE"),
-        settingButton("TF: both", "cfg:set:indicatorIntervals:both"),
-      ],
-      [toggleButton("indicatorExitEnabled", "Exit triggers close"), toggleButton("indicatorRejectAtBottom", "Reject @ bottom")],
+// Which settings page a given key lives on — used to return to the right page after
+// a toggle/step/set/input. Single source of truth (was duplicated in two callbacks).
+// ── /settings editable controls (config-origin key → existing menu control) ──
+// RENDER-ONLY placement registry. Maps each config-origin row key to the control
+// the /settings menu ALREADY exposes for it (same settingValue key + same
+// callback_data → identical edit mechanics/confirmation). config-origin keys
+// absent here are read-only in the menu (shown in the group body, no button) —
+// exactly as today. Editability is NOT changed; only WHERE a control renders.
+//   toggle: [settingKey, label]
+//   input:  [settingKey, label, opts?]
+//   build:  () => rows[]      (multi-option set / category — preserves the exact
+//                              callback_data the menu used before)
+//   pageKeys: settingValue keys whose callback should return to this group page
+//             (defaults to the toggle/input key; set/build list them explicitly)
+const MENU_CONTROLS = {
+  // ⚙️ dev-screening
+  timeframe: cycleControl("timeframe", "Timeframe", ["5m", "30m", "1h", "2h", "4h", "12h", "24h"], 4),
+  category: cycleControl("category", "Category", ["trending", "top", "new"]),
+  minTvl: { input: ["minTvl", "Min TVL"] },
+  maxTvl: { input: ["maxTvl", "Max TVL"] },
+  minVolume: { input: ["minVolume", "Min volume"] },
+  minMcap: { input: ["minMcap", "Min mcap"] },
+  maxMcap: { input: ["maxMcap", "Max mcap"] },
+  minHolders: { input: ["minHolders", "Min holders"] },
+  minFeeActiveTvlRatio: { input: ["minFeeActiveTvlRatio", "Min fee/aTVL", { digits: 3 }] },
+  minTokenFeesSol: { input: ["minTokenFeesSol", "Min token fees SOL"] },
+  minOrganic: { input: ["minOrganic", "Min organic"] },
+  minQuoteOrganic: { input: ["minQuoteOrganic", "Min quote organic"] },
+  minTokenAgeHours: { input: ["minTokenAgeHours", "Min age (h)"] },
+  maxTokenAgeHours: { input: ["maxTokenAgeHours", "Max age (h)"] },
+  minBinStep: { input: ["minBinStep", "Min bin-step"] },
+  maxBinStep: { input: ["maxBinStep", "Max bin-step"] },
+  excludeHighSupplyConcentration: { toggle: ["excludeHighSupplyConcentration", "Excl. high supply conc."] },
+  maxBotHoldersPct: { input: ["maxBotHoldersPct", "Max bot holders %"] },
+  maxTop10Pct: { input: ["maxTop10Pct", "Max top10 %"] },
+  avoidPvpSymbols: { toggle: ["avoidPvpSymbols", "Avoid PVP symbols"] },
+  blockPvpSymbols: { toggle: ["blockPvpSymbols", "PVP hard block"] },
+  useDiscordSignals: { toggle: ["useDiscordSignals", "Discord signals"] },
+  discordSignalMode: cycleControl("discordSignalMode", "Discord mode", ["merge", "only"]),
+  // ⚙️ dev-management
+  solMode: { toggle: ["solMode", "SOL mode"] },
+  maxPositions: { input: ["maxPositions", "Max positions"] },
+  maxDeployAmount: { input: ["maxDeployAmount", "Max SOL"] },
+  deployAmountSol: { input: ["deployAmountSol", "Deploy SOL", { digits: 2 }] },
+  positionSizePct: { input: ["positionSizePct", "Position size %", { digits: 2 }] },
+  minSolToOpen: { input: ["minSolToOpen", "Min SOL to open", { digits: 2 }] },
+  gasReserve: { input: ["gasReserve", "Gas reserve", { digits: 2 }] },
+  stopLossPct: { input: ["stopLossPct", "SL %"] },
+  takeProfitPct: { input: ["takeProfitPct", "TP %"] },
+  trailingTakeProfit: { toggle: ["trailingTakeProfit", "Trailing TP"] },
+  trailingTriggerPct: { input: ["trailingTriggerPct", "Trail trigger", { digits: 1 }] },
+  trailingDropPct: { input: ["trailingDropPct", "Trail drop", { digits: 1 }] },
+  outOfRangeBinsToClose: { input: ["outOfRangeBinsToClose", "OOR bins to close"] },
+  outOfRangeWaitMinutes: { input: ["outOfRangeWaitMinutes", "OOR wait (min)"] },
+  oorCooldownTriggerCount: { input: ["oorCooldownTriggerCount", "OOR cooldown count"] },
+  oorCooldownHours: { input: ["oorCooldownHours", "OOR cooldown hrs"] },
+  repeatDeployCooldownEnabled: { toggle: ["repeatDeployCooldownEnabled", "Repeat cooldown"] },
+  repeatDeployCooldownTriggerCount: { input: ["repeatDeployCooldownTriggerCount", "Repeat count"] },
+  repeatDeployCooldownHours: { input: ["repeatDeployCooldownHours", "Repeat hrs"] },
+  repeatDeployCooldownScope: cycleControl("repeatDeployCooldownScope", "Repeat scope", ["pool", "token", "both"]),
+  repeatDeployCooldownMinFeeEarnedPct: { input: ["repeatDeployCooldownMinFeeEarnedPct", "Min fee earned %", { digits: 1 }] },
+  minFeePerTvl24h: { input: ["minFeePerTvl24h", "Min fee/TVL 24h"] },
+  minAgeBeforeYieldCheck: { input: ["minAgeBeforeYieldCheck", "Min age before yield (min)"] },
+  minVolumeToRebalance: { input: ["minVolumeToRebalance", "Min vol to rebalance"] },
+  minClaimAmount: { input: ["minClaimAmount", "Min claim amount"] },
+  autoSwapAfterClaim: { toggle: ["autoSwapAfterClaim", "Auto-swap after claim"] },
+  // ⚙️ dev-strategy
+  strategy: {
+    pageKeys: ["strategy"],
+    build: () => [[
+      settingButton("spot", "cfg:set:strategy:spot"),
+      settingButton("bid_ask", "cfg:set:strategy:bid_ask"),
+    ]],
+  },
+  minBinsBelow: { input: ["minBinsBelow", "Min bins"] },
+  maxBinsBelow: { input: ["maxBinsBelow", "Max bins"] },
+  defaultBinsBelow: { input: ["defaultBinsBelow", "Default bins"] },
+  // ⚙️ dev-schedule
+  managementIntervalMin: { input: ["managementIntervalMin", "Manage interval (min)"] },
+  screeningIntervalMin: { input: ["screeningIntervalMin", "Screen interval — floor (min)"] },
+  healthCheckIntervalMin: { input: ["healthCheckIntervalMin", "Health-check (min)"] },
+  // ⚙️ dev-llm — models are free-form strings (provider/slug); the menu's input
+  // field is numeric-only, so models stay 👁 (edit via /setcfg). Numeric params here.
+  temperature: { input: ["temperature", "Temperature", { digits: 3 }] },
+  maxTokens: { input: ["maxTokens", "Max tokens"] },
+  maxSteps: { input: ["maxSteps", "Max steps"] },
+  // ⚙️ dev-indicators
+  enabled: { toggle: ["chartIndicatorsEnabled", "Chart indicators"] },
+  entryPreset: {
+    pageKeys: ["indicatorEntryPreset"],
+    build: () => [
       [
         settingButton("Entry: ST", "cfg:set:indicatorEntryPreset:supertrend_break"),
         settingButton("Entry: RSI", "cfg:set:indicatorEntryPreset:rsi_reversal"),
         settingButton("Entry: ST/RSI", "cfg:set:indicatorEntryPreset:supertrend_or_rsi"),
       ],
       [settingButton("Entry: ST+SMI", "cfg:set:indicatorEntryPreset:supertrend_plus_smi")],
+    ],
+  },
+  exitPreset: {
+    pageKeys: ["indicatorExitPreset"],
+    build: () => [[
+      settingButton("Exit: ST", "cfg:set:indicatorExitPreset:supertrend_break"),
+      settingButton("Exit: RSI", "cfg:set:indicatorExitPreset:rsi_reversal"),
+      settingButton("Exit: BB+RSI", "cfg:set:indicatorExitPreset:bb_plus_rsi"),
+    ]],
+  },
+  rsiLength: { input: ["rsiLength", "RSI length"] },
+  rsiOversold: { input: ["rsiOversold", "RSI oversold"] },
+  rsiOverbought: { input: ["rsiOverbought", "RSI overbought"] },
+  candles: { input: ["indicatorCandles", "Candles"] },
+  intervals: {
+    pageKeys: ["indicatorIntervals"],
+    build: () => [[
+      settingButton("TF: 5m", "cfg:set:indicatorIntervals:5_MINUTE"),
+      settingButton("TF: 15m", "cfg:set:indicatorIntervals:15_MINUTE"),
+      settingButton("TF: both", "cfg:set:indicatorIntervals:both"),
+    ]],
+  },
+  requireAllIntervals: { toggle: ["requireAllIntervals", "Require all TF"] },
+  // ⚙️ dev-infra
+  lpAgentRelayEnabled: { toggle: ["lpAgentRelayEnabled", "LPAgent relay"] },
+  hiveMindPullMode: cycleControl("hiveMindPullMode", "Hive pull mode", ["auto", "manual"]),
+  pnlDepositCacheTtlSec: { input: ["pnlDepositCacheTtlSec", "PnL deposit cache (s)"] },
+  pnlSanityMaxDiffPct: { input: ["pnlSanityMaxDiffPct", "PnL sanity max diff %"] },
+  pnlSource: {
+    pageKeys: ["pnlSource"],
+    build: () => [[
+      settingButton(`PnL src: ${fmtSettingValue(settingValue("pnlSource"))}`, "cfg:noop"),
+      settingButton("rpc", "cfg:set:pnlSource:rpc"),
+      settingButton("meteora", "cfg:set:pnlSource:meteora"),
+    ]],
+  },
+  pnlPollIntervalSec: { input: ["pnlPollIntervalSec", "PnL poll (sec)"] },
+  gmgnFeeSource: {
+    pageKeys: ["gmgnFeeSource"],
+    build: () => [[
+      settingButton(`Fee src: ${fmtSettingValue(settingValue("gmgnFeeSource"))}`, "cfg:noop"),
+      settingButton("gmgn", "cfg:set:gmgnFeeSource:gmgn"),
+      settingButton("jupiter", "cfg:set:gmgnFeeSource:jupiter"),
+    ]],
+  },
+  // 🧩 zen-screening
+  screeningSource: {
+    pageKeys: ["screeningSource"],
+    build: () => [[
+      settingButton("Source: Meteora", "cfg:set:screeningSource:meteora"),
+      settingButton("Source: GMGN", "cfg:set:screeningSource:gmgn"),
+    ]],
+  },
+  screeningCategories: {
+    pageKeys: ["screeningCategories"],
+    build: () => [[categoryButton("trending"), categoryButton("top"), categoryButton("new")]],
+  },
+  // 🧩 zen-gmgn
+  "gmgn.interval": {
+    pageKeys: ["gmgnInterval"],
+    build: () => [[
+      settingButton("5m", "cfg:set:gmgnInterval:5m"),
+      settingButton("1h", "cfg:set:gmgnInterval:1h"),
+      settingButton("6h", "cfg:set:gmgnInterval:6h"),
+      settingButton("24h", "cfg:set:gmgnInterval:24h"),
+    ]],
+  },
+  "gmgn.minMcap": { input: ["gmgnMinMcap", "Min mcap"] },
+  "gmgn.maxMcap": { input: ["gmgnMaxMcap", "Max mcap"] },
+  "gmgn.minVolume": { input: ["gmgnMinVolume", "Min volume"] },
+  "gmgn.minHolders": { input: ["gmgnMinHolders", "Min holders"] },
+  "gmgn.minTokenAgeHours": { input: ["gmgnMinTokenAgeHours", "Min token age (h)"] },
+  "gmgn.maxTokenAgeHours": { input: ["gmgnMaxTokenAgeHours", "Max token age (h)"] },
+  "gmgn.athFilterPct": { input: ["gmgnAthFilterPct", "ATH filter %"] },
+  "gmgn.minTotalFeeSol": { input: ["gmgnMinTotalFeeSol", "Min fee SOL"] },
+  "gmgn.requireKol": { toggle: ["gmgnRequireKol", "Require KOL"] },
+  "gmgn.minKolCount": { input: ["gmgnMinKolCount", "Min KOL"] },
+  "gmgn.minSmartDegenCount": { input: ["gmgnMinSmartDegenCount", "Min smart degen"] },
+  "gmgn.maxBundlerRate": { input: ["gmgnMaxBundlerRate", "Max bundler %", { digits: 2 }] },
+  "gmgn.maxRatTraderRate": { input: ["gmgnMaxRatTraderRate", "Max rat trader", { digits: 2 }] },
+  "gmgn.maxFreshWalletRate": { input: ["gmgnMaxFreshWalletRate", "Max fresh wallet", { digits: 2 }] },
+  "gmgn.maxDevTeamHoldRate": { input: ["gmgnMaxDevTeamHoldRate", "Max dev hold", { digits: 2 }] },
+  "gmgn.maxBotDegenRate": { input: ["gmgnMaxBotDegenRate", "Max bot degen", { digits: 2 }] },
+  "gmgn.maxSniperCount": { input: ["gmgnMaxSniperCount", "Max sniper count"] },
+  "gmgn.maxSniperHoldRate": { input: ["gmgnMaxSniperHoldRate", "Max sniper hold", { digits: 2 }] },
+  "gmgn.preferredKolNames": { input: ["gmgnPreferredKolNames", "Preferred KOL (comma-sep)"] },
+  "gmgn.preferredKolMinHoldPct": { input: ["gmgnPreferredKolMinHoldPct", "Preferred KOL min hold %"] },
+  "gmgn.dumpKolNames": { input: ["gmgnDumpKolNames", "Dump KOL (comma-sep)"] },
+  "gmgn.dumpKolMinHoldPct": { input: ["gmgnDumpKolMinHoldPct", "Dump KOL min hold %"] },
+  "gmgn.indicatorFilter": { toggle: ["gmgnIndicatorFilter", "Indicator filter"] },
+  "gmgn.indicatorInterval": {
+    pageKeys: ["gmgnIndicatorInterval"],
+    build: () => [[
+      settingButton("TF: 5m", "cfg:set:gmgnIndicatorInterval:5_MINUTE"),
+      settingButton("TF: 15m", "cfg:set:gmgnIndicatorInterval:15_MINUTE"),
+      settingButton("TF: 1h", "cfg:set:gmgnIndicatorInterval:1h"),
+    ]],
+  },
+  "gmgn.rules.requireBullishSupertrend": { toggle: ["gmgnRequireBullishSt", "Bullish ST"] },
+  "gmgn.rules.rejectAlreadyAtBottom": { toggle: ["gmgnRejectAtBottom", "Reject at bottom"] },
+  "gmgn.rules.requireAboveSupertrend": { toggle: ["gmgnRequireAboveSt", "Above ST"] },
+  "gmgn.rules.minRsi": { input: ["gmgnMinRsi", "Min RSI"] },
+  "gmgn.rules.maxRsi": { input: ["gmgnMaxRsi", "Max RSI"] },
+  // 🧩 zen-management
+  sizingMode: cycleControl("sizingMode", "Sizing mode", ["fixed", "maximize"], 2),
+  rentPerPositionSol: { input: ["rentPerPositionSol", "Rent/posisi SOL", { digits: 3 }] },
+  gasReserveAutoTune: { toggle: ["gasReserveAutoTune", "Gas reserve auto-tune"] },
+  gasReserveBufferDays: { input: ["gasReserveBufferDays", "Gas buffer days"] },
+  gasReserveFloorSol: { input: ["gasReserveFloorSol", "Gas reserve floor SOL", { digits: 2 }] },
+  // 🧩 zen-strategy
+  strategyLock: {
+    pageKeys: ["strategyLock"],
+    build: () => [
+      [settingButton(`🔒 lock: ${fmtSettingValue(settingValue("strategyLock") ?? "default")}`, "cfg:noop")],
       [
-        settingButton("Exit: ST", "cfg:set:indicatorExitPreset:supertrend_break"),
-        settingButton("Exit: RSI", "cfg:set:indicatorExitPreset:rsi_reversal"),
-        settingButton("Exit: BB+RSI", "cfg:set:indicatorExitPreset:bb_plus_rsi"),
+        settingButton("default", "cfg:set:strategyLock:default"),
+        settingButton("lock spot", "cfg:set:strategyLock:spot"),
+        settingButton("lock bid_ask", "cfg:set:strategyLock:bid_ask"),
       ],
-      inputButton("rsiLength", "RSI length"),
-      inputButton("smiPdLookback", "SMI PD lookback"),
-      inputButton("smiPaLookback", "SMI PA lookback"),
-      inputButton("smiCrossWindow", "SMI cross window"),
-    ];
-  } else if (page === "experiments") {
-    // 🧪 GRUP 16 — semua default OFF = perilaku pabrik. Soft signals dulu, lalu gate, lalu sizing.
-    rows = [
-      [toggleButton("candidateMomentum", "Candidate momentum"), toggleButton("smartWalletMomentum", "Smart-wallet mom.")],
-      [toggleButton("expectedYieldSignal", "Expected yield"), toggleButton("narrativeProfileSignal", "Narrative profile")],
-      [toggleButton("counterfactualReview", "Counterfactual review")],
-      inputButton("counterfactualMinMcapGainPct", "Counterfactual min mcap gain %"),
-      [toggleButton("exitLiquidityCheck", "Exit-liquidity GATE")],
-      inputButton("exitLiquidityMaxSlippagePct", "Exit max slippage %", { digits: 1 }),
-      [toggleButton("marketRegimeGate", "Market-regime GATE")],
-      inputButton("marketRegimeMaxDrop24hPct", "Regime max SOL drop 24h %", { digits: 1 }),
-      [toggleButton("convictionSizing", "Conviction sizing (moves capital)")],
-      inputButton("convictionSizingMaxAdjustPct", "Conviction max adjust %"),
-      [toggleButton("idleScreeningCooldown", "Idle screening cooldown")],
-      inputButton("idleScreeningCooldownMin", "Idle cooldown minutes"),
-      [toggleButton("paperTrading", "Paper trading (DRY-RUN sim)")],
-      [toggleButton("usePaperHistoryWhenLive", "Use paper history when live (soft ref)")],
-    ];
-  } else if (page === "reports") {
-    // 📊 GRUP 17 — laporan & gas reserve auto-tune
-    rows = [
-      inputButton("learningReportEvery", "Learning report every N closes (0=off)"),
-      inputButton("learningReportTrendN", "Trend window N"),
-      [toggleButton("gasReserveAutoTune", "Gas reserve auto-tune")],
-      inputButton("gasReserveBufferDays", "Gas buffer days"),
-      inputButton("gasReserveFloorSol", "Gas reserve floor SOL", { digits: 2 }),
-    ];
-  } else if (page === "presets") {
-    // 🗂️ Config presets — per row: ▶ load · 🔍 diff · 🗑️ delete. Plus 💾 save current.
-    const presets = listPresets();
-    const lines = presets.length
-      ? presets.map((p) => p.error
-          ? `⚠ ${p.name}`
-          : `${p.isCurrent ? "●" : "○"} ${p.name} — ${p.dryRun ? "🧪 dry-run" : "live"} · ${p.keys} keys${p.isCurrent ? " (current)" : ""}`)
-      : ["(belum ada preset)"];
-    const setupStatus = (() => {
-      try { const s = getActiveSetupStatus(); return s.name ? `${s.name}${s.edited ? " ✎ (ada edit manual)" : ""}` : "— (belum load)"; } catch { return "—"; }
-    })();
-    bodyText = ["🗂️ Racikan (setup tersimpan)", "",
-      `Aktif: ${setupStatus}`,
-      "(Racikan = snapshot config penuh. Beda dari 🧬 Profil = arketipe wizard.)", "",
-      ...lines, "",
-      "● = sama dgn config live · 🧪 = isi file dryRun (bukan berarti jalan)",
-      "Per baris: ▶ load · 🔍 lihat beda · 🗑️ hapus.",
-      "💾 = simpan config sekarang jadi racikan baru.",
-    ].join("\n");
-    rows = presets.map((p) => p.error
-      ? [settingButton(`⚠ ${p.name}`, "cfg:noop")]
-      : [
-          settingButton(`${p.isCurrent ? "●" : "▶"} ${p.name}${p.dryRun ? " 🧪" : ""}`, `cfg:preset:ask:${p.name}`),
-          settingButton("🔍", `cfg:preset:diff:${p.name}`),
-          settingButton("🗑️", `cfg:preset:rmask:${p.name}`),
-        ]);
-    rows.push([settingButton("💾 Simpan config sekarang", "cfg:preset:save")]);
-  } else {
-    rows = [
-      [
-        settingButton("Source: Meteora", "cfg:set:screeningSource:meteora"),
-        settingButton("Source: GMGN", "cfg:set:screeningSource:gmgn"),
-      ],
-      [toggleButton("solMode", "SOL mode"), toggleButton("lpAgentRelayEnabled", "LPAgent relay")],
-      [toggleButton("chartIndicatorsEnabled", "Chart indicators"), toggleButton("trailingTakeProfit", "Trailing TP")],
-      [
-        settingButton("Risk / deploy", "cfg:page:risk"),
-        settingButton("Screening", "cfg:page:screen"),
-      ],
-      [
-        settingButton("Indicators", "cfg:page:indicators"),
-        settingButton("Show config", "cfg:show"),
-      ],
-    ];
-  }
+    ],
+  },
+  // 🧩 zen-schedule
+  adaptiveScreening: { toggle: ["adaptiveScreening", "Adaptive screening"] },
+  maxScreeningIntervalMin: { input: ["maxScreeningIntervalMin", "Screen interval — ceil (min)"] },
+  // 🧩 zen-llm
+  generalMaxTokens: { input: ["generalMaxTokens", "General max tokens"] },
+  // 🧩 zen-indicators
+  exitEnabled: { toggle: ["indicatorExitEnabled", "Exit triggers close"] },
+  rejectAlreadyAtBottom: { toggle: ["indicatorRejectAtBottom", "Reject @ bottom"] },
+  smiPdLookback: { input: ["smiPdLookback", "SMI PD lookback"] },
+  smiPaLookback: { input: ["smiPaLookback", "SMI PA lookback"] },
+  smiCrossWindow: { input: ["smiCrossWindow", "SMI cross window"] },
+  // 🧩 zen-reports
+  learningReportEvery: { input: ["learningReportEvery", "Learning report every N (0=off)"] },
+  learningReportTrendN: { input: ["learningReportTrendN", "Trend window N"] },
+  // 🧬 zen-learning
+  evolveEnabled: { toggle: ["evolveEnabled", "Auto-evolve threshold (off=FREEZE)"] },
+  // 🧪 zen-experiments
+  candidateMomentum: { toggle: ["candidateMomentum", "Candidate momentum"] },
+  smartWalletMomentum: { toggle: ["smartWalletMomentum", "Smart-wallet mom."] },
+  expectedYieldSignal: { toggle: ["expectedYieldSignal", "Expected yield"] },
+  narrativeProfileSignal: { toggle: ["narrativeProfileSignal", "Narrative profile"] },
+  counterfactualReview: { toggle: ["counterfactualReview", "Counterfactual review"] },
+  counterfactualMinMcapGainPct: { input: ["counterfactualMinMcapGainPct", "Counterfactual min mcap gain %"] },
+  exitLiquidityCheck: { toggle: ["exitLiquidityCheck", "Exit-liquidity GATE"] },
+  exitLiquidityMaxSlippagePct: { input: ["exitLiquidityMaxSlippagePct", "Exit max slippage %", { digits: 1 }] },
+  marketRegimeGate: { toggle: ["marketRegimeGate", "Market-regime GATE"] },
+  marketRegimeMaxDrop24hPct: { input: ["marketRegimeMaxDrop24hPct", "Regime max SOL drop 24h %", { digits: 1 }] },
+  convictionSizing: { toggle: ["convictionSizing", "Conviction sizing (moves capital)"] },
+  convictionSizingMaxAdjustPct: { input: ["convictionSizingMaxAdjustPct", "Conviction max adjust %"] },
+  idleScreeningCooldown: { toggle: ["idleScreeningCooldown", "Idle screening cooldown"] },
+  idleScreeningCooldownMin: { input: ["idleScreeningCooldownMin", "Idle cooldown minutes"] },
+  paperTrading: { toggle: ["paperTrading", "Paper trading (DRY-RUN sim)"] },
+  usePaperHistoryWhenLive: { toggle: ["usePaperHistoryWhenLive", "Use paper history when live"] },
+};
 
-  return { text: bodyText, keyboard: [...nav, ...rows, ...footer] };
+// settingValue key (the callback's parts[2]) → group page id, so a toggle/step/
+// set/input returns to the group it lives on. Derived from MENU_CONTROLS +
+// config-origin so it can never drift from the layout.
+const MENU_KEY_TO_PAGE = (() => {
+  const m = {};
+  for (const sec of ORIGIN_SECTIONS) {
+    for (const sg of sec.subgroups) {
+      for (const k of sg.keys) {
+        const ctrl = MENU_CONTROLS[k];
+        if (!ctrl) continue;
+        const keys = ctrl.pageKeys || (ctrl.toggle ? [ctrl.toggle[0]] : ctrl.input ? [ctrl.input[0]] : []);
+        for (const sk of keys) m[sk] = sg.id;
+      }
+    }
+  }
+  return m;
+})();
+
+// Which group page a given settingValue key belongs to (return-to-page after an
+// edit, and the page stored for a pending text input). Falls back to the
+// management group for any unmapped key.
+function pageForKey(key) {
+  return MENU_KEY_TO_PAGE[key] || "dev-management";
+}
+
+// Page token to re-render after editing `key`: the key's group, preserving the
+// current T3 page suffix when we're already viewing that group (so an edit on
+// GMGN page 2 re-renders page 2, not page 1).
+function returnTokenForKey(key) {
+  const gid = pageForKey(key);
+  const [curBase, curPage] = String(_settingsView).split("~");
+  return curBase === gid && curPage ? `${gid}~${curPage}` : gid;
+}
+
+// ── /settings navigation (selaras /config: ASAL seksi → grup → sub-cluster) ──
+// L1 main = two ASAL section buttons; L2 = relevance groups (same names as
+// /config); L3 group page = read-only /config body + the editable controls for
+// that group, bucketed under the same sub-clusters. RENDER-ONLY: every control
+// is the SAME one MENU_CONTROLS already wired (unchanged callback_data/mechanics).
+
+function findSubgroup(groupId) {
+  for (const sec of ORIGIN_SECTIONS) {
+    const sg = sec.subgroups.find((g) => g.id === groupId);
+    if (sg) return { sec, sg };
+  }
+  return null;
+}
+
+// How many keys in a subgroup are editable from the menu (section-list hint).
+function editableCountFor(sg) {
+  return sg.keys.filter((k) => MENU_CONTROLS[k]).length;
+}
+
+// TINGKAT 1 — header rows, ALWAYS shown. The two ASAL sections + Racikan + Config
+// penuh + Refresh/Close. The active section (and Racikan on the presets page) is
+// marked with ▸. `token` is the current page token so Refresh re-renders it.
+function settingsHeaderRows(activeSection, token) {
+  const secRow = ORIGIN_SECTIONS.map((sec) => {
+    const lbl = MENU_SECTION_LABEL[sec.id] || sec.title;
+    return settingButton(`${sec.id === activeSection ? "▸ " : ""}${lbl}`, `cfg:page:${sec.id}`);
+  });
+  const racikanActive = String(token).split("~")[0] === "presets";
+  return [
+    secRow,
+    [
+      settingButton(`${racikanActive ? "▸ " : ""}🗂️ Racikan`, "cfg:page:presets"),
+      settingButton("📋 Config penuh", "cfg:show"),
+    ],
+    [settingButton("🔄 Refresh", `cfg:page:${token}`), settingButton("❌ Close", "cfg:close")],
+  ];
+}
+
+// TINGKAT 2 — group rows for one ASAL section, shown whenever a section is active
+// and STAY visible when a group is open. Short names, 2/row, each tagged ✏N
+// (editable count) or 👁 (view-only). The active group is marked with ▸.
+function settingsGroupRows(sec, activeGroupId) {
+  const btns = sec.subgroups.map((sg) => {
+    const short = MENU_GROUP_SHORT[sg.id] || sg.title;
+    const mark = sg.id === activeGroupId ? "▸ " : "";
+    if (sg.identity) return settingButton(`${mark}${short} 🗂️`, "cfg:page:presets");
+    const n = editableCountFor(sg);
+    return settingButton(`${mark}${short} ${n > 0 ? `✏${n}` : "👁"}`, `cfg:page:${sg.id}`);
+  });
+  return chunkRows(btns, 2);
+}
+
+// TINGKAT 3 — flat list of editable control rows for one group, bucketed by
+// sub-cluster (a noop header per cluster when the group spans >1). Single-button
+// controls pair two-per-row. Returns rows (incl. cluster headers) for pagination.
+function settingsControlRows(sg) {
+  const order = [];
+  const members = {};
+  for (const k of sg.keys) {
+    if (!MENU_CONTROLS[k]) continue;
+    const cl = KEY_SUBCLUSTER[k] || "_misc";
+    if (!members[cl]) { members[cl] = []; order.push(cl); }
+    members[cl].push(k);
+  }
+  const rows = [];
+  const showHdr = order.length > 1;
+  for (const cl of order) {
+    const meta = SUB_CLUSTER_META[cl];
+    if (showHdr && meta) rows.push([settingButton(`· ${meta.emoji} ${meta.label} ·`, "cfg:noop")]);
+    let buffered = null; // hold one single-button control to pair with the next
+    const flush = () => { if (buffered) { rows.push(buffered); buffered = null; } };
+    for (const k of members[cl]) {
+      const ctrl = MENU_CONTROLS[k];
+      if (ctrl.build) { flush(); rows.push(...ctrl.build()); continue; }
+      const row = ctrl.toggle
+        ? [toggleButton(ctrl.toggle[0], ctrl.toggle[1])]
+        : inputButton(ctrl.input[0], ctrl.input[1], ctrl.input[2] || {});
+      if (row.length === 1) {
+        if (buffered) { rows.push([buffered[0], row[0]]); buffered = null; }
+        else buffered = row;
+      } else { flush(); rows.push(row); }
+    }
+    flush();
+  }
+  return rows;
+}
+
+// Compact "config inti" summary for the /settings landing. Values come from the
+// SAME source as /config + /config core (buildConfigRowMap → already 🟢/⚪-tagged),
+// so the landing can never drift from /config. The keys shown are the core set
+// (mirrors config-origin CORE_GROUPS); they're just regrouped one line/kategori.
+function formatSettingsLandingSummary() {
+  const rowMap = buildConfigRowMap();
+  const v = (k) => (rowMap[k] ? rowMap[k][1] : "—");
+  const setup = (() => {
+    try { const s = getActiveSetupStatus(); return s.name ? `${s.name}${s.edited ? " ✎" : ""}` : "—"; }
+    catch { return "—"; }
+  })();
+  const lock = (config.strategy.strategyLock ?? "default") !== "default" ? ` 🔒${v("strategyLock")}` : "";
+  const expOn = Object.entries(config.experiments).filter(([, x]) => x === true).map(([k]) => k).join(", ") || "none";
+  return [
+    `⚙️ SETTINGS · racikan ${setup}`,
+    `💰 pos ${v("maxPositions")} · deploy ${v("deployAmountSol")} · SL ${v("stopLossPct")} · TP ${v("takeProfitPct")} · trail ${v("trailingTakeProfit")}`,
+    `🔎 mcap ${v("minMcap")}–${v("maxMcap")} · TVL ${v("minTvl")}–${v("maxTvl")} · vol ${v("minVolume")} · holders ${v("minHolders")} · organic ${v("minOrganic")}`,
+    `🎯 ${v("strategy")}${lock} · bins ${v("minBinsBelow")}–${v("maxBinsBelow")}`,
+    `🧠 ${v("managementModel")} · ⏱ manage ${v("managementIntervalMin")}m / screen ${v("screeningIntervalMin")}m`,
+    `📊 indikator ${v("enabled")} (${v("entryPreset")}) · exit ${v("exitEnabled")}`,
+    `🧪 experiments ON: ${expOn}`,
+  ].join("\n");
+}
+
+// LANDING — no section chosen: message = config-inti summary, buttons = TINGKAT 1.
+function renderSettingsMain() {
+  const bodyText = [
+    formatSettingsLandingSummary(),
+    "",
+    "Pilih seksi ⤵️  ( ⚙️ dev · 🧩 zen )",
+  ].join("\n");
+  return { text: bodyText, keyboard: settingsHeaderRows(null, "main") };
+}
+
+// SECTION — a section is active: TINGKAT 1 (active ▸) + TINGKAT 2 groups (none ▸).
+function renderSettingsSection(sectionId) {
+  const sec = ORIGIN_SECTIONS.find((s) => s.id === sectionId);
+  if (!sec) return renderSettingsMain();
+  const bodyText = [
+    `${MENU_SECTION_LABEL[sec.id] || sec.title} — ${sec.blurb}`,
+    "",
+    "Pilih grup ⤵️  ( ✏N = N setelan editable · 👁 = lihat-saja )",
+  ].join("\n");
+  const keyboard = [
+    ...settingsHeaderRows(sec.id, sec.id),
+    ...settingsGroupRows(sec, null),
+  ];
+  return { text: bodyText, keyboard };
+}
+
+// GROUP — a group is open: TINGKAT 1 (active section ▸) + TINGKAT 2 (active group
+// ▸, STAYS visible) + TINGKAT 3 editable controls (paginated when many). Body text
+// = the same read-only /config rows (sub-clusters, 🟢/⚪, legacy notes). `token`
+// may carry a T3 page suffix ("dev-management~2"); switching group/section swaps
+// the lower levels without any "back" button.
+function renderSettingsGroup(token) {
+  const [groupId, pageStr] = String(token).split("~");
+  const found = findSubgroup(groupId);
+  if (!found) return renderSettingsMain();
+  const { sec, sg } = found;
+  if (sg.identity) return renderSettingsPresets();
+
+  const rowMap = buildConfigRowMap();
+  const { text: body } = renderSubclusterRows(sg.keys, rowMap);
+
+  let controlRows = settingsControlRows(sg);
+  if (controlRows.length === 0) controlRows = [[settingButton("👁 Lihat-saja — ubah via /setcfg atau file", "cfg:noop")]];
+
+  // T3 pagination: chunk control rows; T1 + T2 stay visible across pages.
+  const totalPages = Math.max(1, Math.ceil(controlRows.length / MAX_T3_ROWS));
+  const page = Math.min(Math.max(1, parseInt(pageStr, 10) || 1), totalPages);
+  const controlsThisPage = totalPages > 1
+    ? controlRows.slice((page - 1) * MAX_T3_ROWS, page * MAX_T3_ROWS)
+    : controlRows;
+  const pagerRows = totalPages > 1
+    ? [[
+        settingButton("‹", `cfg:page:${groupId}~${page > 1 ? page - 1 : totalPages}`),
+        settingButton(`Hal ${page}/${totalPages}`, "cfg:noop"),
+        settingButton("›", `cfg:page:${groupId}~${page < totalPages ? page + 1 : 1}`),
+      ]]
+    : [];
+  const currentToken = totalPages > 1 ? `${groupId}~${page}` : groupId;
+
+  const bodyText = [
+    `${MENU_SECTION_LABEL[sec.id] || sec.title} › ${sg.title}`,
+    `📝 ${subgroupDesc(sg)}`,
+    "",
+    body || "  (tak ada setelan)",
+    "",
+    totalPages > 1
+      ? `Tombol edit (hal ${page}/${totalPages}). Sisanya lihat-saja (via /setcfg / file).`
+      : "Tombol = bisa diubah. Sisanya lihat-saja (via /setcfg / file).",
+  ].join("\n");
+
+  const keyboard = [
+    ...settingsHeaderRows(sec.id, currentToken),
+    ...settingsGroupRows(sec, groupId),
+    ...pagerRows,
+    ...controlsThisPage,
+  ];
+  return { text: bodyText, keyboard };
+}
+
+// 🗂️ Racikan/Identitas — kept as the dedicated presets page (load/diff/del/save).
+function renderSettingsPresets() {
+  const presets = listPresets();
+  const lines = presets.length
+    ? presets.map((p) => p.error
+        ? `⚠ ${p.name}`
+        : `${p.isCurrent ? "●" : "○"} ${p.name} — ${p.dryRun ? "🧪 dry-run" : "live"} · ${p.keys} keys${p.isCurrent ? " (current)" : ""}`)
+    : ["(belum ada preset)"];
+  const setupStatus = (() => {
+    try { const s = getActiveSetupStatus(); return s.name ? `${s.name}${s.edited ? " ✎ (ada edit manual)" : ""}` : "— (belum load)"; } catch { return "—"; }
+  })();
+  const bodyText = ["🧩 ADD BY ZEN › 🗂️ Racikan/Identitas", "",
+    `Aktif: ${setupStatus}`,
+    "(Racikan = snapshot config penuh. Beda dari 🧬 Profil = arketipe wizard.)", "",
+    ...lines, "",
+    "● = sama dgn config live · 🧪 = isi file dryRun (bukan berarti jalan)",
+    "Per baris: ▶ load · 🔍 lihat beda · 🗑️ hapus.",
+    "💾 = simpan config sekarang jadi racikan baru.",
+  ].join("\n");
+  const rows = presets.map((p) => p.error
+    ? [settingButton(`⚠ ${p.name}`, "cfg:noop")]
+    : [
+        settingButton(`${p.isCurrent ? "●" : "▶"} ${p.name}${p.dryRun ? " 🧪" : ""}`, `cfg:preset:ask:${p.name}`),
+        settingButton("🔍", `cfg:preset:diff:${p.name}`),
+        settingButton("🗑️", `cfg:preset:rmask:${p.name}`),
+      ]);
+  rows.push([settingButton("💾 Simpan config sekarang", "cfg:preset:save")]);
+  // Keep TINGKAT 1 + the Zen TINGKAT 2 groups visible (Racikan marked ▸) so the
+  // user can jump straight to another section/group without a back button.
+  const zenSec = ORIGIN_SECTIONS.find((s) => s.id === "zen");
+  const keyboard = [
+    ...settingsHeaderRows("zen", "presets"),
+    ...settingsGroupRows(zenSec, "zen-racikan"),
+    ...rows,
+  ];
+  return { text: bodyText, keyboard };
+}
+
+function renderSettingsMenu(page = "main") {
+  const base = String(page).split("~")[0];
+  if (base === "main") return renderSettingsMain();
+  if (base === "dev" || base === "zen") return renderSettingsSection(base);
+  if (base === "presets") return renderSettingsPresets();
+  return renderSettingsGroup(page); // group token (e.g. "dev-management" / "zen-gmgn~2"); unknown → main
 }
 
 async function showSettingsMenu({ messageId = null, page = "main" } = {}) {
+  _settingsView = page; // remember the live view so post-edit re-renders stay put
   const menu = renderSettingsMenu(page);
   if (messageId) {
     await editMessageWithButtons(menu.text, messageId, menu.keyboard);
@@ -2194,7 +2910,7 @@ async function applySettingsMenuCallback(msg) {
   if (action === "input") {
     const inputKey = parts[2];
     const currentVal = settingValue(inputKey);
-    const inputPage = pageForKey(inputKey);
+    const inputPage = returnTokenForKey(inputKey);
     _pendingInput = { key: inputKey, page: inputPage, menuMsgId: msg.messageId };
     await answerCallbackQuery(msg.callbackQueryId);
     await sendMessage(`Enter new value for ${inputKey} (current: ${currentVal ?? "off"}):\nSend a number, or "off" to clear.`);
@@ -2206,8 +2922,10 @@ async function applySettingsMenuCallback(msg) {
     return;
   }
   if (action === "show") {
+    // "📋 Config penuh" → the full /config (same as the /config command, auto-split).
+    // sendMessage drops it below the menu so the keyboard stays usable.
     await answerCallbackQuery(msg.callbackQueryId);
-    await editMessageWithButtons(formatConfigSnapshot(), msg.messageId, [[settingButton("Back", "cfg:page:main")]]);
+    await sendMessage(formatFullConfig());
     return;
   }
   if (action === "page") {
@@ -2305,7 +3023,7 @@ async function applySettingsMenuCallback(msg) {
       return;
     }
     await answerCallbackQuery(msg.callbackQueryId, `categories: ${value ? value.join(",") : "off (factory)"}`);
-    await showSettingsMenu({ messageId: msg.messageId, page: "screen" });
+    await showSettingsMenu({ messageId: msg.messageId, page: "zen-screening" });
     return;
   }
 
@@ -2342,7 +3060,7 @@ async function applySettingsMenuCallback(msg) {
     await answerCallbackQuery(msg.callbackQueryId, "Config update failed");
     return;
   }
-  page = pageForKey(key);
+  page = returnTokenForKey(key);
   await answerCallbackQuery(msg.callbackQueryId, `Updated ${key}`);
   await showSettingsMenu({ messageId: msg.messageId, page });
 }
@@ -2353,11 +3071,13 @@ function formatHelpText() {
     "",
     "📊 LAPORAN & STATUS",
     "/status — wallet + positions snapshot",
-    "/wallet — wallet, deploy amount, HiveMind + SOL growth tracker (1d/7d/30d)",
-    "/positions — list open positions",
-    "/pool <n> — detailed info for one position",
+    "/wallet — wallet, SOL bebas (cair) + real deploy/slot + rent tertahan + SOL tracker (1d/7d/30d)",
+    "/wallet trackstart <YYYY-MM-DD|off> — anchor tracker SOL ke tanggal",
+    "/positions — list open positions (+ rent tertahan)",
+    "/pool <n> — detail 1 posisi (+ range-efficiency + rent)",
     "/briefing — morning briefing (auto-pinned)",
-    "/report [week|month|day] — trade learning report",
+    "/report — racikan aktif · /report all = lifetime · /report setups · /report <racikan>",
+    "/report [week|month|day] — digest periodik",
     "",
     "🛠️ POSISI & DEPLOY",
     "/close <n> — close one position by index",
@@ -2369,6 +3089,7 @@ function formatHelpText() {
     "",
     "⚙️ KONFIGURASI",
     "/config — show full runtime config (grouped)",
+    "/config core — ringkasan key inti saja",
     "/settings — button menu for common config",
     "/setcfg <key> <value> — update persisted config",
     "/preset [list|save|use|show <nama>] — simpan/ganti profil config",
@@ -2522,7 +3243,15 @@ async function deployLatestCandidate(index) {
       throw new Error(`NO DEPLOY: only cached candidate ${candidate.name} is not worth deploying — ${skipReason}`);
     }
   }
-  const deployAmount = computeDeployAmount((await getWalletBalances()).sol);
+  const [balForDeploy, posForDeploy] = await Promise.all([getWalletBalances(), getMyPositions({ force: true }).catch(() => ({ total_positions: 0 }))]);
+  const slotsLeft = Math.max(1, config.risk.maxPositions - (posForDeploy?.total_positions ?? 0));
+  const deployAmount = computeDeployAmount(balForDeploy.sol, { slotsRemaining: slotsLeft });
+  // 0 = adaptive sizing can't reach the min-deploy floor (wallet too small). Fail
+  // with a clear "modal kurang" message instead of letting the executor reject a
+  // sub-min / zero amount with a generic error.
+  if (deployAmount < minDeployAmount()) {
+    throw new Error(`NO DEPLOY: modal kurang — wallet ${balForDeploy.sol.toFixed(3)} SOL tak cukup untuk satu posisi ≥ ${minDeployAmount()} SOL (gas ${config.management.gasReserve} + rent ${config.management.rentPerPositionSol}/pos).`);
+  }
   const binsBelow = computeBinsBelow(candidate.volatility);
   const result = await executeTool("deploy_position", {
     pool_address: candidate.pool,
@@ -2676,6 +3405,29 @@ async function telegramHandler(msg) {
     return;
   }
 
+  // SOL tracker anchor: "/wallet trackstart YYYY-MM-DD" (or off|clear to remove).
+  const trackStartMatch = text.match(/^\/wallet\s+trackstart\b\s*(.*)$/i);
+  if (trackStartMatch) {
+    const arg = trackStartMatch[1].trim().toLowerCase();
+    if (!arg) {
+      const cur = getTrackStart();
+      await sendMessage(cur
+        ? `📊 SOL tracker anchor: ${cur}\nGanti: /wallet trackstart YYYY-MM-DD · Hapus: /wallet trackstart off`
+        : `📊 SOL tracker anchor: belum diset.\nSet: /wallet trackstart YYYY-MM-DD (mis. ${new Date().toISOString().slice(0, 10)})`).catch(() => {});
+      return;
+    }
+    if (["off", "clear", "hapus", "reset"].includes(arg)) {
+      setTrackStart(null);
+      await sendMessage("📊 SOL tracker anchor dihapus. /wallet pakai window 1D/7D/30D saja.").catch(() => {});
+      return;
+    }
+    const res = setTrackStart(arg);
+    await sendMessage(res.ok
+      ? `✅ SOL tracker anchor diset ke ${res.dateKey}. /wallet sekarang nampilin baris "SINCE ${res.dateKey}".`
+      : `❌ ${res.error}`).catch(() => {});
+    return;
+  }
+
   if (text === "/wallet" || text === "/status") {
     try {
       const [wallet, positions, orBalance, orCredits] = await Promise.all([
@@ -2684,7 +3436,17 @@ async function telegramHandler(msg) {
         getOpenRouterBalance(),
         getOpenRouterCredits(),
       ]);
-      let msg = formatWalletStatus(wallet, positions);
+      // Held rent across open positions → total tertahan + SOL bebas efektif.
+      let rentInfo = null;
+      if (positions.total_positions > 0) {
+        const rentMap = await getPositionsRentSol(positions.positions.map((p) => p.position)).catch(() => ({}));
+        const vals = Object.values(rentMap);
+        rentInfo = {
+          totalRentSol: vals.reduce((s, r) => s + (r?.sol ?? 0), 0),
+          estimated: vals.some((r) => r?.estimated),
+        };
+      }
+      let msg = formatWalletStatus(wallet, positions, rentInfo);
       if (orCredits?.balance != null) {
         // Actual purchased-credit balance — the number to watch for top-ups.
         msg += `\n💳 OpenRouter saldo: $${orCredits.balance.toFixed(2)}`;
@@ -2732,8 +3494,8 @@ async function telegramHandler(msg) {
     return;
   }
 
-  if (text === "/config") {
-    await sendMessage(formatFullConfig()).catch(() => {});
+  if (text === "/config" || text === "/config core") {
+    await sendMessage(text === "/config core" ? formatCoreConfig() : formatFullConfig()).catch(() => {});
     return;
   }
 
@@ -2749,13 +3511,39 @@ async function telegramHandler(msg) {
       const { positions, total_positions } = await getMyPositions({ force: true });
       if (total_positions === 0) { await sendMessage("No open positions."); return; }
       const cur = config.management.solMode ? "◎" : "$";
-      const lines = positions.map((p, i) => {
-        const pnl = p.pnl_usd >= 0 ? `+${cur}${p.pnl_usd}` : `-${cur}${Math.abs(p.pnl_usd)}`;
-        const age = p.age_minutes != null ? `${p.age_minutes}m` : "?";
-        const oor = !p.in_range ? " ⚠️OOR" : "";
-        return `${i + 1}. ${p.pair} | ${cur}${p.total_value_usd} | PnL: ${pnl} | fees: ${cur}${p.unclaimed_fees_usd} | ${age}${oor}`;
+      const rentMap = await getPositionsRentSol(positions.map((p) => p.position)).catch(() => ({}));
+      const lines = [];
+      let totalRent = 0, anyRentEst = false;
+      positions.forEach((p, i) => {
+        const pnlVal = p.pnl_usd ?? 0;
+        const pnl = `${pnlVal >= 0 ? "+" : "-"}${cur}${Math.abs(pnlVal)}${p.pnl_pct != null ? ` (${p.pnl_pct >= 0 ? "+" : ""}${p.pnl_pct}%)` : ""}`;
+        const age = fmtAgeMin(p.age_minutes);
+        const state = p.in_range ? "✅ in-range" : `⚠️ OOR ${p.minutes_out_of_range ?? 0}m`;
+        const width = (Number.isFinite(p.lower_bin) && Number.isFinite(p.upper_bin)) ? `${p.upper_bin - p.lower_bin + 1} bins` : "? bins";
+        const rent = rentMap[p.position];
+        if (rent) { totalRent += rent.sol; if (rent.estimated) anyRentEst = true; }
+        const rentStr = rent ? ` · 🔒 ${rent.sol.toFixed(3)}◎${rent.estimated ? " (est)" : ""}` : "";
+        // Fee density so far: simple fees-earned / position-value (% of capital
+        // recovered as fees). NOT annualized — extrapolating a young position's
+        // short window to a year produces nonsense (a fresh pos reads 1000s of %).
+        // The aggregate /report carries the proper fee-APR (large, stable window).
+        const feesSoFar = (p.collected_fees_usd ?? 0) + (p.unclaimed_fees_usd ?? 0);
+        let feeDensStr = "";
+        if (Number.isFinite(p.total_value_usd) && p.total_value_usd > 0 && feesSoFar > 0) {
+          feeDensStr = ` · 💧 fee ${((feesSoFar / p.total_value_usd) * 100).toFixed(2)}%`;
+        }
+        lines.push(
+          `${i + 1}. ${p.pair}  ${state}`,
+          `   value ${cur}${p.total_value_usd ?? "?"} · PnL ${pnl} · fees ${cur}${p.unclaimed_fees_usd ?? "?"}`,
+          `   age ${age} · range ${width}${rentStr}${feeDensStr}`,
+        );
       });
-      await sendMessage(`📊 Open Positions (${total_positions}):\n\n${lines.join("\n")}\n\n/close <n> to close | /set <n> <note> to set instruction`);
+      const footer = [
+        "━━━━━━━━━━━━━━━━━",
+        `🔒 Total tertahan ~${totalRent.toFixed(3)} SOL${anyRentEst ? " (sebagian est)" : ""} — refund saat close`,
+        "/close <n> · /pool <n> · /set <n> <note>",
+      ].join("\n");
+      await sendMessage(`📊 Open Positions (${total_positions})\n━━━━━━━━━━━━━━━━━\n${lines.join("\n")}\n${footer}`);
     } catch (e) { await sendMessage(`Error: ${e.message}`).catch(() => {}); }
     return;
   }
@@ -2767,16 +3555,23 @@ async function telegramHandler(msg) {
       const { positions } = await getMyPositions({ force: true });
       if (idx < 0 || idx >= positions.length) { await sendMessage("Invalid number. Use /positions first."); return; }
       const pos = positions[idx];
-      await sendMessage([
+      const cur = config.management.solMode ? "◎" : "$";
+      const tracked = (() => { try { return getTrackedPosition(pos.position); } catch { return null; } })();
+      const rent = (await getPositionsRentSol([pos.position]).catch(() => ({})))[pos.position];
+
+      const lines = [
         `${idx + 1}. ${pos.pair}`,
         `Pool: ${pos.pool}`,
         `Position: ${pos.position}`,
-        `Range: ${pos.lower_bin} → ${pos.upper_bin} | active ${pos.active_bin}`,
-        `PnL: ${pos.pnl_pct ?? "?"}% | fees: ${config.management.solMode ? "◎" : "$"}${pos.unclaimed_fees_usd ?? "?"}`,
-        `Value: ${config.management.solMode ? "◎" : "$"}${pos.total_value_usd ?? "?"}`,
-        `Age: ${pos.age_minutes ?? "?"}m | ${pos.in_range ? "IN RANGE" : `OOR ${pos.minutes_out_of_range ?? 0}m`}`,
-        pos.instruction ? `Note: ${pos.instruction}` : null,
-      ].filter(Boolean).join("\n"));
+        "── Range efficiency ──",
+        ...buildRangeEfficiencyLines(pos, tracked),
+        "── Value ──",
+        `PnL: ${pos.pnl_pct ?? "?"}% | fees: ${cur}${pos.unclaimed_fees_usd ?? "?"} | value ${cur}${pos.total_value_usd ?? "?"}`,
+        `Age: ${fmtAgeMin(pos.age_minutes)}`,
+      ];
+      if (rent) lines.push(`🔒 Tertahan (rent): ${rent.sol.toFixed(4)} SOL${rent.estimated ? " (estimasi)" : ""} — refund saat close`);
+      if (pos.instruction) lines.push(`Note: ${pos.instruction}`);
+      await sendMessage(lines.join("\n"));
     } catch (e) {
       await sendMessage(`Error: ${e.message}`).catch(() => {});
     }
@@ -2950,7 +3745,11 @@ async function telegramHandler(msg) {
   try {
     log("telegram", `Incoming: ${text}`);
     const hasCloseIntent = /\bclose\b|\bsell\b|\bexit\b|\bwithdraw\b|\btutup\b|\bjual\b|\btarik\b|\bcabut\b/i.test(text);
-    const isDeployRequest = !hasCloseIntent && /\bdeploy\b|\bopen position\b|\blp into\b|\badd liquidity\b|\bbuka posisi\b|\btambah likuiditas\b/i.test(text);
+    // A settings-change phrase ("ubah/ganti/naikin/turunin/set/atur deploy …") must NOT be
+    // treated as a deploy request: it belongs in GENERAL (which has update_config), not
+    // SCREENER (which can only deploy). The word "deploy"/"amount" here names the SETTING.
+    const isSettingEdit = /\b(ubah|ganti|atur|setel|set|naik(?:in|kan)|turun(?:in|kan)|tingkatkan|kurangi|perbesar|perkecil|change|update|increase|decrease|lower|raise|bump|adjust)\b/i.test(text);
+    const isDeployRequest = !hasCloseIntent && !isSettingEdit && /\bdeploy\b|\bopen position\b|\blp into\b|\badd liquidity\b|\bbuka posisi\b|\btambah likuiditas\b/i.test(text);
     const agentRole = isDeployRequest ? "SCREENER" : "GENERAL";
     const agentModel = agentRole === "SCREENER" ? config.llm.screeningModel : config.llm.generalModel;
     liveMessage = await createLiveMessage("🤖 Live Update", `Request: ${text.slice(0, 240)}`);
@@ -3072,12 +3871,13 @@ Commands:
   /status        Refresh wallet + positions
   /candidates    Refresh top pool list
   /briefing      Show morning briefing (last 24h)
-  /report        Trade learning report — /report [week|month|day]
+  /report        Trade report — /report [all|setups|<racikan>|week|month|day]
   /guide         Panduan setting (TOC) — /guide <no|katakunci|all>
   /learn         Study top LPers from the best current pool and save lessons
   /learn <addr>  Study top LPers from a specific pool address
   /thresholds    Show current screening thresholds + performance stats
   /evolve        Manually trigger threshold evolution from performance data
+  /evolve force  Run evolve once even when frozen (evolveEnabled=false) — manual override
   /stop          Shut down
 `);
 
@@ -3255,8 +4055,24 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
       return;
     }
 
-    if (input === "/evolve") {
+    if (input === "/evolve" || input === "/evolve force") {
       await runBusy(async () => {
+        // FREEZE gate: when evolveEnabled=false the AUTO loop is frozen. The manual
+        // /evolve stays available to the operator, but plain `/evolve` refuses and
+        // explains — running it anyway requires the explicit `/evolve force` override,
+        // which writes thresholds despite the freeze (operator's deliberate choice).
+        const frozen = config.learning?.evolveEnabled === false;
+        const forced = input === "/evolve force";
+        if (frozen && !forced) {
+          console.log("\n🧊 Auto-evolve DIBEKUKAN (evolveEnabled=false) — threshold tidak akan diubah.");
+          console.log("   minFeeActiveTvlRatio & minOrganic tetap manual.");
+          console.log("   Untuk override manual SEKALI JALAN: ketik  /evolve force\n");
+          return;
+        }
+        if (frozen && forced) {
+          console.log("\n⚠️  OVERRIDE MANUAL — evolve dibekukan (evolveEnabled=false) tapi dipaksa jalan.");
+          console.log("   Ini akan MENULIS threshold sekali ini. Toggle tetap false setelahnya.\n");
+        }
         const perf = getPerformanceSummary();
         if (!perf || perf.total_positions_closed < 5) {
           const needed = 5 - (perf?.total_positions_closed || 0);
@@ -3292,6 +4108,12 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
     // ── Free-form chat ───────────────────────
     await runBusy(async () => {
       log("user", input);
+      // No onConfirmRequired here (unlike the Telegram path, which wires
+      // requestConfirmation): the CLI REPL is the local operator's own console —
+      // whoever types here is already the trusted operator, so a confirm prompt
+      // would be redundant. Value safety is not skipped: update_config still runs
+      // through the same executor, so config-schema.js validation applies on this
+      // path too (a garbled model id / out-of-range value is rejected regardless).
       const { content } = await agentLoop(input, config.llm.maxSteps, sessionHistory, "GENERAL", config.llm.generalModel, null, { interactive: true });
       appendHistory(input, content);
       console.log(`\n${content}\n`);

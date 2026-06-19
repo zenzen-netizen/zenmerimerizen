@@ -1,6 +1,7 @@
 import fs from "fs";
 import { log } from "./logger.js";
 import { repoPath } from "./repo-root.js";
+import { estimateGasSol } from "./reports.js";
 
 const USER_CONFIG_PATH = repoPath("user-config.json");
 
@@ -568,72 +569,95 @@ function activeRacikan() {
   catch { return null; }
 }
 
+// Shared notification divider — keeps all four notifs visually consistent.
+const NOTIF_DIV = "────────────────";
+
 export async function notifyDeploy({ pair, amountSol, position, tx, priceRange, rangeCoverage, binStep, baseFee }) {
   if (hasActiveLiveMessage()) return;
   const safePair = escapeHtml(pair || "?");
   const racikan = activeRacikan();
-  const racikanStr = racikan ? `Racikan: ${escapeHtml(racikan)}\n` : "";
-  const priceStr = priceRange
-    ? `Price range: ${priceRange.min < 0.0001 ? priceRange.min.toExponential(3) : priceRange.min.toFixed(6)} – ${priceRange.max < 0.0001 ? priceRange.max.toExponential(3) : priceRange.max.toFixed(6)}\n`
-    : "";
-  const coverageStr = rangeCoverage
-    ? `Range cover: ${fmtPct(rangeCoverage.downside_pct)} downside | ${fmtPct(rangeCoverage.upside_pct)} upside | ${fmtPct(rangeCoverage.width_pct)} total\n`
-    : "";
-  const poolStr = (binStep || baseFee)
-    ? `Bin step: ${binStep ?? "?"}  |  Base fee: ${baseFee != null ? baseFee + "%" : "?"}\n`
-    : "";
-  await sendHTML(
-    `✅ <b>Deployed</b> ${safePair}\n` +
-    `Amount: ${amountSol} SOL\n` +
-    racikanStr +
-    priceStr +
-    coverageStr +
-    poolStr +
-    `Position: <code>${position?.slice(0, 8)}...</code>\n` +
-    `Tx: <code>${tx?.slice(0, 16)}...</code>`
-  );
+  const lines = [
+    `✅ <b>Deployed</b> ${safePair}`,
+    NOTIF_DIV,
+    `💵 Amount: ${amountSol} SOL${racikan ? `  ·  🗂️ ${escapeHtml(racikan)}` : ""}`,
+  ];
+  if (priceRange) {
+    const fmtP = (v) => (v < 0.0001 ? v.toExponential(3) : v.toFixed(6));
+    lines.push(`📐 Price range: ${fmtP(priceRange.min)} – ${fmtP(priceRange.max)}`);
+  }
+  if (rangeCoverage) {
+    lines.push(`↕️ Cover: ${fmtPct(rangeCoverage.downside_pct)} ↓ | ${fmtPct(rangeCoverage.upside_pct)} ↑ | ${fmtPct(rangeCoverage.width_pct)} total`);
+  }
+  if (binStep || baseFee) {
+    lines.push(`🧱 Bin step ${binStep ?? "?"}  ·  base fee ${baseFee != null ? baseFee + "%" : "?"}`);
+  }
+  lines.push(`🆔 Position: <code>${position?.slice(0, 8)}...</code>`);
+  lines.push(`🔗 Tx: <code>${tx?.slice(0, 16)}...</code>`);
+  await sendHTML(lines.join("\n"));
 }
 
-export async function notifyClose({ pair, pnlUsd, pnlPct, reason, lesson, feesUsd }) {
+export async function notifyClose({ pair, pnlUsd, pnlPct, peakPnlPct, reason, lesson, feesUsd }) {
   if (hasActiveLiveMessage()) return;
   const safePair = escapeHtml(pair || "?");
-  const sign = pnlUsd >= 0 ? "+" : "";
-  const reasonLine = reason ? `\n📋 <b>Reason:</b> ${escapeHtml(String(reason).slice(0, 200))}` : "";
-  const lessonLine = lesson ? `\n📚 <b>Lesson:</b> <i>${escapeHtml(String(lesson).slice(0, 300))}</i>` : "";
-  // PnL already includes claimed fees — say so, so a softened/worsened number
-  // is never mistaken for "fees not yet counted".
-  const feeLine = feesUsd != null && feesUsd > 0
-    ? `\n💎 Fees earned: +$${feesUsd.toFixed(2)} (sudah termasuk dalam PnL)`
-    : "";
+  const net = pnlUsd ?? 0;
+  const win = net >= 0;
+  // One signed-$ formatter so every figure shares the same sign/precision style.
+  const usd = (v) => `${v >= 0 ? "+" : "-"}$${Math.abs(v).toFixed(2)}`;
+  const lines = [
+    `${win ? "🟢" : "🔴"} <b>Closed</b> ${safePair}`,
+    NOTIF_DIV,
+    // Headline $ and % are the SAME basis: total net, fees INCLUDED (pnl_usd =
+    // leg + fee, verified empirically). No more "$ = price-leg, % = total" split.
+    `📊 Net PnL: ${usd(net)} (${pnlPct >= 0 ? "+" : ""}${(pnlPct ?? 0).toFixed(2)}%)`,
+  ];
+  // Decompose the position PnL so a number's SOURCE is legible: how much came
+  // from harvested FEES vs the price leg (IL+drift). Live can't separate IL from
+  // drift (paper can) — fee vs price-effect vs gas is the right granularity.
+  // FEE + EFEK-HARGA = Net PnL exactly (price = net − fee = final − initial).
+  if (feesUsd != null) {
+    const fee = feesUsd;
+    const priceEffect = net - fee;
+    // Gas is a separate wallet-side network cost (NOT part of the position PnL the
+    // DLMM API reports). Rough per-action estimate; real fees aren't captured per tx.
+    const gasSol = estimateGasSol({ close_position: 1, claim_fees: 1, swap_token: 1 });
+    lines.push(
+      `   💎 Fee panen ${usd(fee)}  ·  📈 Efek-harga ${usd(priceEffect)}`,
+      `   ⛽ Gas ~${gasSol.toFixed(5)} SOL (est, di luar PnL — dari wallet)`,
+    );
+  }
+  // Give-back: how much of a real PROFIT run-up wasn't captured at exit. Gated on
+  // a meaningful peak (≥3%) so a stop-loss dump from a near-flat peak isn't framed
+  // as "leaving profit on the table" — that's the leak the report flags too.
+  if (Number.isFinite(peakPnlPct) && Number.isFinite(pnlPct)) {
+    const giveback = peakPnlPct - pnlPct;
+    if (peakPnlPct >= 3 && giveback >= 1) {
+      lines.push(`📈 Give-back: peak +${peakPnlPct.toFixed(2)}% → exit ${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}% (tinggal ${giveback.toFixed(2)}pp di meja)`);
+    }
+  }
   // Stop-loss/trailing reasons embed the PnL reading that TRIGGERED the close
   // (e.g. "Stop loss: PnL -12.16% <= -12%"). The realized PnL can land far away
   // when price keeps moving during the ~1 min close execution — flag the gap so
   // it reads as execution slippage, not a math error.
-  let gapLine = "";
   const trig = reason ? String(reason).match(/PnL (-?\d+(?:\.\d+)?)%/) : null;
   if (trig && pnlPct != null) {
     const triggerPct = parseFloat(trig[1]);
     const gap = Math.abs((pnlPct ?? 0) - triggerPct);
     if (Number.isFinite(gap) && gap >= 5) {
-      gapLine = `\n⚠️ Trigger di ${triggerPct.toFixed(2)}%, realisasi ${(pnlPct ?? 0).toFixed(2)}% — harga terus bergerak selama eksekusi close (gap ${gap.toFixed(1)}pp).`;
+      lines.push(`⚠️ Trigger di ${triggerPct.toFixed(2)}%, realisasi ${(pnlPct ?? 0).toFixed(2)}% — harga terus bergerak selama eksekusi close (gap ${gap.toFixed(1)}pp).`);
     }
   }
-  await sendHTML(
-    `🔒 <b>Closed</b> ${safePair}\n` +
-    `PnL: ${sign}$${(pnlUsd ?? 0).toFixed(2)} (${sign}${(pnlPct ?? 0).toFixed(2)}%)` +
-    feeLine +
-    gapLine +
-    reasonLine +
-    lessonLine
-  );
+  if (reason) lines.push(`📋 <b>Reason:</b> ${escapeHtml(String(reason).slice(0, 200))}`);
+  if (lesson) lines.push(`📚 <b>Lesson:</b> <i>${escapeHtml(String(lesson).slice(0, 300))}</i>`);
+  await sendHTML(lines.join("\n"));
 }
 
 export async function notifySwap({ inputSymbol, outputSymbol, amountIn, amountOut, tx }) {
   if (hasActiveLiveMessage()) return;
   await sendHTML(
     `🔄 <b>Swapped</b> ${escapeHtml(inputSymbol || "?")} → ${escapeHtml(outputSymbol || "?")}\n` +
-    `In: ${amountIn ?? "?"} | Out: ${amountOut ?? "?"}\n` +
-    `Tx: <code>${tx?.slice(0, 16)}...</code>`
+    NOTIF_DIV + "\n" +
+    `💱 In: ${amountIn ?? "?"}  ·  Out: ${amountOut ?? "?"}\n` +
+    `🔗 Tx: <code>${tx?.slice(0, 16)}...</code>`
   );
 }
 
@@ -641,7 +665,8 @@ export async function notifyOutOfRange({ pair, minutesOOR }) {
   if (hasActiveLiveMessage()) return;
   await sendHTML(
     `⚠️ <b>Out of Range</b> ${escapeHtml(pair || "?")}\n` +
-    `Been OOR for ${minutesOOR} minutes`
+    NOTIF_DIV + "\n" +
+    `⏱️ Been OOR for ${minutesOOR} minutes`
   );
 }
 

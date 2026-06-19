@@ -26,17 +26,22 @@ import {
   ensureDeployedAt,
 } from "../state.js";
 import { recordPerformance } from "../lessons.js";
+import { estimateGasSol } from "../reports.js";
 import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
 import { normalizeMint, getWalletBalances } from "./wallet.js";
 import {
   isPaperMode,
   makePaperPositionId,
   simulatePaperMetrics,
+  timeframeMinutes,
+  classifyPaperEdge,
+  formatPaperDecomposition,
 } from "../paper-trading.js";
 import { appendDecision } from "../decision-log.js";
 import { getAndClearStagedSignals } from "../signal-tracker.js";
 import { trackTxGas } from "../gas-tracker.js";
 import { getCandidateMomentum, getSmartWalletMomentum } from "../candidate-memory.js";
+import { computePositions, fetchDlmmPnlForPool } from "./pnl.js";
 
 /**
  * 🔬 Shadow-logging: snapshot the experiment signals' VALUES for a pool at deploy
@@ -786,6 +791,27 @@ export async function deployPosition({
         const displayName = pool_name || `${baseMint.slice(0, 6)}/SOL`;
         const paperId = makePaperPositionId(pool_address);
 
+        // 🧪 Paper fee model (FASE 1): capture RAW fee + active_tvl so the sim can use
+        // the TRUE per-window yield fee = fee/active_tvl (NOT the ×100 percentage that
+        // fee_active_tvl_ratio actually is — see notes/paper-recon.md + paper-fix-progress.md).
+        // Fetched at the 24h window: active_tvl is window-invariant and the daily fee rate is
+        // far more stable/predictive than a 5m/30m snapshot. Stashed INSIDE signal_snapshot
+        // (already stored verbatim) so this stays 100% paper-only — no change to the shared
+        // state.js record shape. Fail-open: any error leaves these absent and
+        // computePaperMetrics falls back to fee_tvl_ratio/100.
+        const paperSig = { base_mint: baseMint, entry_fee_window: "24h" };
+        try {
+          const f = encodeURIComponent(`pool_address=${pool_address}`);
+          const detail = await fetch(`https://pool-discovery-api.datapi.meteora.ag/pools?page_size=1&filter_by=${f}&timeframe=24h`).then((r) => r.json()).catch(() => null);
+          const row = detail?.data?.[0];
+          if (row) {
+            const rf = Number(row.fee);
+            const rt = Number(row.active_tvl ?? row.tvl);
+            if (Number.isFinite(rf)) paperSig.entry_fee = rf;
+            if (Number.isFinite(rt) && rt > 0) paperSig.entry_active_tvl = rt;
+          }
+        } catch { /* fail-open: fall back to stored fee_tvl_ratio */ }
+
         trackPosition({
           position: paperId,
           pool: pool_address,
@@ -800,7 +826,7 @@ export async function deployPosition({
           fee_tvl_ratio: fee_tvl_ratio ?? null,
           organic_score: organic_score ?? null,
           narrative_category: narrative_category ?? null,
-          signal_snapshot: { base_mint: baseMint },
+          signal_snapshot: paperSig,
           entry_mcap: entry_mcap ?? null,
           entry_tvl: entry_tvl ?? null,
           entry_volume: entry_volume ?? null,
@@ -1200,33 +1226,6 @@ async function fetchLpAgentOpenPositions(walletAddress) {
   }
 }
 
-// ─── Fetch DLMM PnL API for all positions in a pool ────────────
-async function fetchDlmmPnlForPool(poolAddress, walletAddress) {
-  const url = `https://dlmm.datapi.meteora.ag/positions/${poolAddress}/pnl?user=${walletAddress}&status=open&pageSize=100&page=1`;
-  try {
-    const res = await fetch(url);
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      log("pnl_api", `HTTP ${res.status} for pool ${poolAddress.slice(0, 8)}: ${body.slice(0, 120)}`);
-      return {};
-    }
-    const data = await res.json();
-    const positions = data.positions || data.data || [];
-    if (positions.length === 0) {
-      log("pnl_api", `No positions returned for pool ${poolAddress.slice(0, 8)} — keys: ${Object.keys(data).join(", ")}`);
-    }
-    const byAddress = {};
-    for (const p of positions) {
-      const addr = p.positionAddress || p.address || p.position;
-      if (addr) byAddress[addr] = p;
-    }
-    return byAddress;
-  } catch (e) {
-    log("pnl_api", `Fetch error for pool ${poolAddress.slice(0, 8)}: ${e.message}`);
-    return {};
-  }
-}
-
 // ─── Get Position PnL (Meteora API) ─────────────────────────────
 export async function getPositionPnl({ pool_address, position_address }) {
   pool_address = normalizeMint(pool_address);
@@ -1253,7 +1252,8 @@ export async function getPositionPnl({ pool_address, position_address }) {
     };
   }
   const walletAddress = getWallet().publicKey.toString();
-  if (shouldUseLpAgentRelay()) {
+  // Prefer the public-infra path (RPC + Jupiter + Meteora deposits) used by getMyPositions.
+  if (config.pnl.source === "rpc") {
     try {
       const payload = await getMyPositions({ force: true, silent: true });
       const p = payload?.positions?.find((position) => position.position === position_address);
@@ -1270,13 +1270,10 @@ export async function getPositionPnl({ pool_address, position_address }) {
           upper_bin: p.upper_bin,
           active_bin: p.active_bin,
           age_minutes: p.age_minutes,
-          request_id: payload?.request_id || null,
         };
       }
-      log("pnl_warn", "Relay positions API did not include requested position; falling back to Meteora PnL path");
     } catch (error) {
-      relayCallFailed(error);
-      log("pnl_warn", `Relay PnL lookup failed; falling back to Meteora PnL path: ${error.message}`);
+      log("pnl_warn", `RPC PnL lookup failed; falling back to direct Meteora PnL path: ${error.message}`);
     }
   }
   try {
@@ -1485,15 +1482,35 @@ async function computePaperMetrics(tracked) {
       : 0;
     const minutesOOR = minutesOutOfRange(tracked.position) || 0;
 
+    // Fee yield per window (FASE 1): prefer RAW fee/active_tvl captured at entry (24h
+    // window, stashed in signal_snapshot). Fallback for positions without it (older /
+    // fetch failed): the stored fee_tvl_ratio is a ×100 percentage over the SCREENING
+    // timeframe → /100 to get the fraction, with that timeframe as the window.
+    const sig = tracked.signal_snapshot || {};
+    let feeYieldPerWindow, feeWindowMin;
+    if (Number.isFinite(sig.entry_fee) && Number.isFinite(sig.entry_active_tvl) && sig.entry_active_tvl > 0) {
+      feeYieldPerWindow = sig.entry_fee / sig.entry_active_tvl;
+      feeWindowMin = timeframeMinutes(sig.entry_fee_window || "24h");
+    } else {
+      feeYieldPerWindow = Math.max(0, Number(tracked.fee_tvl_ratio) || 0) / 100;
+      feeWindowMin = timeframeMinutes(config.screening?.timeframe);
+    }
+
+    // FASE 2: gas-drag of the full live-equivalent round-trip (deploy + close, where
+    // a real close also claims fees and auto-swaps base→SOL). Same estimator the
+    // briefing uses (reports.js GAS_EST_SOL) so paper and live cost lines agree.
+    const gasDragSol = estimateGasSol({ deploy_position: 1, close_position: 1, claim_fees: 1, swap_token: 1 });
+
     const m = simulatePaperMetrics({
       entryPrice, currentPrice, lowerPrice,
       lowerBin, upperBin, currentBin,
       amountSol: tracked.amount_sol,
       solPrice: await getPaperSolPriceUsd(),
-      feeTvlRatio: tracked.fee_tvl_ratio,
+      feeYieldPerWindow,
       minutesInRange: Math.max(0, minutesHeld - minutesOOR),
       minutesHeld,
-      windowMinutes: 24 * 60, // fee_active_tvl_ratio behaves as a ~24h rate
+      windowMinutes: feeWindowMin,
+      gasDragSol,
     });
     return { ...m, currentBin, lowerBin, upperBin, entryPrice, currentPrice };
   } catch (e) {
@@ -1591,7 +1608,12 @@ async function closePaperPosition(position_address, reason) {
       price_peak_pct: tracked.price_peak_pct ?? null,
       price_trough_pct: tracked.price_trough_pct ?? null,
       fees_earned_usd: m?.fees_usd ?? 0,
-      final_value_usd: m?.position_value_usd ?? 0,
+      // recordPerformance computes pnl = (final_value_usd + fees_earned_usd) - initial.
+      // position_value_usd ALREADY includes fees, so pass PRINCIPAL ONLY (minus fees)
+      // and ALSO net out costs (gas + slippage) → recorded pnl = after-cost net,
+      // matching m.pnl_usd + the decomposition. (Fixes a paper-only fee double-count;
+      // recordPerformance itself is untouched.)
+      final_value_usd: (m?.position_value_usd ?? 0) - (m?.fees_usd ?? 0) - (m?.costs_usd ?? 0),
       initial_value_usd: m?.initial_value_usd ?? 0,
       minutes_in_range: Math.max(0, minutesHeld - minutesOOR),
       minutes_held: minutesHeld,
@@ -1607,7 +1629,20 @@ async function closePaperPosition(position_address, reason) {
     log("paper_warn", `paper recordPerformance failed: ${e.message}`);
   }
   recordClose(position_address, reason || "paper close");
-  log("close", `[PAPER] closed ${String(position_address).slice(0, 14)} @ ${pnlPct.toFixed(2)}% (simulated)`);
+  // FASE 4: PnL decomposition (fee / IL-price / slippage / gas; edge before vs after costs).
+  const decomposition = {
+    fees_usd: m?.fees_usd ?? 0,
+    il_usd: m?.il_usd ?? 0,
+    slippage_usd: m?.slippage_usd ?? 0,
+    gas_drag_usd: m?.gas_drag_usd ?? 0,
+    costs_usd: m?.costs_usd ?? 0,
+    edge_before_costs_usd: m?.pnl_before_costs_usd ?? 0,
+    edge_after_costs_usd: m?.pnl_usd ?? 0,
+    source: classifyPaperEdge(m),
+  };
+  const breakdown = formatPaperDecomposition(m);
+  log("close", `[PAPER] closed ${String(position_address).slice(0, 14)} @ ${pnlPct.toFixed(2)}% net (simulated) — ${decomposition.source}`);
+  if (breakdown) log("close", breakdown);
   return {
     success: true,
     dry_run: true,
@@ -1619,9 +1654,11 @@ async function closePaperPosition(position_address, reason) {
     pnl_usd: pnlUsd,
     pnl_pct: pnlPct,
     fees_earned_usd: m?.fees_usd ?? 0,
+    decomposition,
+    breakdown,
     close_reason: reason || "paper close",
     derived_lesson: derivedLesson,
-    message: "PAPER close — simulated PnL recorded",
+    message: `PAPER close — simulated net PnL recorded (${decomposition.source})`,
   };
 }
 
@@ -1653,26 +1690,25 @@ export async function getMyPositions({ force = false, silent = false, wallet_add
   }
 
   const loadPositions = async () => { try {
-    let relayLpAgentByPosition = null;
-    let relayRequestId = null;
-    if (shouldUseLpAgentRelay()) {
+    // ── Primary path: public infra (on-chain RPC + Jupiter + Meteora deposits) ──
+    // No LPAgent / agentmeridian dependency, so the poller runs aggressively on
+    // fully public resources. Falls through to the Meteora-API path on any error.
+    if (config.pnl.source === "rpc") {
       try {
-        if (!silent) log("positions", "Fetching raw LPAgent open positions via Agent Meridian relay...");
-        const result = await fetchRawOpenPositionsFromMeridian({
-          walletAddress,
-          agentId: config.hiveMind.agentId || "agent-local",
-        });
-        relayLpAgentByPosition = result.byPosition || {};
-        relayRequestId = result.requestId || result.request_id || null;
-        relayCallSucceeded();
+        if (!silent) log("positions", `Computing PnL from RPC (${config.pnl.rpcUrl})...`);
+        const rpcResult = await computePositions(walletAddress);
+        if (useLocalWallet) {
+          syncOpenPositions(rpcResult.positions.map((p) => p.position));
+          _positionsCache = rpcResult;
+          _positionsCacheAt = Date.now();
+        }
+        return rpcResult;
       } catch (error) {
-        relayCallFailed(error);
-        log("positions_warn", `Agent Meridian raw relay failed; falling back to direct LPAgent fetch: ${error.message}`);
+        log("positions_warn", `RPC PnL path failed; falling back to Meteora portfolio API: ${error.message}`);
       }
     }
 
-    // Portfolio API discovers open pools/positions for this wallet.
-    // Detailed range data stays on Meteora PnL API; value/PnL can be overridden by LPAgent below.
+    // ── Fallback path: Meteora portfolio + /pnl APIs (no LPAgent) ──
     if (!silent) log("positions", "Fetching portfolio via Meteora portfolio API...");
     const portfolioUrl = `https://dlmm.datapi.meteora.ag/portfolio/open?user=${walletAddress}`;
     const res = await fetch(portfolioUrl);
@@ -1687,7 +1723,7 @@ export async function getMyPositions({ force = false, silent = false, wallet_add
     const binDataByPool = {};
     const pnlMaps = await Promise.all(pools.map(pool => fetchDlmmPnlForPool(pool.poolAddress, walletAddress)));
     pools.forEach((pool, i) => { binDataByPool[pool.poolAddress] = pnlMaps[i]; });
-    const lpAgentByPosition = relayLpAgentByPosition || await fetchLpAgentOpenPositions(walletAddress);
+    const lpAgentByPosition = {}; // LPAgent removed — Meteora binData only
 
     const positions = [];
     for (const pool of pools) {
@@ -1826,7 +1862,7 @@ export async function getMyPositions({ force = false, silent = false, wallet_add
       wallet: walletAddress,
       total_positions: positions.length,
       positions,
-      request_id: relayRequestId,
+      source: "meteora",
     };
     if (useLocalWallet) {
       syncOpenPositions(positions.map(p => p.position));
@@ -1848,6 +1884,51 @@ export async function getMyPositions({ force = false, silent = false, wallet_add
   }
 
   return loadPositions();
+}
+
+// Empirical rent of a Meteora positionV2 account, used only when the on-chain
+// lamport read fails (or under paper/dry-run with synthetic ids). Refundable on
+// close. Measured ~0.05–0.06 SOL/position.
+export const POSITION_RENT_ESTIMATE_SOL = 0.057;
+
+/**
+ * Held (rent-exempt) SOL locked inside each position account — capital parked
+ * outside the deploy amount, REFUNDED on close. RENDER-ONLY: reads the real
+ * account lamports on-chain (batched, chunked ≤100); falls back to the empirical
+ * estimate for any account that can't be read or isn't a valid pubkey (paper
+ * ids). Never touches deploy/close logic. Returns { [position]: { sol, estimated } }.
+ */
+export async function getPositionsRentSol(positionAddresses = []) {
+  const out = {};
+  const addrs = (positionAddresses || []).filter(Boolean);
+  if (!addrs.length) return out;
+
+  // Split valid base58 pubkeys (readable on-chain) from synthetic ids (paper).
+  const valid = [];
+  for (const a of addrs) {
+    try { valid.push({ a, key: new PublicKey(a) }); }
+    catch { out[a] = { sol: POSITION_RENT_ESTIMATE_SOL, estimated: true }; }
+  }
+  if (!valid.length) return out;
+
+  try {
+    const infos = [];
+    for (let i = 0; i < valid.length; i += 100) {
+      const chunk = valid.slice(i, i + 100).map((v) => v.key);
+      const res = await getConnection().getMultipleAccountsInfo(chunk, "confirmed");
+      infos.push(...res);
+    }
+    valid.forEach((v, i) => {
+      const info = infos[i];
+      out[v.a] = (info && Number.isFinite(info.lamports))
+        ? { sol: Math.round((info.lamports / 1e9) * 1e6) / 1e6, estimated: false }
+        : { sol: POSITION_RENT_ESTIMATE_SOL, estimated: true };
+    });
+  } catch (e) {
+    log("positions_warn", `rent read failed (fallback est): ${e.message}`);
+    for (const v of valid) out[v.a] = { sol: POSITION_RENT_ESTIMATE_SOL, estimated: true };
+  }
+  return out;
 }
 
 // ─── Get Positions for Any Wallet ─────────────────────────────
@@ -2232,6 +2313,7 @@ export async function closePosition({ position_address, reason }) {
             fees_earned_usd: feesUsd,
             base_mint: closeBaseMint,
             close_reason: reason || "agent decision",
+            peak_pnl_pct: tracked.peak_pnl_pct ?? null, // for notifyClose give-back (render only)
             derived_lesson: derivedLesson1?.rule ?? null,
           };
         }
@@ -2524,6 +2606,7 @@ export async function closePosition({ position_address, reason }) {
         fees_earned_usd: feesUsd,
         base_mint: closeBaseMint,
         close_reason: reason || "agent decision",
+        peak_pnl_pct: tracked.peak_pnl_pct ?? null, // for notifyClose give-back (render only)
         derived_lesson: derivedLesson2?.rule ?? null,
       };
     }

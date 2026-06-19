@@ -52,7 +52,13 @@ Target rename (semua tempat label `net_pnl_usd` / trading-PnL-24h sbg "Net" → 
 baris after-opex sekarang eksplisit `PnL <x> − biaya <y> = <net>`. Sisa "Net" = after-opex (BENAR) +
 telegram.js:611 notif (self-contained, di luar scope FASE 1). node --check OK. Commit: FASE 1.
 
-## FASE 2 — F5a DISCLOSE trade ke-drop (DISPLAY, jujur) ⬜
+## FASE 2 — F5a DISCLOSE trade ke-drop (DISPLAY, jujur) ✅
+
+**DONE:** `getExcludedRacikanStats()` (lessons.js, setelah getSuspectCount) + formatter
+`racikanScopeDisclosure()` (index.js) → wired /report default, /wallet+/status TG (3583), CLI /status (4040).
+Live now: `⚠️ 93 trade live di luar racikan ini dikecualikan (PnL -$11.20) — /report all buat semua`
+(racikan aktif v2.1 n=23 +$1.51 vs 93 v2 −$11.20 yg tadinya diam-diam ke-buang). Nol ubah scoping/data. node --check OK.
+
 
 - Helper baru `getExcludedRacikanStats()` (lessons.js): live (non-paper,non-suspect) yg `!keepActiveRacikan`
   → {count, net_usd}. Paper mode → {0,0}.

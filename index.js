@@ -12,7 +12,7 @@ import { confirmIndicatorPreset } from "./tools/chart-indicators.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
 import { config, reloadScreeningThresholds, computeDeployAmount, minDeployAmount, persistConfigChange } from "./config.js";
 import { getGasStats } from "./gas-tracker.js";
-import { evolveThresholds, getPerformanceSummary, getModePerformance, getSuspectCount, listLessons, classifySession, currentWibSession, getLifetimePerformance, getPerformanceForRacikan, listRacikanInPerformance } from "./lessons.js";
+import { evolveThresholds, getPerformanceSummary, getModePerformance, getSuspectCount, getExcludedRacikanStats, listLessons, classifySession, currentWibSession, getLifetimePerformance, getPerformanceForRacikan, listRacikanInPerformance } from "./lessons.js";
 import { buildTradeReport, computeCostDragPct } from "./reports.js";
 import { getLlmCostStats } from "./llm-cost-tracker.js";
 import { executeTool, registerCronRestarter } from "./tools/executor.js";
@@ -262,6 +262,22 @@ async function computeReportCostDrag() {
  *   /report week|month|day → windowed periodic digest (activity + cost)
  * Async: fetches cost/wallet for the windowed digest + the cost-drag quant line.
  */
+/**
+ * One-line disclosure for the racikan-scoped views (/report default, /wallet,
+ * /status). When the active-racikan filter holds out LIVE trades (a different
+ * racikan or untagged), say so + their net — so the scoped headline never
+ * SILENTLY drops live trades. Plain text (renders under both HTML + plain send).
+ * Returns "" when nothing is held out (or on any error — fail-open).
+ */
+function racikanScopeDisclosure() {
+  try {
+    const { count, net_usd } = getExcludedRacikanStats();
+    if (!count) return "";
+    const s = `${net_usd >= 0 ? "+" : "-"}$${Math.abs(net_usd).toFixed(2)}`;
+    return `\n\n⚠️ ${count} trade live di luar racikan ini dikecualikan (PnL ${s}) — /report all buat semua.`;
+  } catch { return ""; }
+}
+
 async function buildReportForArg(arg = "") {
   const a = String(arg).trim().toLowerCase();
   if (["week", "weekly", "7d", "minggu", "mingguan"].includes(a)) return generatePeriodicBriefing("week");
@@ -331,7 +347,7 @@ async function buildReportForArg(arg = "") {
     ? `\n\n⚠️ <b>Suspect (perlu verifikasi): ${suspectN}</b>\n<i>Close ≤−90% non-stopLoss — dikecualikan dari stats di atas sampai dicek (rug asli vs bad-data).</i>`
     : "";
   const tracker = formatPnlTracker(modePerf);
-  return `${rep}${tracker ? `\n\n${tracker}` : ""}${suspectLine}`;
+  return `${rep}${tracker ? `\n\n${tracker}` : ""}${suspectLine}${racikanScopeDisclosure()}`;
 }
 
 /**
@@ -3582,6 +3598,7 @@ async function telegramHandler(msg) {
       // Realized-PnL & net-of-cost tracker (1d/7d/30d) — both /wallet and /status.
       const pnlBlock = formatPnlTracker(getModePerformance(), { solPriceUsd: wallet?.sol_price ?? null });
       if (pnlBlock) msg += `\n\n${pnlBlock}`;
+      msg += racikanScopeDisclosure();
       await sendMessage(msg).catch(() => {});
     } catch (e) {
       await sendMessage(`Error: ${e.message}`).catch(() => {});
@@ -4039,6 +4056,8 @@ Commands:
         console.log();
         const pnlBlock = formatPnlTracker(getModePerformance(), { solPriceUsd: wallet?.sol_price ?? null });
         if (pnlBlock) console.log(`${pnlBlock}\n`);
+        const disc = racikanScopeDisclosure();
+        if (disc) console.log(`${disc.trim()}\n`);
       });
       return;
     }

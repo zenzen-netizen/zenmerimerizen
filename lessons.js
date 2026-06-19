@@ -979,6 +979,23 @@ export function getSuspectCount() {
 }
 
 /**
+ * Disclosure stats for the racikan-scoped views: LIVE closed records HELD OUT of
+ * getModePerformance purely by racikan-scoping (a different active_setup, or an
+ * untagged record). Display-only so /report + /wallet can't SILENTLY hide live
+ * trades the racikan-scoped headline doesn't count. Paper + suspect excluded
+ * (suspect has its own line). Returns { count, net_usd } — {0,0} in paper mode
+ * (nothing live to disclose while dry-running).
+ */
+export function getExcludedRacikanStats() {
+  if (isPaperMode()) return { count: 0, net_usd: 0 };
+  const excluded = (load().performance || []).filter(
+    (p) => !p.paper && !p.suspect_pnl && !keepActiveRacikan(p),
+  );
+  const net = excluded.reduce((s, p) => s + (p.pnl_usd || 0), 0);
+  return { count: excluded.length, net_usd: Math.round(net * 100) / 100 };
+}
+
+/**
  * Get performance stats summary.
  */
 export function getPerformanceSummary() {

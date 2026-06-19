@@ -91,7 +91,16 @@ dlmm.js:618 sudah hyphen. node --check OK.
 - F7: slash→hyphen di backfill/fallback: dlmm.js:1741, dlmm.js:1782, pnl.js:216.
 - F6: fallback `?/SOL` → `?-SOL` (ikut hyphen). Kosmetik, cuma posisi unresolved.
 
-## FASE 5 — F5b STAMP backfill (RECORDING — hati-hati) ⬜
+## FASE 5 — F5b STAMP backfill (RECORDING — hati-hati) ✅
+
+**DONE:** ensureDeployedAt (state.js) sekarang stamp `active_setup: config.activeSetup`,
+`profile: config.profile` ke record backfill (config in-scope :14). Note "Backfilled from on-chain"
+DIPERTAHANKAN (jujur: atribusi = ASUMSI racikan-saat-ini, queryable nanti). Komentar trackPosition
+yg usang ("backfills stay null") dibetulin. Additive ke record backfill DOANG — trackPosition normal /
+recordPerformance / filter learning NOL disentuh. node --check OK.
+**Catatan masa depan:** kalau purity Darwin/evolve mau dijaga, record backfilled bisa di-exclude via
+note "Backfilled from on-chain" (BUKAN sekarang).
+
 
 - ensureDeployedAt (state.js:183-188): tambah `active_setup: config.activeSetup`, `profile: config.profile`.
 - PERTAHANKAN note "Backfilled from on-chain" (jujur: atribusi = ASUMSI racikan-saat-ini).

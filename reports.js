@@ -272,7 +272,7 @@ export function formatStatsBlock(st, label) {
     ? ` (${pct(-st.max_drawdown_pct)} dari puncak)` : "";
   const lines = [
     `<b>📊 ${esc(label)} — ${st.count} closed</b>`,
-    `💰 Net: ${money(st.net_pnl_usd)}${st.roi_pct != null ? ` (${pct(st.roi_pct)} ROI)` : ""} | 💎 fees $${st.fees_usd.toFixed(2)}`,
+    `💰 PnL: ${money(st.net_pnl_usd)}${st.roi_pct != null ? ` (${pct(st.roi_pct)} ROI)` : ""} | 💎 fees $${st.fees_usd.toFixed(2)}`,
     `🎯 Win ${st.win_rate_pct}% (${st.wins}W/${st.losses}L) | profit factor ${pf(st.profit_factor)} | expectancy ${money(st.expectancy_usd)}${expPct}/trade`,
     `⚖️ Avg win ${pct(st.avg_win_pct)} vs avg loss ${pct(st.avg_loss_pct)}${st.payoff_ratio != null ? ` (payoff ${st.payoff_ratio.toFixed(2)}×)` : ""}`,
     `📉 Max drawdown -$${(st.max_drawdown_usd ?? 0).toFixed(2)}${ddPct} | worst streak ${st.max_consecutive_losses}L | avg hold ${fmtHold(st.avg_hold_min)} | in-range ${st.avg_range_efficiency ?? "?"}%`,
@@ -410,7 +410,7 @@ export function formatTrend(allPerf, n) {
   const arrow = (a, b) => (a == null || b == null ? "" : a > b ? " 📈" : a < b ? " 📉" : " ➡️");
   return [
     `<b>📈 Trend — last ${n} vs prior ${n}:</b>`,
-    `  Net: ${money(prior.net_pnl_usd)} → ${money(recent.net_pnl_usd)}${arrow(recent.net_pnl_usd, prior.net_pnl_usd)}`,
+    `  PnL: ${money(prior.net_pnl_usd)} → ${money(recent.net_pnl_usd)}${arrow(recent.net_pnl_usd, prior.net_pnl_usd)}`,
     `  Win rate: ${prior.win_rate_pct}% → ${recent.win_rate_pct}%${arrow(recent.win_rate_pct, prior.win_rate_pct)}`,
     `  Profit factor: ${pf(prior.profit_factor)} → ${pf(recent.profit_factor)}${arrow(recent.profit_factor === Infinity ? 99 : recent.profit_factor, prior.profit_factor === Infinity ? 99 : prior.profit_factor)}`,
   ].join("\n");
@@ -445,7 +445,7 @@ export function buildRecommendations(allPerf, st = null, opts = {}) {
 
   // ── Risk posture first — the lens the old briefing was missing ──
   if (netNeg || weakPF) {
-    recs.push(`⚠️ Net ${money(stats.net_pnl_usd)} with profit factor ${pf(stats.profit_factor)} — book is not profitable yet. <b>Do NOT scale up</b>; fix the leak before sizing up.`);
+    recs.push(`⚠️ PnL ${money(stats.net_pnl_usd)} with profit factor ${pf(stats.profit_factor)} — book is not profitable yet. <b>Do NOT scale up</b>; fix the leak before sizing up.`);
     const curSize = m.positionSizePct ?? 0.35;
     if (curSize > 0.25) recs.push(`Lower <code>positionSizePct</code> ${curSize} → ${(curSize * 0.8).toFixed(2)} until profit factor &gt; 1.5`);
   }
@@ -555,13 +555,13 @@ export function buildVerdict(st) {
   const pfv = st.profit_factor;
   let verdict;
   if ((st.net_pnl_usd ?? 0) >= 0 && (pfv === Infinity || (pfv ?? 0) >= 1.5)) {
-    verdict = `✅ Sehat — net ${money(st.net_pnl_usd)}, profit factor ${pf(pfv)}. Edge nyata; pertahankan & boleh compounding pelan.`;
+    verdict = `✅ Sehat — PnL ${money(st.net_pnl_usd)}, profit factor ${pf(pfv)}. Edge nyata; pertahankan & boleh compounding pelan.`;
   } else if ((st.net_pnl_usd ?? 0) >= 0) {
-    verdict = `🟡 Tipis — net ${money(st.net_pnl_usd)} tapi profit factor cuma ${pf(pfv)}. Untung rapuh; jangan gedein size, perbaiki rasio menang/kalah dulu.`;
+    verdict = `🟡 Tipis — PnL ${money(st.net_pnl_usd)} tapi profit factor cuma ${pf(pfv)}. Untung rapuh; jangan gedein size, perbaiki rasio menang/kalah dulu.`;
   } else if (st.win_rate_pct >= 60) {
-    verdict = `🔴 Jebakan win-rate — menang ${st.win_rate_pct}% TAPI net ${money(st.net_pnl_usd)}. Masalahnya rugi besar (avg loss ${pct(st.avg_loss_pct)} vs avg win ${pct(st.avg_win_pct)}), bukan sering kalah. Fokus: potong rugi lebih cepat.`;
+    verdict = `🔴 Jebakan win-rate — menang ${st.win_rate_pct}% TAPI PnL ${money(st.net_pnl_usd)}. Masalahnya rugi besar (avg loss ${pct(st.avg_loss_pct)} vs avg win ${pct(st.avg_win_pct)}), bukan sering kalah. Fokus: potong rugi lebih cepat.`;
   } else {
-    verdict = `🔴 Belum profit — net ${money(st.net_pnl_usd)}, win ${st.win_rate_pct}%, profit factor ${pf(pfv)}. Perketat screening & exit sebelum nambah modal.`;
+    verdict = `🔴 Belum profit — PnL ${money(st.net_pnl_usd)}, win ${st.win_rate_pct}%, profit factor ${pf(pfv)}. Perketat screening & exit sebelum nambah modal.`;
   }
   return `<b>🧭 Verdict:</b> ${verdict}`;
 }

@@ -197,7 +197,7 @@ function buildCostSection({ costData, balance, credits, llmStats, gasSol, gasIsE
   if (Number.isFinite(netPnlUsd) && totalCost > 0) {
     const real = netPnlUsd - totalCost;
     const verdict = real >= 0 ? "✅ profit bersih" : "🔴 rugi setelah biaya";
-    lines.push(`📊 Net − semua biaya${paper ? " (simulasi)" : ""}: ${money(netPnlUsd)} − $${totalCost.toFixed(4)} (LLM $${llmUsd.toFixed(4)}${gasUsd != null ? ` + gas $${gasUsd.toFixed(2)}` : ""}) = ${money(real)} ${verdict}`);
+    lines.push(`📊 Net − semua biaya${paper ? " (simulasi)" : ""}: PnL ${money(netPnlUsd)} − biaya $${totalCost.toFixed(4)} (LLM $${llmUsd.toFixed(4)}${gasUsd != null ? ` + gas $${gasUsd.toFixed(2)}` : ""}) = ${money(real)} ${verdict}`);
   }
 
   if (credits?.balance != null) {
@@ -337,7 +337,7 @@ export async function generateBriefing() {
     `📤 Positions Closed: ${closedLast24h.length}`,
     "",
     `<b>Performance (24h):</b>`,
-    `💰 Net PnL: ${totalPnLUsd >= 0 ? "+" : ""}$${totalPnLUsd.toFixed(2)}`,
+    `💰 PnL: ${totalPnLUsd >= 0 ? "+" : ""}$${totalPnLUsd.toFixed(2)}`,
     `💎 Fees Earned: $${totalFeesUsd.toFixed(2)}`,
     perfLast24h.length > 0
       ? `📈 Win Rate (24h): ${Math.round((perfLast24h.filter(p => p.pnl_usd > 0).length / perfLast24h.length) * 100)}% (${perfLast24h.length} closed)`
@@ -467,7 +467,7 @@ export async function generatePeriodicBriefing(period = "week") {
   const totalCost = llmTotal + (gasUsd ?? 0);
   if (totalCost > 0) {
     const real = netPnl - totalCost;
-    costLines.push(`📊 Net − biaya${paper ? " (simulasi)" : ""}: ${money(netPnl)} − $${totalCost.toFixed(4)} = ${money(real)} ${real >= 0 ? "✅" : "🔴"}`);
+    costLines.push(`📊 Net − biaya${paper ? " (simulasi)" : ""}: PnL ${money(netPnl)} − biaya $${totalCost.toFixed(4)} = ${money(real)} ${real >= 0 ? "✅" : "🔴"}`);
   }
   if (credits?.balance != null) costLines.push(`💳 Saldo OpenRouter: $${credits.balance.toFixed(2)}`);
 

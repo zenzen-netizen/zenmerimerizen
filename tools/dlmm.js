@@ -788,7 +788,7 @@ export async function deployPosition({
           ? parseFloat((baseFactor * actualBinStep / 1e6 * 100).toFixed(4))
           : null);
         const coveragePct = activePrice > 0 ? ((activePrice - pMinPrice) / activePrice) * 100 : null;
-        const displayName = pool_name || `${baseMint.slice(0, 6)}/SOL`;
+        const displayName = pool_name || `${baseMint.slice(0, 6)}-SOL`;
         const paperId = makePaperPositionId(pool_address);
 
         // 🧪 Paper fee model (FASE 1): capture RAW fee + active_tvl so the sim can use
@@ -1738,7 +1738,7 @@ export async function getMyPositions({ force = false, silent = false, wallet_add
       for (const positionAddress of (pool.listPositions || [])) {
         // Persist deployed_at on first sight so age / minutes-held survives a
         // state reset and is always available for untracked on-chain positions.
-        ensureDeployedAt(positionAddress, { pool: pool.poolAddress, pool_name: `${pool.tokenX}/${pool.tokenY}` });
+        ensureDeployedAt(positionAddress, { pool: pool.poolAddress, pool_name: `${pool.tokenX}-${pool.tokenY}` });
         const tracked = getTrackedPosition(positionAddress);
         const isOOR = pool.outOfRange || pool.positionsOutOfRange?.includes(positionAddress);
 
@@ -1779,7 +1779,7 @@ export async function getMyPositions({ force = false, silent = false, wallet_add
         positions.push({
           position:           positionAddress,
           pool:               pool.poolAddress,
-          pair:               tracked?.pool_name || `${pool.tokenX}/${pool.tokenY}`,
+          pair:               tracked?.pool_name || `${pool.tokenX}-${pool.tokenY}`,
           base_mint:          pool.tokenXMint,
           lower_bin:          lowerBin,
           upper_bin:          upperBin,

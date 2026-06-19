@@ -81,7 +81,12 @@ Canonical pnl_usd & recordPerformance NOL diubah. node --check OK.
   `recorded_pnl_usd`/`recorded_pnl_pct` = recompute (USD mode; solMode→null fallback). executor.js:799
   notif pakai `result.recorded_pnl_usd ?? result.pnl_usd`. **JANGAN ubah canonical pnl_usd / recordPerformance.**
 
-## FASE 4 — F6/F7 kosmetik separator (DISPLAY) ⬜
+## FASE 4 — F6/F7 kosmetik separator (DISPLAY) ✅
+
+**DONE:** slash→hyphen di SEMUA jalur: dlmm.js:1741 (backfill), dlmm.js:1782 (pair fallback),
+dlmm.js:791 (paper notify displayName), pnl.js:216 (pair fallback + F6 `?/SOL`→`?-SOL`). Canonical
+dlmm.js:618 sudah hyphen. node --check OK.
+
 
 - F7: slash→hyphen di backfill/fallback: dlmm.js:1741, dlmm.js:1782, pnl.js:216.
 - F6: fallback `?/SOL` → `?-SOL` (ikut hyphen). Kosmetik, cuma posisi unresolved.

@@ -67,7 +67,13 @@ Live now: `⚠️ 93 trade live di luar racikan ini dikecualikan (PnL -$11.20) �
 - Pasang di: /report default tier (index.js ~333), /wallet+/status TG (index.js ~3583), CLI /status (~4040).
 - Nol ubah scoping/data.
 
-## FASE 3 — F9-light: notif close == report (DISPLAY) ⬜
+## FASE 3 — F9-light: notif close == report (DISPLAY) ✅
+
+**DONE:** field additive `recorded_pnl_usd/pct = (final+fees)−initial` (= persis yg recordPerformance simpan)
+di DUA jalur close (dlmm.js relay + local return). solMode → null (fallback ke pnl_usd SOL). notif pakai
+`recorded_pnl_usd ?? pnl_usd` di TIGA call: executor.js:799 (LLM/`/close`), index.js:1238 (Lever A emergency).
+Canonical pnl_usd & recordPerformance NOL diubah. node --check OK.
+
 
 - notif (telegram.js:611 via executor.js:799 → result.pnl_usd) pakai Meteora authoritative `pnlUsd`;
   record (lessons.js:173) = recompute `(final+fees)−initial`. → popup ≠ report.

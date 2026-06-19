@@ -1237,8 +1237,9 @@ async function emergencyCloseDirect(p, reason) {
       if (telegramEnabled()) {
         notifyClose({
           pair: res.pool_name || p.pair,
-          pnlUsd: res.pnl_usd ?? 0,
-          pnlPct: res.pnl_pct ?? 0,
+          // F9-light: recorded recompute when present so popup == /report.
+          pnlUsd: res.recorded_pnl_usd ?? res.pnl_usd ?? 0,
+          pnlPct: res.recorded_pnl_pct ?? res.pnl_pct ?? 0,
           peakPnlPct: res.peak_pnl_pct ?? null,
           reason: res.close_reason || reason,
           lesson: res.derived_lesson,

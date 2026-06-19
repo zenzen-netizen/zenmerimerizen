@@ -2306,6 +2306,13 @@ export async function closePosition({ position_address, reason }) {
             },
           });
 
+          // F9-light: surface the SAME PnL that recordPerformance stores
+          // ((final+fees)−initial, lessons.js:173) so the close notif == the later
+          // /report. USD mode only (the report is USD); solMode keeps its SOL
+          // headline via the pnl_usd fallback in the notifier. Render-only — the
+          // canonical recorded pnl_usd is unchanged (F9-besar deferred).
+          const recordedPnlUsd = (finalValueUsd + feesUsd) - initialUsd;
+          const recordedPnlPct = initialUsd > 0 ? (recordedPnlUsd / initialUsd) * 100 : 0;
           return {
             success: true,
             relay: true,
@@ -2318,6 +2325,8 @@ export async function closePosition({ position_address, reason }) {
             txs: txHashes,
             pnl_usd: pnlUsd,
             pnl_pct: pnlPct,
+            recorded_pnl_usd: config.management.solMode ? null : recordedPnlUsd, // for notif==report (render only)
+            recorded_pnl_pct: config.management.solMode ? null : recordedPnlPct,
             fees_earned_usd: feesUsd,
             base_mint: closeBaseMint,
             close_reason: reason || "agent decision",
@@ -2601,6 +2610,13 @@ export async function closePosition({ position_address, reason }) {
         },
       });
 
+      // F9-light: surface the SAME PnL that recordPerformance stores
+      // ((final+fees)−initial, lessons.js:173) so the close notif == the later
+      // /report. USD mode only (the report is USD); solMode keeps its SOL headline
+      // via the pnl_usd fallback in the notifier. Render-only — the canonical
+      // recorded pnl_usd is unchanged (F9-besar deferred).
+      const recordedPnlUsd = (finalValueUsd + feesUsd) - initialUsd;
+      const recordedPnlPct = initialUsd > 0 ? (recordedPnlUsd / initialUsd) * 100 : 0;
       return {
         success: true,
         position: position_address,
@@ -2611,6 +2627,8 @@ export async function closePosition({ position_address, reason }) {
         txs: txHashes,
         pnl_usd: pnlUsd,
         pnl_pct: pnlPct,
+        recorded_pnl_usd: config.management.solMode ? null : recordedPnlUsd, // for notif==report (render only)
+        recorded_pnl_pct: config.management.solMode ? null : recordedPnlPct,
         fees_earned_usd: feesUsd,
         base_mint: closeBaseMint,
         close_reason: reason || "agent decision",

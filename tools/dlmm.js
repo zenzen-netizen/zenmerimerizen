@@ -1340,6 +1340,14 @@ const PERFORMANCE_SIGNAL_FIELDS = [
   "study_win_rate",
   "hive_consensus",
   "volatility",
+  // Logging-upgrade: concentration/age (primary path = staged spread; these names
+  // are a fallback so the fields survive if ever sourced as top-level props).
+  "entry_top10_pct",
+  "entry_bot_pct",
+  "entry_age_hours",
+  "entry_mint_disabled",
+  "entry_freeze_disabled",
+  "entry_dev_migrations",
 ];
 
 function resolvePerformanceSignalSnapshot({ poolAddress, baseMint, tracked }) {

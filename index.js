@@ -1000,6 +1000,15 @@ export async function runScreeningCycle({ silent = false } = {}) {
           smart_wallets_present: (sw?.in_pool?.length ?? 0) > 0,
           narrative_quality:     n?.narrative ? "present" : "absent",
           volatility:            pool.volatility            ?? null,
+          // Logging-upgrade: concentration/age signals already fetched during
+          // screening (ti.audit / pool.token_age_hours) but previously discarded.
+          // Stamped here purely for post-hoc rug analysis — additive, never gates.
+          entry_top10_pct:       ti?.audit?.top_holders_pct ?? null,
+          entry_bot_pct:         ti?.audit?.bot_holders_pct ?? null,
+          entry_age_hours:       pool.token_age_hours       ?? null,
+          entry_mint_disabled:   ti?.audit?.mint_disabled   ?? null,
+          entry_freeze_disabled: ti?.audit?.freeze_disabled ?? null,
+          entry_dev_migrations:  ti?.audit?.dev_migrations  ?? null,
         });
       }
 

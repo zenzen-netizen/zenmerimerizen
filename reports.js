@@ -280,7 +280,7 @@ export function formatStatsBlock(st, label) {
   if (st.biggest_win) lines.push(`🏆 Best: ${esc(st.biggest_win.name)} ${pct(st.biggest_win.pnl_pct)} | 💀 Worst: ${st.biggest_loss ? `${esc(st.biggest_loss.name)} ${pct(st.biggest_loss.pnl_pct)}` : "—"}`);
   // Tail dominance: the single worst loser in $ and what net would be without it.
   if (st.worst_trade_usd != null && st.worst_trade_usd < 0) {
-    lines.push(`🩸 Tail: trade terburuk ${esc(st.worst_trade_name)} ${money(st.worst_trade_usd)} → tanpa itu net ${money(st.net_excl_worst_usd)}`);
+    lines.push(`🩸 Tail: trade terburuk ${esc(st.worst_trade_name)} ${money(st.worst_trade_usd)} → tanpa itu PnL ${money(st.net_excl_worst_usd)}`);
   }
   return lines.join("\n");
 }

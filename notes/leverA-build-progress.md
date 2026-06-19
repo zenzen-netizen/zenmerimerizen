@@ -47,7 +47,26 @@ Dua cabang darurat disisipkan di poller (`index.js`, dalam `startCronJobs`):
 - Fallback dipicu SETELAH helper return (lock sudah lepas di `finally`) → tidak self-block (D3).
 - `node --check index.js` ✅ PASS.
 
-## ⬜ FASE 3 — TEST (DRY_RUN + code-review idempotensi + /close regress)
+## ✅ FASE 3 — TEST (berlapis)
+Commit: `test(gap-fix): phase-3 lever A verification`
+
+- **Test A — closePosition DRY_RUN (real code):** `closePosition({...})` dgn `process.env.DRY_RUN
+  ="true"` (di-reassert SETELAH import; config.js:59 nge-set false dari `dryRun:false`) → return
+  `{dry_run:true, would_close, message}`, **tanpa tx / tanpa success flag**. ✅
+  ⚠️ Temuan: di DRY_RUN closePosition return TANPA `success` → helper anggap gagal → needFallback
+  =true → picu management fallback. Artefak DRY_RUN saja (harmless; live close return success).
+- **Test B — logic/concurrency (replica verbatim, 14/14 PASS, `/tmp/test-leverA-logic.mjs`):**
+  success→{success,no-fallback}+lock lepas; busy→skipped+closePosition NOT called+lock tak diclobber;
+  fail→needFallback+lock lepas; dry-run-return→needFallback; throw→finally lepas lock;
+  **concurrency 2 panggilan 1 tick → closePosition fire TEPAT 1× (no double-fire), 1 skipped.**
+- **Test C — idempotensi (code-review):** Lever A ubah **HANYA index.js** (`git diff --stat`:
+  dlmm.js/lessons.js/state.js/executor.js/telegram.js NOL). `_managementBusy` ketahan sepanjang
+  in-flight (set sinkron → `finally` lepas); mgmt cron guard `index.js:431` TAK diubah → tak ada
+  jalur dobel `recordPerformance`.
+- **Test D — /close regress:** handler `index.js:3675`/`3695` + closePosition TAK tersentuh → no regress.
+- **Test E — recordPerformance + suspect:** `recordPerformance` tetap di dalam closePosition
+  (`dlmm.js:2541`), suspect-pnl (`dlmm.js:2448`) tetap → kepicu identik utk poller-direct.
+
 ## ⬜ FASE 4 — VERIFIKASI & restart pm2 id0 (--update-env) + pantau SL natural berikut
 
 ---

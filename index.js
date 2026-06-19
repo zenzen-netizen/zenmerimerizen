@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 import { agentLoop } from "./agent.js";
 import { log } from "./logger.js";
 import { getMyPositions, closePosition, getActiveBin, getPositionsRentSol } from "./tools/dlmm.js";
-import { getWalletBalances, getSolMarketRegime } from "./tools/wallet.js";
+import { getWalletBalances, getSolMarketRegime, swapToken } from "./tools/wallet.js";
 import { getTopCandidates, formatYieldToMe } from "./tools/screening.js";
 import { confirmIndicatorPreset } from "./tools/chart-indicators.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
@@ -26,6 +26,7 @@ import {
   editMessageWithButtons,
   answerCallbackQuery,
   notifyOutOfRange,
+  notifyClose,
   isEnabled as telegramEnabled,
   createLiveMessage,
   pinMessage,
@@ -999,6 +1000,15 @@ export async function runScreeningCycle({ silent = false } = {}) {
           smart_wallets_present: (sw?.in_pool?.length ?? 0) > 0,
           narrative_quality:     n?.narrative ? "present" : "absent",
           volatility:            pool.volatility            ?? null,
+          // Logging-upgrade: concentration/age signals already fetched during
+          // screening (ti.audit / pool.token_age_hours) but previously discarded.
+          // Stamped here purely for post-hoc rug analysis — additive, never gates.
+          entry_top10_pct:       ti?.audit?.top_holders_pct ?? null,
+          entry_bot_pct:         ti?.audit?.bot_holders_pct ?? null,
+          entry_age_hours:       pool.token_age_hours       ?? null,
+          entry_mint_disabled:   ti?.audit?.mint_disabled   ?? null,
+          entry_freeze_disabled: ti?.audit?.freeze_disabled ?? null,
+          entry_dev_migrations:  ti?.audit?.dev_migrations  ?? null,
         });
       }
 
@@ -1173,6 +1183,65 @@ function shouldRunScheduledScreening() {
   return elapsedMin >= eff - 0.5;
 }
 
+// ── Lever A: EMERGENCY direct close (LLM-free, sidesteps the 10m cooldown) ──
+// Used ONLY by the PnL poller for catastrophic exits (stop-loss / rule 1) where
+// the detect→close latency drives the realized loss far below the SL trigger.
+// closePosition() is self-contained (recordClose + recordPerformance + suspect-pnl
+// handling all live inside it, dlmm.js), so recording is preserved exactly as the
+// LLM/`/close` paths. Holds _managementBusy for the whole in-flight window so the
+// management cron (which only checks _managementBusy) can't double-close.
+// Returns { success, skipped, needFallback } — needFallback is true ONLY when a
+// close was ATTEMPTED and FAILED (never when skipped because management is busy).
+async function emergencyCloseDirect(p, reason) {
+  // Check-and-set must be synchronous (no await in between) so two ticks can't
+  // both pass the guard. Skip (not force-close) when management already holds the
+  // lock — let that cycle handle it.
+  if (_managementBusy) return { success: false, skipped: true, needFallback: false };
+  _managementBusy = true;
+  let success = false;
+  try {
+    log("state", `[PnL poll] EMERGENCY direct close: ${p.pair} — ${reason}`);
+    const res = await closePosition({ position_address: p.position, reason });
+    success = !!res?.success;
+    if (success) {
+      // D1: auto-swap base→SOL (replicates executor post-hook) — FAIL-OPEN.
+      if (res.base_mint) {
+        try {
+          const balances = await getWalletBalances({});
+          const token = balances.tokens?.find((t) => t.mint === res.base_mint);
+          if (token && token.usd >= 0.10) {
+            log("executor", `Auto-swapping ${token.symbol || res.base_mint.slice(0, 8)} ($${token.usd.toFixed(2)}) back to SOL`);
+            await swapToken({ input_mint: res.base_mint, output_mint: "SOL", amount: token.balance });
+          }
+        } catch (e) {
+          log("executor_warn", `Auto-swap after emergency close failed: ${e.message}`);
+        }
+      }
+      // D2: Telegram notify — FAIL-OPEN.
+      if (telegramEnabled()) {
+        notifyClose({
+          pair: res.pool_name || p.pair,
+          pnlUsd: res.pnl_usd ?? 0,
+          pnlPct: res.pnl_pct ?? 0,
+          peakPnlPct: res.peak_pnl_pct ?? null,
+          reason: res.close_reason || reason,
+          lesson: res.derived_lesson,
+          feesUsd: res.fees_earned_usd ?? null,
+        }).catch(() => {});
+      }
+      log("state", `[PnL poll] EMERGENCY close OK: ${p.pair} — PnL ${res.pnl_pct ?? "?"}%`);
+    } else {
+      log("cron_warn", `[PnL poll] EMERGENCY close did not succeed for ${p.pair}: ${res?.error || "unknown"}`);
+    }
+  } catch (e) {
+    log("cron_error", `[PnL poll] EMERGENCY close error for ${p.pair}: ${e.message}`);
+    success = false;
+  } finally {
+    _managementBusy = false;
+  }
+  return { success, skipped: false, needFallback: !success };
+}
+
 export function startCronJobs() {
   stopCronJobs(); // stop any running tasks before (re)starting
 
@@ -1255,6 +1324,20 @@ Summarize the current portfolio health, total fees earned, and performance of al
             }
             continue;
           }
+          // ── Lever A: EMERGENCY (stop-loss) → close directly, LLM-free, no cooldown ──
+          if (exit.action === "STOP_LOSS") {
+            const em = await emergencyCloseDirect(p, exit.reason);
+            if (em.success) break;
+            if (em.needFallback) {
+              // close attempted & failed — fall back to the old path ASAP (after the
+              // helper released _managementBusy), no cooldown (this is an emergency).
+              _pollTriggeredAt = Date.now();
+              log("state", `[PnL poll] EMERGENCY close failed: ${p.pair} — falling back to management ASAP`);
+              runManagementCycle({ silent: true }).catch((e) => log("cron_error", `Poll-triggered (emergency fallback) management failed: ${e.message}`));
+              break;
+            }
+            continue; // skipped (management busy) — let that cycle handle it
+          }
           const cooldownMs = config.schedule.managementIntervalMin * 60 * 1000;
           const sinceLastTrigger = Date.now() - _pollTriggeredAt;
           if (sinceLastTrigger >= cooldownMs) {
@@ -1268,6 +1351,18 @@ Summarize the current portfolio health, total fees earned, and performance of al
         }
         const closeRule = getDeterministicCloseRule(p, config.management);
         if (closeRule) {
+          // ── Lever A: EMERGENCY (rule 1 = stop loss) → close directly, LLM-free, no cooldown ──
+          if (closeRule.rule === 1) {
+            const em = await emergencyCloseDirect(p, closeRule.reason || "stop loss");
+            if (em.success) break;
+            if (em.needFallback) {
+              _pollTriggeredAt = Date.now();
+              log("state", `[PnL poll] EMERGENCY close (rule 1) failed: ${p.pair} — falling back to management ASAP`);
+              runManagementCycle({ silent: true }).catch((e) => log("cron_error", `Poll-triggered (emergency fallback) management failed: ${e.message}`));
+              break;
+            }
+            continue; // skipped (management busy) — let that cycle handle it
+          }
           const cooldownMs = config.schedule.managementIntervalMin * 60 * 1000;
           const sinceLastTrigger = Date.now() - _pollTriggeredAt;
           if (sinceLastTrigger >= cooldownMs) {

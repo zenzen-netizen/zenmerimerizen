@@ -32,6 +32,13 @@ const PERFORMANCE_SIGNAL_FIELDS = [
   "entry_mcap",
   "entry_tvl",
   "entry_volume",
+  // Logging-upgrade: concentration/age (primary path = staged spread; fallback here).
+  "entry_top10_pct",
+  "entry_bot_pct",
+  "entry_age_hours",
+  "entry_mint_disabled",
+  "entry_freeze_disabled",
+  "entry_dev_migrations",
 ];
 const MAX_MANUAL_LESSON_LENGTH = 400;
 

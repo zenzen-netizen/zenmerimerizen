@@ -67,7 +67,27 @@ Commit: `test(gap-fix): phase-3 lever A verification`
 - **Test E — recordPerformance + suspect:** `recordPerformance` tetap di dalam closePosition
   (`dlmm.js:2541`), suspect-pnl (`dlmm.js:2448`) tetap → kepicu identik utk poller-direct.
 
-## ⬜ FASE 4 — VERIFIKASI & restart pm2 id0 (--update-env) + pantau SL natural berikut
+## ✅ FASE 4 — VERIFIKASI (restart = owner)
+- git branch = `experimental` ✅
+- `git diff --stat` (commit lever A): **HANYA `index.js`** (88 baris, kode — bukan gitignored) +
+  notes. dlmm/lessons/state/executor/telegram NOL. ✅
+- pm2 id=0 `meridian` online, cwd=`/home/ubuntu/meridianzen` ✅ (cocok working dir)
+- Commits: f32179a (helper) → 1c21a50 (wiring) → 97ed560 (test). Revertible per-fase.
+- 1 posisi OPEN saat ini (FLKR-SOL) — restart aman (state.json persist, bot rediscover bbrp detik).
+
+⏳ **PENDING (owner): `pm2 restart 0 --update-env`** biar kode lever A aktif.
+⭐ **TES SEBENARNYA = SL natural BERIKUTNYA.** Setelah restart, saat ada close darurat pertama,
+   cek log: (a) baris `[PnL poll] EMERGENCY direct close: …` + `EMERGENCY close OK` (BUKAN
+   "triggering management" + agentLoop MANAGER di jalur itu), (b) nol dobel-close/record,
+   (c) notif Telegram masuk, (d) record kecatet di lessons.json (pnl + suspect handling).
+
+---
+
+## REVERT
+Per fase via git: `git revert 1c21a50` (unwire poller) lalu `git revert f32179a` (hapus helper),
+atau revert ketiganya. Helper additive + 2 cabang poller — non-darurat tak tersentuh.
+
+## STATUS AKHIR: FASE 1-4 selesai (kode + test + commit). Tinggal restart pm2 (owner) + pantau SL.
 
 ---
 

@@ -1043,6 +1043,8 @@ Positions: ${prePositions.total_positions}/${config.risk.maxPositions} | SOL: ${
 PRE-LOADED CANDIDATES (${passing.length} pools):
 ${candidateBlocks.join("\n\n")}
 
+Every candidate block above already carries ALL the recon you need to decide: pool metrics, audit (top10/bots/fees/launchpad), smart_wallets, active_bin, narrative, and pool memory. This data is final — judge straight from it and call deploy_position. Do NOT call get_token_info, get_token_holders, get_token_narrative, check_smart_wallets_on_pool, get_active_bin, or get_pool_memory: they only re-fetch what is already shown here and burn an extra step. Reach for a tool only if a specific value you truly need is genuinely missing from a block.
+
 STEPS:
 1. Decide whether any candidate is worth deploying. A single remaining candidate is not automatically good enough.
 2. Pick the best candidate only if it has real conviction from narrative quality, smart wallets, and pool metrics. If the list has only one pool and it lacks narrative or smart-wallet confirmation, skip the cycle.

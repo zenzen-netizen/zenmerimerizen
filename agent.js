@@ -5,7 +5,14 @@ import { executeTool } from "./tools/executor.js";
 import { tools } from "./tools/definitions.js";
 
 const MANAGER_TOOLS  = new Set(["close_position", "claim_fees", "swap_token", "get_position_pnl", "get_my_positions", "get_wallet_balance"]);
-const SCREENER_TOOLS = new Set(["deploy_position", "get_active_bin", "get_top_candidates", "check_smart_wallets_on_pool", "get_token_holders", "get_token_narrative", "get_token_info", "search_pools", "get_pool_memory", "get_time_profile", "get_narrative_profile", "get_wallet_balance", "get_my_positions"]);
+// LLM-efficiency trim (notes/llm-cost-recon.md #4): six recon tools were dropped from the
+// SCREENER's offered schema — get_active_bin, check_smart_wallets_on_pool, get_token_holders,
+// get_token_narrative, get_token_info, get_pool_memory — because their data is already
+// pre-loaded into every candidate block in runScreeningCycle (index.js: active_bin / audit /
+// smart_wallets / narrative_untrusted / memory_untrusted). Not offering them means the model
+// can't burn extra ~8k-token multi-step round-trips re-fetching data it already sees. The tool
+// impls remain wired for GENERAL/manual use; only the SCREENER schema is slimmed.
+const SCREENER_TOOLS = new Set(["deploy_position", "get_top_candidates", "search_pools", "get_time_profile", "get_narrative_profile", "get_wallet_balance", "get_my_positions"]);
 // Tools that MUST be confirmed before executing in the interactive (casual-chat) path.
 // update_config = mutates settings; the four on-chain trade actions move real capital /
 // live positions, so an ambiguous chat message must never fire them unprompted. This set

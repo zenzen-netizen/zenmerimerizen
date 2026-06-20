@@ -4010,7 +4010,7 @@ Commands:
         const pool = latest[pick - 1];
         console.log(`\nDeploying ${DEPLOY} SOL into ${pool.name}...\n`);
         const { content: reply } = await agentLoop(
-          `Deploy ${DEPLOY} SOL into pool ${pool.pool} (${pool.name}). Call get_active_bin first then deploy_position. Report result.`,
+          `Deploy ${DEPLOY} SOL into pool ${pool.pool} (${pool.name}). Call deploy_position (it reads the active bin itself). Report result.`,
           config.llm.maxSteps,
           [],
           "SCREENER"

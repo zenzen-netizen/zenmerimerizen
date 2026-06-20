@@ -796,7 +796,10 @@ export async function executeTool(name, args) {
       } else if (name === "deploy_position") {
         notifyDeploy({ pair: result.pool_name || args.pool_name || args.pool_address?.slice(0, 8), amountSol: args.amount_y ?? args.amount_sol ?? 0, position: result.position, tx: result.txs?.[0] ?? result.tx, priceRange: result.price_range, rangeCoverage: result.range_coverage, binStep: result.bin_step, baseFee: result.base_fee }).catch(() => {});
       } else if (name === "close_position") {
-        notifyClose({ pair: result.pool_name || args.position_address?.slice(0, 8), pnlUsd: result.pnl_usd ?? 0, pnlPct: result.pnl_pct ?? 0, peakPnlPct: result.peak_pnl_pct ?? null, reason: result.close_reason || args.reason, lesson: result.derived_lesson, feesUsd: result.fees_earned_usd ?? null }).catch(() => {});
+        // F9-light: notif headline uses the recorded recompute (recorded_pnl_usd)
+        // when present so the close popup == the later /report; falls back to the
+        // authoritative pnl_usd (e.g. solMode) when not set.
+        notifyClose({ pair: result.pool_name || args.position_address?.slice(0, 8), pnlUsd: result.recorded_pnl_usd ?? result.pnl_usd ?? 0, pnlPct: result.recorded_pnl_pct ?? result.pnl_pct ?? 0, peakPnlPct: result.peak_pnl_pct ?? null, reason: result.close_reason || args.reason, lesson: result.derived_lesson, feesUsd: result.fees_earned_usd ?? null }).catch(() => {});
         // Note low-yield closes in pool memory so screener avoids redeploying
         if (args.reason && args.reason.toLowerCase().includes("yield")) {
           const poolAddr = result.pool || args.pool_address;

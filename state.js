@@ -144,7 +144,9 @@ export function trackPosition(fields) {
   // its clock — that would corrupt minutes-held / age in PnL and performance.
   const deployed_at = existing?.deployed_at ?? new Date().toISOString();
   // Stamp the identity live at deploy so each trade is attributable to its
-  // Racikan/Profil (real deploys only; ensureDeployedAt backfills stay null).
+  // Racikan/Profil. ensureDeployedAt backfills also stamp the CURRENT racikan now
+  // (an assumption, flagged by the "Backfilled from on-chain" note) so a
+  // tracking-lost position isn't orphaned out of the racikan-scoped report.
   state.positions[fields.position] = makePositionRecord({
     ...fields,
     deployed_at,
@@ -185,6 +187,14 @@ export function ensureDeployedAt(position_address, meta = {}) {
     pool: meta.pool ?? null,
     pool_name: meta.pool_name ?? null,
     strategy: meta.strategy ?? "unknown",
+    // Stamp the CURRENT racikan/profil so a backfilled (tracking-lost) position
+    // isn't orphaned with active_setup=null and silently dropped from the
+    // racikan-scoped report. This is an ASSUMPTION (the real deploy metadata is
+    // unknown) — the "Backfilled from on-chain" note below keeps that honest and
+    // makes these records queryable later (e.g. excludable from Darwin/evolve
+    // purity via the note if ever needed — NOT now).
+    active_setup: config.activeSetup ?? null,
+    profile: config.profile ?? null,
   });
   record.notes.push("Backfilled from on-chain — deploy metadata unknown");
   state.positions[position_address] = record;

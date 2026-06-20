@@ -788,7 +788,7 @@ export async function deployPosition({
           ? parseFloat((baseFactor * actualBinStep / 1e6 * 100).toFixed(4))
           : null);
         const coveragePct = activePrice > 0 ? ((activePrice - pMinPrice) / activePrice) * 100 : null;
-        const displayName = pool_name || `${baseMint.slice(0, 6)}/SOL`;
+        const displayName = pool_name || `${baseMint.slice(0, 6)}-SOL`;
         const paperId = makePaperPositionId(pool_address);
 
         // 🧪 Paper fee model (FASE 1): capture RAW fee + active_tvl so the sim can use
@@ -1738,7 +1738,7 @@ export async function getMyPositions({ force = false, silent = false, wallet_add
       for (const positionAddress of (pool.listPositions || [])) {
         // Persist deployed_at on first sight so age / minutes-held survives a
         // state reset and is always available for untracked on-chain positions.
-        ensureDeployedAt(positionAddress, { pool: pool.poolAddress, pool_name: `${pool.tokenX}/${pool.tokenY}` });
+        ensureDeployedAt(positionAddress, { pool: pool.poolAddress, pool_name: `${pool.tokenX}-${pool.tokenY}` });
         const tracked = getTrackedPosition(positionAddress);
         const isOOR = pool.outOfRange || pool.positionsOutOfRange?.includes(positionAddress);
 
@@ -1779,7 +1779,7 @@ export async function getMyPositions({ force = false, silent = false, wallet_add
         positions.push({
           position:           positionAddress,
           pool:               pool.poolAddress,
-          pair:               tracked?.pool_name || `${pool.tokenX}/${pool.tokenY}`,
+          pair:               tracked?.pool_name || `${pool.tokenX}-${pool.tokenY}`,
           base_mint:          pool.tokenXMint,
           lower_bin:          lowerBin,
           upper_bin:          upperBin,
@@ -2306,6 +2306,13 @@ export async function closePosition({ position_address, reason }) {
             },
           });
 
+          // F9-light: surface the SAME PnL that recordPerformance stores
+          // ((final+fees)−initial, lessons.js:173) so the close notif == the later
+          // /report. USD mode only (the report is USD); solMode keeps its SOL
+          // headline via the pnl_usd fallback in the notifier. Render-only — the
+          // canonical recorded pnl_usd is unchanged (F9-besar deferred).
+          const recordedPnlUsd = (finalValueUsd + feesUsd) - initialUsd;
+          const recordedPnlPct = initialUsd > 0 ? (recordedPnlUsd / initialUsd) * 100 : 0;
           return {
             success: true,
             relay: true,
@@ -2318,6 +2325,8 @@ export async function closePosition({ position_address, reason }) {
             txs: txHashes,
             pnl_usd: pnlUsd,
             pnl_pct: pnlPct,
+            recorded_pnl_usd: config.management.solMode ? null : recordedPnlUsd, // for notif==report (render only)
+            recorded_pnl_pct: config.management.solMode ? null : recordedPnlPct,
             fees_earned_usd: feesUsd,
             base_mint: closeBaseMint,
             close_reason: reason || "agent decision",
@@ -2601,6 +2610,13 @@ export async function closePosition({ position_address, reason }) {
         },
       });
 
+      // F9-light: surface the SAME PnL that recordPerformance stores
+      // ((final+fees)−initial, lessons.js:173) so the close notif == the later
+      // /report. USD mode only (the report is USD); solMode keeps its SOL headline
+      // via the pnl_usd fallback in the notifier. Render-only — the canonical
+      // recorded pnl_usd is unchanged (F9-besar deferred).
+      const recordedPnlUsd = (finalValueUsd + feesUsd) - initialUsd;
+      const recordedPnlPct = initialUsd > 0 ? (recordedPnlUsd / initialUsd) * 100 : 0;
       return {
         success: true,
         position: position_address,
@@ -2611,6 +2627,8 @@ export async function closePosition({ position_address, reason }) {
         txs: txHashes,
         pnl_usd: pnlUsd,
         pnl_pct: pnlPct,
+        recorded_pnl_usd: config.management.solMode ? null : recordedPnlUsd, // for notif==report (render only)
+        recorded_pnl_pct: config.management.solMode ? null : recordedPnlPct,
         fees_earned_usd: feesUsd,
         base_mint: closeBaseMint,
         close_reason: reason || "agent decision",

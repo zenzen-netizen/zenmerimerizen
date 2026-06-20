@@ -12,7 +12,7 @@ import { confirmIndicatorPreset } from "./tools/chart-indicators.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
 import { config, reloadScreeningThresholds, computeDeployAmount, minDeployAmount, persistConfigChange } from "./config.js";
 import { getGasStats } from "./gas-tracker.js";
-import { evolveThresholds, getPerformanceSummary, getModePerformance, getSuspectCount, listLessons, classifySession, currentWibSession, getLifetimePerformance, getPerformanceForRacikan, listRacikanInPerformance } from "./lessons.js";
+import { evolveThresholds, getPerformanceSummary, getModePerformance, getSuspectCount, getExcludedRacikanStats, listLessons, classifySession, currentWibSession, getLifetimePerformance, getPerformanceForRacikan, listRacikanInPerformance } from "./lessons.js";
 import { buildTradeReport, computeCostDragPct } from "./reports.js";
 import { getLlmCostStats } from "./llm-cost-tracker.js";
 import { executeTool, registerCronRestarter } from "./tools/executor.js";
@@ -262,6 +262,22 @@ async function computeReportCostDrag() {
  *   /report week|month|day → windowed periodic digest (activity + cost)
  * Async: fetches cost/wallet for the windowed digest + the cost-drag quant line.
  */
+/**
+ * One-line disclosure for the racikan-scoped views (/report default, /wallet,
+ * /status). When the active-racikan filter holds out LIVE trades (a different
+ * racikan or untagged), say so + their net — so the scoped headline never
+ * SILENTLY drops live trades. Plain text (renders under both HTML + plain send).
+ * Returns "" when nothing is held out (or on any error — fail-open).
+ */
+function racikanScopeDisclosure() {
+  try {
+    const { count, net_usd } = getExcludedRacikanStats();
+    if (!count) return "";
+    const s = `${net_usd >= 0 ? "+" : "-"}$${Math.abs(net_usd).toFixed(2)}`;
+    return `\n\n⚠️ ${count} trade live di luar racikan ini dikecualikan (PnL ${s}) — /report all buat semua.`;
+  } catch { return ""; }
+}
+
 async function buildReportForArg(arg = "") {
   const a = String(arg).trim().toLowerCase();
   if (["week", "weekly", "7d", "minggu", "mingguan"].includes(a)) return generatePeriodicBriefing("week");
@@ -331,7 +347,7 @@ async function buildReportForArg(arg = "") {
     ? `\n\n⚠️ <b>Suspect (perlu verifikasi): ${suspectN}</b>\n<i>Close ≤−90% non-stopLoss — dikecualikan dari stats di atas sampai dicek (rug asli vs bad-data).</i>`
     : "";
   const tracker = formatPnlTracker(modePerf);
-  return `${rep}${tracker ? `\n\n${tracker}` : ""}${suspectLine}`;
+  return `${rep}${tracker ? `\n\n${tracker}` : ""}${suspectLine}${racikanScopeDisclosure()}`;
 }
 
 /**
@@ -1027,6 +1043,8 @@ Positions: ${prePositions.total_positions}/${config.risk.maxPositions} | SOL: ${
 PRE-LOADED CANDIDATES (${passing.length} pools):
 ${candidateBlocks.join("\n\n")}
 
+Every candidate block above already carries ALL the recon you need to decide: pool metrics, audit (top10/bots/fees/launchpad), smart_wallets, active_bin, narrative, and pool memory. This data is final — judge straight from it and call deploy_position. Do NOT call get_token_info, get_token_holders, get_token_narrative, check_smart_wallets_on_pool, get_active_bin, or get_pool_memory: they only re-fetch what is already shown here and burn an extra step. Reach for a tool only if a specific value you truly need is genuinely missing from a block.
+
 STEPS:
 1. Decide whether any candidate is worth deploying. A single remaining candidate is not automatically good enough.
 2. Pick the best candidate only if it has real conviction from narrative quality, smart wallets, and pool metrics. If the list has only one pool and it lacks narrative or smart-wallet confirmation, skip the cycle.
@@ -1221,8 +1239,9 @@ async function emergencyCloseDirect(p, reason) {
       if (telegramEnabled()) {
         notifyClose({
           pair: res.pool_name || p.pair,
-          pnlUsd: res.pnl_usd ?? 0,
-          pnlPct: res.pnl_pct ?? 0,
+          // F9-light: recorded recompute when present so popup == /report.
+          pnlUsd: res.recorded_pnl_usd ?? res.pnl_usd ?? 0,
+          pnlPct: res.recorded_pnl_pct ?? res.pnl_pct ?? 0,
           peakPnlPct: res.peak_pnl_pct ?? null,
           reason: res.close_reason || reason,
           lesson: res.derived_lesson,
@@ -3582,6 +3601,7 @@ async function telegramHandler(msg) {
       // Realized-PnL & net-of-cost tracker (1d/7d/30d) — both /wallet and /status.
       const pnlBlock = formatPnlTracker(getModePerformance(), { solPriceUsd: wallet?.sol_price ?? null });
       if (pnlBlock) msg += `\n\n${pnlBlock}`;
+      msg += racikanScopeDisclosure();
       await sendMessage(msg).catch(() => {});
     } catch (e) {
       await sendMessage(`Error: ${e.message}`).catch(() => {});
@@ -3990,7 +4010,7 @@ Commands:
         const pool = latest[pick - 1];
         console.log(`\nDeploying ${DEPLOY} SOL into ${pool.name}...\n`);
         const { content: reply } = await agentLoop(
-          `Deploy ${DEPLOY} SOL into pool ${pool.pool} (${pool.name}). Call get_active_bin first then deploy_position. Report result.`,
+          `Deploy ${DEPLOY} SOL into pool ${pool.pool} (${pool.name}). Call deploy_position (it reads the active bin itself). Report result.`,
           config.llm.maxSteps,
           [],
           "SCREENER"
@@ -4039,6 +4059,8 @@ Commands:
         console.log();
         const pnlBlock = formatPnlTracker(getModePerformance(), { solPriceUsd: wallet?.sol_price ?? null });
         if (pnlBlock) console.log(`${pnlBlock}\n`);
+        const disc = racikanScopeDisclosure();
+        if (disc) console.log(`${disc.trim()}\n`);
       });
       return;
     }

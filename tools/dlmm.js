@@ -24,6 +24,7 @@ import {
   minutesOutOfRange,
   syncOpenPositions,
   ensureDeployedAt,
+  setPositionInstruction,
 } from "../state.js";
 import { recordPerformance } from "../lessons.js";
 import { estimateGasSol } from "../reports.js";
@@ -41,7 +42,7 @@ import { appendDecision } from "../decision-log.js";
 import { getAndClearStagedSignals } from "../signal-tracker.js";
 import { trackTxGas } from "../gas-tracker.js";
 import { getCandidateMomentum, getSmartWalletMomentum } from "../candidate-memory.js";
-import { computePositions, fetchDlmmPnlForPool } from "./pnl.js";
+import { computePositions, fetchDlmmPnlForPool, resolveDisplayPair, firstResolvedName } from "./pnl.js";
 
 /**
  * 🔬 Shadow-logging: snapshot the experiment signals' VALUES for a pool at deploy
@@ -1057,6 +1058,12 @@ export async function deployPosition({
   log("deploy", `Amount: ${finalAmountX} X, ${finalAmountY} Y`);
   log("deploy", `Position: ${newPosition.publicKey.toString()}`);
 
+  // Wide-range deploy is NON-ATOMIC (Create and Add-liquidity are separate txs).
+  // Track whether the position account was created so the catch can clean up an
+  // orphan if the add-liquidity phase fails. The standard (≤69 bins) path is a
+  // single atomic tx and never sets this — its failure creates nothing.
+  let positionCreated = false;
+
   try {
     const txHashes = [];
 
@@ -1079,6 +1086,10 @@ export async function deployPosition({
         const signers = i === 0 ? [wallet, newPosition] : [wallet];
         const txHash = await sendTxTracked(createTxArray[i], signers, "deploy");
         txHashes.push(txHash);
+        // Position account exists on-chain from the first create tx onward (i===0
+        // signs with newPosition) → rent is locked → mark for orphan cleanup if a
+        // later phase throws.
+        positionCreated = true;
         log("deploy", `Create tx ${i + 1}/${createTxArray.length}: ${txHash}`);
       }
 
@@ -1186,6 +1197,35 @@ export async function deployPosition({
     };
   } catch (error) {
     log("deploy_error", error.message);
+    // Non-atomic wide-range cleanup: if Phase 1 (Create) succeeded but a later
+    // phase (Add-liquidity) threw, the position account exists ON-CHAIN with rent
+    // locked but was never tracked → orphan (otherwise only adopted much later by
+    // the on-chain backfill). Track it NOW so the management loop closes it via the
+    // normal close path and recovers the rent. Idempotent: trackPosition is keyed
+    // by address and ensureDeployedAt early-returns for already-tracked positions,
+    // so the later backfill never double-adopts. Wrapped in its own try/catch so
+    // this cleanup can NEVER block the failure return below. The standard (atomic)
+    // path leaves positionCreated=false → never reaches here with a created position.
+    if (positionCreated) {
+      try {
+        const orphanAddr = newPosition.publicKey.toString();
+        trackPosition({
+          position: orphanAddr,
+          pool: pool_address,
+          pool_name,
+          strategy: activeStrategy,
+          bin_range: { min: minBinId, max: maxBinId, bins_below: activeBinsBelow, bins_above: activeBinsAbove },
+          bin_step,
+          amount_sol: finalAmountY,
+          amount_x: finalAmountX,
+          active_bin: activeBin.binId,
+        });
+        setPositionInstruction(orphanAddr, "incomplete deploy — liquidity add failed; close to recover rent");
+        log("deploy_error", `Tracked orphan position ${orphanAddr} (create succeeded, liquidity-add failed) for cleanup`);
+      } catch (trackErr) {
+        log("deploy_error", `Failed to track orphan position for cleanup: ${trackErr.message}`);
+      }
+    }
     return { success: false, error: error.message };
   }
 }
@@ -1779,7 +1819,7 @@ export async function getMyPositions({ force = false, silent = false, wallet_add
         positions.push({
           position:           positionAddress,
           pool:               pool.poolAddress,
-          pair:               tracked?.pool_name || `${pool.tokenX}-${pool.tokenY}`,
+          pair:               resolveDisplayPair(tracked?.pool_name || `${pool.tokenX}-${pool.tokenY}`, pool.tokenXMint),
           base_mint:          pool.tokenXMint,
           lower_bin:          lowerBin,
           upper_bin:          upperBin,
@@ -2319,7 +2359,7 @@ export async function closePosition({ position_address, reason }) {
             request_id: order.requestId,
             position: position_address,
             pool: poolAddress,
-            pool_name: tracked.pool_name || poolMeta.name || null,
+            pool_name: resolveDisplayPair(firstResolvedName(tracked.pool_name, poolMeta.name), closeBaseMint),
             claim_txs: claimTxHashes,
             close_txs: closeTxHashes,
             txs: txHashes,
@@ -2621,7 +2661,7 @@ export async function closePosition({ position_address, reason }) {
         success: true,
         position: position_address,
         pool: poolAddress,
-        pool_name: tracked.pool_name || poolMeta.name || null,
+        pool_name: resolveDisplayPair(firstResolvedName(tracked.pool_name, poolMeta.name), closeBaseMint),
         claim_txs: claimTxHashes,
         close_txs: closeTxHashes,
         txs: txHashes,
@@ -2652,7 +2692,7 @@ export async function closePosition({ position_address, reason }) {
       success: true,
       position: position_address,
       pool: poolAddress,
-      pool_name: poolMeta.name || null,
+      pool_name: resolveDisplayPair(firstResolvedName(poolMeta.name), pool.lbPair.tokenXMint.toString()),
       claim_txs: claimTxHashes,
       close_txs: closeTxHashes,
       txs: txHashes,

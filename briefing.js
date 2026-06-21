@@ -1,7 +1,7 @@
 import fs from "fs";
 import { log } from "./logger.js";
 import { repoPath } from "./repo-root.js";
-import { getHourlyProfile } from "./lessons.js";
+import { getHourlyProfile, getModePerformance, getExcludedRacikanStats } from "./lessons.js";
 import { config } from "./config.js";
 import { getOpenRouterBalance, getOpenRouter24hCost, getOpenRouterCredits } from "./openrouter-usage.js";
 import { getSkipReview } from "./candidate-memory.js";
@@ -19,6 +19,18 @@ import { formatIdentity } from "./preset-manager.js";
 import { formatPnlTracker } from "./pnl-tracker.js";
 
 const money = (n) => `${n >= 0 ? "+" : "-"}$${Math.abs(n).toFixed(2)}`;
+
+// Racikan-scope disclosure (mirrors index.js racikanScopeDisclosure): when the
+// active-racikan view holds out LIVE trades (a different racikan or untagged),
+// state the count + net so the briefing's racikan block never SILENTLY differs
+// from the All-time block. Returns "" when nothing is held out (fail-open).
+function racikanScopeDisclosure() {
+  try {
+    const { count, net_usd } = getExcludedRacikanStats();
+    if (!count) return "";
+    return `⚠️ ${count} trade live di luar racikan ini dikecualikan (PnL ${money(net_usd)}) — /report all buat semua.`;
+  } catch { return ""; }
+}
 
 // On-chain tools whose successful calls cost network/gas fees.
 const ONCHAIN_TOOLS = ["deploy_position", "close_position", "claim_fees", "swap_token"];
@@ -303,6 +315,11 @@ export async function generateBriefing() {
   const openPositions = allPositions.filter(p => !p.closed);
   const modePerf = (lessonsData.performance || []).filter(keepMode);
   const statsAll = computeTradeStats(modePerf);
+  // Racikan-scoped stats shown ALONGSIDE All-time so the briefing reconciles with
+  // /report default (same scope: getModePerformance = mode + active-racikan + !suspect).
+  // Display-only; does NOT change the existing all-live `modePerf`/`statsAll`.
+  const statsRacikan = computeTradeStats(getModePerformance());
+  const racikanLabel = config.activeSetup ? `Racikan: ${config.activeSetup}` : "Racikan aktif";
 
   // 5. Cost data (LLM + SOL price for gas USD) + gas estimate over the 24h window
   const [costData, balance, credits, wallet] = await Promise.all([
@@ -345,10 +362,13 @@ export async function generateBriefing() {
     "",
     formatPnlTracker(modePerf, { solPriceUsd: solPrice || null }),
     "",
-    formatStatsBlock(statsAll, "All-time"),
+    formatStatsBlock(statsAll, "All-time (semua racikan)"),
     buildVerdict(statsAll) || "",
     formatQuantBlock(statsAll, quantOpts) ? "\n" + formatQuantBlock(statsAll, quantOpts) : "",
     formatMovement(statsAll) ? "\n" + formatMovement(statsAll) : "",
+    "",
+    formatStatsBlock(statsRacikan, racikanLabel),
+    racikanScopeDisclosure() || "",
     "",
     `<b>Lessons Learned (24h):</b>`,
     tradingLessons.length > 0
@@ -408,6 +428,11 @@ export async function generatePeriodicBriefing(period = "week") {
   });
   const opened = allPositions.filter((p) => new Date(p.deployed_at).getTime() >= since).length;
   const netPnl = windowPerf.reduce((s, p) => s + (p.pnl_usd || 0), 0);
+  // Racikan-scoped windowed perf (same scope as /report default) for a second stats
+  // block, so the periodic digest reconciles with /report. Display-only; the all-live
+  // `windowPerf` report above is unchanged.
+  const racikanWindowPerf = getModePerformance().filter((p) => new Date(p.closed_at || p.recorded_at || 0).getTime() >= since);
+  const racikanLabel = config.activeSetup ? `Racikan: ${config.activeSetup} (${days}d)` : `Racikan aktif (${days}d)`;
 
   const [balance, credits, wallet] = await Promise.all([
     getOpenRouterBalance(),
@@ -435,7 +460,7 @@ export async function generatePeriodicBriefing(period = "week") {
 
   const report = buildTradeReport(windowPerf, {
     title: `${emoji} ${label} Briefing — last ${days}d`,
-    statsLabel: `Last ${days}d`,
+    statsLabel: `Last ${days}d (semua racikan)`,
     trendN: period === "month" ? 10 : 7,
     identity: (() => { try { return formatIdentity({ compact: true }); } catch { return null; } })(),
     quant: Number.isFinite(costDragPct) ? { costDragPct } : {},
@@ -473,6 +498,8 @@ export async function generatePeriodicBriefing(period = "week") {
 
   const parts = [
     report,
+    formatStatsBlock(computeTradeStats(racikanWindowPerf), racikanLabel),
+    racikanScopeDisclosure() || null,
     formatPnlTracker((lessonsData.performance || []).filter(keepMode), { solPriceUsd: solPrice || null }) || null,
     `<b>Activity (${days}d):</b> 📥 ${opened} opened | 📤 ${windowPerf.length} closed`,
     buildFeatureStatus(),

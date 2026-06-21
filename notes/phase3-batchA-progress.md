@@ -6,8 +6,16 @@ Brief: migrasi 3 position-view (⑤) ke views/ + FIX bug unit ◎/$-campur di /s
 
 - [x] 0  env + progress file
 - [x] 1  /status  → views/status.js  (FIX bug ◎/$ campur #12)
-- [ ] 2  /wallet  → views/wallet.js
+- [x] 2  /wallet  → views/wallet.js
 - [ ] 3  /pool    → views/pool.js
+
+## FASE 2 — /wallet (DONE)
+- views/wallet.js: + buildView/telegram. Section: 👛 Wallet → ⚙️ Sistem(dry-run/hive/OpenRouter) → SOL tracker(embed) → realized PnL tracker(embed) → disclosure(embed).
+- render.js: register RENDERERS.wallet. index.js: + import walletView; blok /wallet ganti ke walletView.buildView+render+sendHTML (data fetch tak diubah).
+- formatWalletStatus DIHAPUS dari index.js (0 pemanggil setelah /status+/wallet migrasi; ini justru fungsi buggy #12). Logikanya kini di walletBlockLines/systemLines (ikut solMode).
+- FIX #12 di /wallet juga: per-slot/bebas ikut solMode (mode OFF=$ via ×price), held tetap ◎.
+- Field brief KURANG ditambah balik: Dry-run + HiveMind (ada di formatWalletStatus lama, hilang di mockup) → DIKEMBALIKAN di ⚙️ Sistem.
+- Cross-check §C(126-137) NOL hilang: Saldo(2 basis)·SOLprice·Posisi·per-slot·bebas·held(+est)·Dry-run·HiveMind·OpenRouter·SOL-tracker(1D/7D/30D+anchor)·realized-tracker·disclosure. node --check LULUS.
 
 ## FASE 1 — /status (DONE)
 - views/format.js: + fmtWib (WIB UTC+7, deterministik) + ICON perf/brain/arrow.

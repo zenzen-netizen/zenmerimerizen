@@ -54,6 +54,7 @@ import { getOpenRouterBalance, getOpenRouterCredits } from "./openrouter-usage.j
 import { render } from "./views/render.js";
 import * as positionsView from "./views/positions.js";
 import * as statusView from "./views/status.js";
+import * as walletView from "./views/wallet.js";
 
 import { REPO_ROOT, repoPath } from "./repo-root.js";
 
@@ -1679,33 +1680,8 @@ function buildRangeEfficiencyLines(pos, tracked) {
   return out;
 }
 
-function formatWalletStatus(wallet, positions, rent = null) {
-  const slotsRemaining = Math.max(1, config.risk.maxPositions - (positions?.total_positions ?? 0));
-  const deployAmount = computeDeployAmount(wallet.sol, { slotsRemaining });
-  const hive = isHiveMindEnabled() ? "on" : "off";
-  const gasReserve = config.management?.gasReserve ?? 0;
-  const lines = [
-    `Wallet: ${wallet.sol} SOL ($${wallet.sol_usd})`,
-    `SOL price: $${wallet.sol_price}`,
-    `Open positions: ${positions.total_positions}/${config.risk.maxPositions}`,
-    `📦 Real deploy/slot: ${deployAmount} SOL  (ukuran per posisi baru)`,
-  ];
-  // Liquid SOL = wallet − gasReserve. Rent is NOT subtracted: it already left the
-  // wallet into the on-chain position accounts (it's not part of wallet.sol), so
-  // deducting it here double-counted. Held rent is shown as info — it refunds to
-  // the wallet on close, it isn't an extra reservation against today's balance.
-  const free = wallet.sol - gasReserve;
-  lines.push(`🟢 Bebas (cair): ~${free.toFixed(3)} SOL  (wallet − gasReserve ${gasReserve})`);
-  const held = rent?.totalRentSol ?? 0;
-  if (held > 0) {
-    lines.push(`🔒 Tertahan (rent ${positions.total_positions} posisi): ~${held.toFixed(3)} SOL${rent?.estimated ? " (sebagian est)" : ""} — info: sudah keluar wallet, balik saat close`);
-  }
-  lines.push(
-    `Dry run: ${process.env.DRY_RUN === "true" ? "yes" : "no"}`,
-    `HiveMind: ${hive}`,
-  );
-  return lines.join("\n");
-}
+// (formatWalletStatus dipindah ke views/wallet.js sebagai walletBlockLines +
+//  systemLines — render wallet block kini ikut solMode, FIX bug unit #12.)
 
 // OpenRouter balance/usage → array baris (logika verbatim dari /status+/wallet lama).
 // Array (bukan string) supaya tree() di views/ bisa kasih prefix per baris (incl
@@ -3622,26 +3598,29 @@ async function telegramHandler(msg) {
         getOpenRouterBalance(),
         getOpenRouterCredits(),
       ]);
-      // Held rent across open positions → total tertahan + SOL bebas efektif.
+      // Held rent across open positions → total tertahan (info; SOL bebas tak dikurangi).
       let rentInfo = null;
       if (positions.total_positions > 0) {
         const rentMap = await getPositionsRentSol(positions.positions.map((p) => p.position)).catch(() => ({}));
         const vals = Object.values(rentMap);
-        rentInfo = {
-          totalRentSol: vals.reduce((s, r) => s + (r?.sol ?? 0), 0),
-          estimated: vals.some((r) => r?.estimated),
-        };
+        rentInfo = { totalRentSol: vals.reduce((s, r) => s + (r?.sol ?? 0), 0), estimated: vals.some((r) => r?.estimated) };
       }
-      let msg = formatWalletStatus(wallet, positions, rentInfo);
-      const orLines = buildOpenRouterLines(orBalance, orCredits);
-      if (orLines.length) msg += `\n${orLines.join("\n")}`;
-      // SOL balance growth tracker (calendar 1d/7d/30d) — /wallet only.
-      msg += `\n\n${formatSolTracker(wallet.sol)}`;
-      // Realized-PnL & net-of-cost tracker (1d/7d/30d).
-      const pnlBlock = formatPnlTracker(getModePerformance(), { solPriceUsd: wallet?.sol_price ?? null });
-      if (pnlBlock) msg += `\n\n${pnlBlock}`;
-      msg += racikanScopeDisclosure();
-      await sendMessage(msg).catch(() => {});
+      const slotsRemaining = Math.max(1, config.risk.maxPositions - (positions?.total_positions ?? 0));
+      // Render delegated to views/wallet.js (Phase 3 🅴). Data fetch unchanged.
+      const vm = walletView.buildView({
+        cfg: config,
+        sol: wallet.sol, solUsd: wallet.sol_usd, solPrice: wallet.sol_price,
+        totalPositions: positions.total_positions, maxPositions: config.risk.maxPositions,
+        deployAmount: computeDeployAmount(wallet.sol, { slotsRemaining }),
+        gasReserve: config.management?.gasReserve ?? 0,
+        heldSol: rentInfo?.totalRentSol ?? 0, heldEst: rentInfo?.estimated ?? false,
+        dryRun: process.env.DRY_RUN === "true", hive: isHiveMindEnabled(),
+        orLines: buildOpenRouterLines(orBalance, orCredits),
+        solTracker: formatSolTracker(wallet.sol),
+        pnlBlock: formatPnlTracker(getModePerformance(), { solPriceUsd: wallet?.sol_price ?? null }),
+        disclosure: racikanScopeDisclosure(),
+      });
+      await sendHTML(render(vm, "telegram"));
     } catch (e) {
       await sendMessage(`Error: ${e.message}`).catch(() => {});
     }

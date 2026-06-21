@@ -53,3 +53,42 @@ export function systemLines(d, orLines = []) {
   for (const l of orLines) if (l) lines.push(l);
   return lines;
 }
+
+/**
+ * View-model /wallet. Cross-check §C /wallet (index.js:3547,3581-3584): blok wallet
+ * (= /status block + OpenRouter) + formatSolTracker + formatPnlTracker + disclosure.
+ * Field formatWalletStatus lama termasuk Dry-run + HiveMind → DIPERTAHANKAN (mockup
+ * brief tak nampilin; dikembalikan di seksi ⚙️ Sistem, governing #1).
+ *
+ * @param input {
+ *   cfg, nowMs?, sol, solUsd, solPrice, totalPositions, maxPositions, deployAmount,
+ *   gasReserve, heldSol, heldEst, dryRun, hive, orLines,   // shared wallet/system
+ *   solTracker, pnlBlock, disclosure                        // embedded (string)
+ * }
+ */
+export function buildView(input) {
+  const solMode = !!input.cfg?.management?.solMode;
+  return { type: "wallet", solMode, nowMs: input.nowMs ?? Date.now(), ...input };
+}
+
+export function telegram(vm) {
+  const { solMode } = vm;
+  const out = [`${ICON.wallet} Wallet · ${fmtWib(vm.nowMs)}`, SEP];
+
+  out.push(tree(walletBlockLines({
+    solMode, sol: vm.sol, solUsd: vm.solUsd, solPrice: vm.solPrice,
+    totalPositions: vm.totalPositions, maxPositions: vm.maxPositions,
+    deployAmount: vm.deployAmount, gasReserve: vm.gasReserve,
+    heldSol: vm.heldSol, heldEst: vm.heldEst,
+  })));
+
+  // ⚙️ Sistem (dry-run / HiveMind / OpenRouter) — Dry-run+HiveMind dikembalikan dari versi lama.
+  out.push(SEP, `${ICON.config} Sistem`);
+  out.push(tree(systemLines({ dryRun: vm.dryRun, hive: vm.hive }, vm.orLines)));
+
+  // Tracker SOL (saldo mentah 1D/7D/30D) + realized PnL/Net + disclosure — embed (string).
+  if (vm.solTracker) out.push("", vm.solTracker);
+  if (vm.pnlBlock) out.push("", vm.pnlBlock);
+  if (vm.disclosure) out.push(vm.disclosure.replace(/^\n+/, ""));
+  return out.join("\n");
+}

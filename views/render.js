@@ -11,11 +11,13 @@
 
 import * as positions from "./positions.js";
 import * as status from "./status.js";
+import * as wallet from "./wallet.js";
 
 // type -> { telegram(vm) -> string }. plain di-derive dari telegram via stripHtml.
 const RENDERERS = {
   positions,
   status,
+  wallet,
 };
 
 /** Buang tag HTML tapi pertahankan struktur tree/baris (untuk REPL plain).

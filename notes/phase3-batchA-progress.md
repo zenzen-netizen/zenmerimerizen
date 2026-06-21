@@ -7,7 +7,15 @@ Brief: migrasi 3 position-view (⑤) ke views/ + FIX bug unit ◎/$-campur di /s
 - [x] 0  env + progress file
 - [x] 1  /status  → views/status.js  (FIX bug ◎/$ campur #12)
 - [x] 2  /wallet  → views/wallet.js
-- [ ] 3  /pool    → views/pool.js
+- [x] 3  /pool    → views/pool.js
+
+## FASE 3 — /pool (DONE)
+- views/pool.js: buildView/telegram. Header 📐 Pool #n — pair · status → tree(PnL/Value+fees/💧fee-density/Age/held) → 📐 Range efficiency(embed rangeEffLines penuh) → 🔖 Pool/Position addr → 📝 Note.
+- index.js: + import poolView; blok /pool ganti ke poolView.buildView+render+sendHTML. buildRangeEfficiencyLines + data fetch (getTrackedPosition/getPositionsRentSol) TAK diubah (rangeEffLines di-pass ke view).
+- Cross-check §C(156-173) NOL hilang: idx+pair·Pool addr·Position addr·Range-eff(Range bins+bin_step·Active-bar "N dari bawah/ke atas"·State IN/OOR+menit·In-range approx "in ~Xh/OOR-spell Ym")·PnL%·fees·value·Age·held(+estimasi)·Note.
+- TAMBAH (governing #1 boleh, sejajar pilot 💧): 💰 PnL delta uang + 💧 fee-density.
+- Label "In-range (approx)" DIPERTAHANKAN apa adanya (over-state posisi sering OOR-balik §E-257).
+- Note di-esc() HTML-safe (decode balik di REPL plain). Edge null (PnL?/fees ◎?/no-rent/no-note) jalan. node --check LULUS.
 
 ## FASE 2 — /wallet (DONE)
 - views/wallet.js: + buildView/telegram. Section: 👛 Wallet → ⚙️ Sistem(dry-run/hive/OpenRouter) → SOL tracker(embed) → realized PnL tracker(embed) → disclosure(embed).

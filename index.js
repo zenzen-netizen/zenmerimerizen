@@ -55,6 +55,7 @@ import { render } from "./views/render.js";
 import * as positionsView from "./views/positions.js";
 import * as statusView from "./views/status.js";
 import * as walletView from "./views/wallet.js";
+import * as poolView from "./views/pool.js";
 
 import { REPO_ROOT, repoPath } from "./repo-root.js";
 
@@ -3658,23 +3659,21 @@ async function telegramHandler(msg) {
       const { positions } = await getMyPositions({ force: true });
       if (idx < 0 || idx >= positions.length) { await sendMessage("Invalid number. Use /positions first."); return; }
       const pos = positions[idx];
-      const cur = config.management.solMode ? "◎" : "$";
       const tracked = (() => { try { return getTrackedPosition(pos.position); } catch { return null; } })();
       const rent = (await getPositionsRentSol([pos.position]).catch(() => ({})))[pos.position];
-
-      const lines = [
-        `${idx + 1}. ${pos.pair}`,
-        `Pool: ${pos.pool}`,
-        `Position: ${pos.position}`,
-        "── Range efficiency ──",
-        ...buildRangeEfficiencyLines(pos, tracked),
-        "── Value ──",
-        `PnL: ${pos.pnl_pct ?? "?"}% | fees: ${cur}${pos.unclaimed_fees_usd ?? "?"} | value ${cur}${pos.total_value_usd ?? "?"}`,
-        `Age: ${fmtAgeMin(pos.age_minutes)}`,
-      ];
-      if (rent) lines.push(`🔒 Tertahan (rent): ${rent.sol.toFixed(4)} SOL${rent.estimated ? " (estimasi)" : ""} — refund saat close`);
-      if (pos.instruction) lines.push(`Note: ${pos.instruction}`);
-      await sendMessage(lines.join("\n"));
+      // Render delegated to views/pool.js (Phase 3 🅴). Data fetch + range-eff calc unchanged.
+      const vm = poolView.buildView({
+        cfg: config, idx, pair: pos.pair, inRange: !!pos.in_range,
+        poolAddr: pos.pool, positionAddr: pos.position,
+        pnlPct: pos.pnl_pct, pnlVal: pos.pnl_usd ?? 0,
+        value: pos.total_value_usd, fees: pos.unclaimed_fees_usd,
+        collectedFees: pos.collected_fees_usd, unclaimedFees: pos.unclaimed_fees_usd,
+        ageMin: pos.age_minutes,
+        heldSol: rent ? rent.sol : null, heldEst: rent ? rent.estimated : false,
+        note: pos.instruction || null,
+        rangeEffLines: buildRangeEfficiencyLines(pos, tracked),
+      });
+      await sendHTML(render(vm, "telegram"));
     } catch (e) {
       await sendMessage(`Error: ${e.message}`).catch(() => {});
     }

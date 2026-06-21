@@ -5,8 +5,13 @@ Workstream: 🅴 Telegram/CLI redesign + layer presentasi modular
 
 - [x] 0  Verify env + progress file
 - [x] 1  Indeks LENGKAP semua pesan Telegram (read-only) → telegram-message-index.md
-- [ ] 2  Scaffold views/format.js + views/render.js (additive, node --check)
+- [x] 2  Scaffold views/format.js + views/render.js (additive, node --check)
 - [ ] 3  PILOT redesign /positions via views/ (nol detail hilang, diff minimal)
+
+## Verifikasi FASE 2
+- views/format.js: primitif round/curSym/fmtCur(sol,usd,solMode brief-locked)/fmtMoney/fmtMoneySigned/fmtSol/fmtPct/fmtAge(mirror fmtAgeMin)/SEP/ICON/numEmoji/header/tree/disclosure/esc.
+- views/render.js: dispatcher render(view,target) → telegram(HTML) / plain(stripHtml); import positions.js (diisi FASE 3).
+- node --check views/format.js views/render.js → LULUS. Belum di-wire ke index.js (tak ada yang manggil) → tanpa restart.
 
 ## Verifikasi FASE 1
 - 35 pesan terindeks di notes/telegram-message-index.md (kat ①–⑬) + TABEL SCOPE checklist migrasi.

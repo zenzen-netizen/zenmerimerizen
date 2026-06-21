@@ -391,7 +391,7 @@
 | 11 | /closeall | ④ | index.js:3720,3730 | 🔴 | §C | ⬜ |
 | 12 | /status | ⑤ | index.js:3605 | 🟡 | §C | ⬜ |
 | 13 | /wallet (+trackstart) | ⑤ | index.js:3528-3543,3581 | 🟡 | §C | ⬜ |
-| 14 | **/positions** (PILOT) | ⑤ | index.js:3627,3661 | 🟡 | §C+DETAIL | ⬜→🛠 FASE 3 |
+| 14 | **/positions** (PILOT) | ⑤ | index.js:3627 → views/positions.js | 🟡 | §C+DETAIL | ✅ (e9bd6a3) |
 | 15 | /pool <n> | ⑤ | index.js:3689 | 🟡 | §C | ⬜ |
 | 16 | /report (semua varian) | ⑥ | index.js:3510 | 🟡 | §C | ⬜ |
 | 17 | Daily briefing | ⑦ | index.js:372 → 190 | 🟡 | §C | ⬜ |

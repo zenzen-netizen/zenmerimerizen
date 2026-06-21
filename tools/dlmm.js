@@ -42,7 +42,7 @@ import { appendDecision } from "../decision-log.js";
 import { getAndClearStagedSignals } from "../signal-tracker.js";
 import { trackTxGas } from "../gas-tracker.js";
 import { getCandidateMomentum, getSmartWalletMomentum } from "../candidate-memory.js";
-import { computePositions, fetchDlmmPnlForPool } from "./pnl.js";
+import { computePositions, fetchDlmmPnlForPool, resolveDisplayPair, firstResolvedName } from "./pnl.js";
 
 /**
  * 🔬 Shadow-logging: snapshot the experiment signals' VALUES for a pool at deploy
@@ -1819,7 +1819,7 @@ export async function getMyPositions({ force = false, silent = false, wallet_add
         positions.push({
           position:           positionAddress,
           pool:               pool.poolAddress,
-          pair:               tracked?.pool_name || `${pool.tokenX}-${pool.tokenY}`,
+          pair:               resolveDisplayPair(tracked?.pool_name || `${pool.tokenX}-${pool.tokenY}`, pool.tokenXMint),
           base_mint:          pool.tokenXMint,
           lower_bin:          lowerBin,
           upper_bin:          upperBin,
@@ -2359,7 +2359,7 @@ export async function closePosition({ position_address, reason }) {
             request_id: order.requestId,
             position: position_address,
             pool: poolAddress,
-            pool_name: tracked.pool_name || poolMeta.name || null,
+            pool_name: resolveDisplayPair(firstResolvedName(tracked.pool_name, poolMeta.name), closeBaseMint),
             claim_txs: claimTxHashes,
             close_txs: closeTxHashes,
             txs: txHashes,
@@ -2661,7 +2661,7 @@ export async function closePosition({ position_address, reason }) {
         success: true,
         position: position_address,
         pool: poolAddress,
-        pool_name: tracked.pool_name || poolMeta.name || null,
+        pool_name: resolveDisplayPair(firstResolvedName(tracked.pool_name, poolMeta.name), closeBaseMint),
         claim_txs: claimTxHashes,
         close_txs: closeTxHashes,
         txs: txHashes,
@@ -2692,7 +2692,7 @@ export async function closePosition({ position_address, reason }) {
       success: true,
       position: position_address,
       pool: poolAddress,
-      pool_name: poolMeta.name || null,
+      pool_name: resolveDisplayPair(firstResolvedName(poolMeta.name), pool.lbPair.tokenXMint.toString()),
       claim_txs: claimTxHashes,
       close_txs: closeTxHashes,
       txs: txHashes,

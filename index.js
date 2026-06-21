@@ -51,6 +51,8 @@ import { appendDecision } from "./decision-log.js";
 import { formatSolTracker, setTrackStart, getTrackStart } from "./sol-tracker.js";
 import { formatPnlTracker } from "./pnl-tracker.js";
 import { getOpenRouterBalance, getOpenRouterCredits } from "./openrouter-usage.js";
+import { render } from "./views/render.js";
+import * as positionsView from "./views/positions.js";
 
 import { REPO_ROOT, repoPath } from "./repo-root.js";
 
@@ -3625,40 +3627,10 @@ async function telegramHandler(msg) {
     try {
       const { positions, total_positions } = await getMyPositions({ force: true });
       if (total_positions === 0) { await sendMessage("No open positions."); return; }
-      const cur = config.management.solMode ? "◎" : "$";
+      // Data fetch unchanged; render delegated to views/ layer (Phase 2 🅴 pilot).
       const rentMap = await getPositionsRentSol(positions.map((p) => p.position)).catch(() => ({}));
-      const lines = [];
-      let totalRent = 0, anyRentEst = false;
-      positions.forEach((p, i) => {
-        const pnlVal = p.pnl_usd ?? 0;
-        const pnl = `${pnlVal >= 0 ? "+" : "-"}${cur}${Math.abs(pnlVal)}${p.pnl_pct != null ? ` (${p.pnl_pct >= 0 ? "+" : ""}${p.pnl_pct}%)` : ""}`;
-        const age = fmtAgeMin(p.age_minutes);
-        const state = p.in_range ? "✅ in-range" : `⚠️ OOR ${p.minutes_out_of_range ?? 0}m`;
-        const width = (Number.isFinite(p.lower_bin) && Number.isFinite(p.upper_bin)) ? `${p.upper_bin - p.lower_bin + 1} bins` : "? bins";
-        const rent = rentMap[p.position];
-        if (rent) { totalRent += rent.sol; if (rent.estimated) anyRentEst = true; }
-        const rentStr = rent ? ` · 🔒 ${rent.sol.toFixed(3)}◎${rent.estimated ? " (est)" : ""}` : "";
-        // Fee density so far: simple fees-earned / position-value (% of capital
-        // recovered as fees). NOT annualized — extrapolating a young position's
-        // short window to a year produces nonsense (a fresh pos reads 1000s of %).
-        // The aggregate /report carries the proper fee-APR (large, stable window).
-        const feesSoFar = (p.collected_fees_usd ?? 0) + (p.unclaimed_fees_usd ?? 0);
-        let feeDensStr = "";
-        if (Number.isFinite(p.total_value_usd) && p.total_value_usd > 0 && feesSoFar > 0) {
-          feeDensStr = ` · 💧 fee ${((feesSoFar / p.total_value_usd) * 100).toFixed(2)}%`;
-        }
-        lines.push(
-          `${i + 1}. ${p.pair}  ${state}`,
-          `   value ${cur}${p.total_value_usd ?? "?"} · PnL ${pnl} · fees ${cur}${p.unclaimed_fees_usd ?? "?"}`,
-          `   age ${age} · range ${width}${rentStr}${feeDensStr}`,
-        );
-      });
-      const footer = [
-        "━━━━━━━━━━━━━━━━━",
-        `🔒 Total tertahan ~${totalRent.toFixed(3)} SOL${anyRentEst ? " (sebagian est)" : ""} — refund saat close`,
-        "/close <n> · /pool <n> · /set <n> <note>",
-      ].join("\n");
-      await sendMessage(`📊 Open Positions (${total_positions})\n━━━━━━━━━━━━━━━━━\n${lines.join("\n")}\n${footer}`);
+      const vm = positionsView.buildView(positions, config, rentMap);
+      await sendHTML(render(vm, "telegram"));
     } catch (e) { await sendMessage(`Error: ${e.message}`).catch(() => {}); }
     return;
   }

@@ -6,7 +6,19 @@ Workstream: 🅴 Telegram/CLI redesign + layer presentasi modular
 - [x] 0  Verify env + progress file
 - [x] 1  Indeks LENGKAP semua pesan Telegram (read-only) → telegram-message-index.md
 - [x] 2  Scaffold views/format.js + views/render.js (additive, node --check)
-- [ ] 3  PILOT redesign /positions via views/ (nol detail hilang, diff minimal)
+- [x] 3  PILOT redesign /positions via views/ (nol detail hilang, diff minimal)
+
+## Verifikasi FASE 3 (PILOT /positions)
+- views/positions.js: buildView(positions,cfg,rentMap)→view-model netral + telegram(vm)→tree HTML. Didaftarkan RENDERERS.positions (render.js).
+- Wire index.js: 2 baris import (render, * as positionsView) + handler /positions (≈3624) ganti blok render inline → buildView+render+sendHTML. getMyPositions/early-return("No open positions.")/rentMap TAK diubah (cuma render).
+- CROSS-CHECK NOL detail hilang (vs inline lama index.js:3624-3663) — SEMUA field kebawa:
+  header(count) · per-pos: pair · state(IN/OOR+menit) · PnL(%+delta uang) · value · fees(unclaimed,?fallback) ·
+  age(fmtAge mirror fmtAgeMin byte-identik) · bins(?fallback) · 💧 fee-density · 🔒 held(+est) ·
+  footer total-held(+sebagian est, "refund saat close") · hint /close·/pool·/set. Ikon disegarkan (📊→💼,✅→🟢,⚠️→🔴,+⚡), NOL info hilang.
+- Unit: fmtMoney pakai *_usd mode-correct (◎ saat solMode on, $ saat off); rent/held SELALU ◎ (SOL intrinsik) — sama dgn lama (`.toFixed(3)◎`).
+- Smoke-test render (solMode on/off + plain REPL): output match mockup; fallback ?/(est) jalan; plain decode `<n>`. node --check index.js+views/* LULUS.
+- git diff --stat FASE 3: index.js (−30/+8 = import+blok render saja), views/format.js (fmtSol toFixed padded), views/render.js (stripHtml decode entity), views/positions.js (baru). notes/logging-build-progress.md = M pra-sesi, BUKAN bagian FASE 3 (tak di-stage).
+- ⚠️ Restart owner-only: tampilan /positions berubah → owner restart pm2 id0 (meridian) utk tes di Telegram. Claude Code TIDAK restart.
 
 ## Verifikasi FASE 2
 - views/format.js: primitif round/curSym/fmtCur(sol,usd,solMode brief-locked)/fmtMoney/fmtMoneySigned/fmtSol/fmtPct/fmtAge(mirror fmtAgeMin)/SEP/ICON/numEmoji/header/tree/disclosure/esc.

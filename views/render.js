@@ -16,9 +16,15 @@ const RENDERERS = {
   positions,
 };
 
-/** Buang tag HTML tapi pertahankan struktur tree/baris (untuk REPL plain). */
+/** Buang tag HTML tapi pertahankan struktur tree/baris (untuk REPL plain).
+ *  Decode entity dasar setelah strip supaya teks yang sengaja di-escape
+ *  (mis. placeholder "&lt;n&gt;" pada hint) balik jadi "<n>" di REPL. */
 function stripHtml(s) {
-  return String(s ?? "").replace(/<[^>]*>/g, "");
+  return String(s ?? "")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
 }
 
 /**

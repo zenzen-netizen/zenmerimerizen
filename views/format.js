@@ -58,11 +58,12 @@ export function fmtMoneySigned(value, solMode, dp) {
   return `${x >= 0 ? "+" : "-"}${sym}${round(Math.abs(x), d)}`;
 }
 
-/** SOL eksplisit (rent/held & sejenisnya), selalu ◎, default 3dp. */
+/** SOL eksplisit (rent/held & sejenisnya), selalu ◎, default 3dp padded (toFixed,
+ *  cocokin display lama `rent.sol.toFixed(3)` + mockup "◎0.070"). */
 export function fmtSol(value, dp = 3) {
   const x = Number(value);
   if (value == null || !Number.isFinite(x)) return "◎?";
-  return `◎${round(x, dp)}`;
+  return `◎${x.toFixed(dp)}`;
 }
 
 /** Persen bertanda: "+1.61%" / "-2.20%". null → "". */

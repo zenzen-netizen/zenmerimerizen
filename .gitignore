@@ -20,6 +20,7 @@ presets/
 # Runtime state (position tracking, lessons — user-specific)
 state.json
 lessons.json
+lessons-archive-pre-mainzen_v2.json
 smart-wallets.json
 pool-memory.json
 candidate-memory.json

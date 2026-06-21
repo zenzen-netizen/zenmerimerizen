@@ -56,6 +56,51 @@ function unique(arr) {
   return [...new Set(arr.filter(Boolean))];
 }
 
+// ─── Display-name resolution (F6) ──────────────────────────────
+// A position's display name ("BONK-SOL") is "unresolved" when the base-token
+// symbol never came back from the API at track time, leaving a bare "?" (or
+// "undefined"/"null"). These helpers heal the DISPLAY string only — no trading,
+// PnL, exit, or persisted record field is touched. Quote side (tokenY) is kept
+// when sane; only the base (tokenX) is what fails to resolve.
+const UNRESOLVED_TOKENS = new Set(["?", "undefined", "null", ""]);
+
+function badNamePart(part) {
+  return UNRESOLVED_TOKENS.has(String(part ?? "").trim().toLowerCase());
+}
+
+export function isUnresolvedName(name) {
+  if (!name || typeof name !== "string") return true;
+  return name.split("-").some(badNamePart);
+}
+
+function mintPrefix(mint) {
+  return typeof mint === "string" && mint.length > 5 ? `${mint.slice(0, 5)}…` : null;
+}
+
+// "GTAVi…-SOL" — a mint-prefixed fallback that's far more identifiable than "?".
+export function mintPrefixPair(mint, quote = "SOL") {
+  const pre = mintPrefix(mint);
+  return pre ? `${pre}-${quote}` : null;
+}
+
+// Returns the first candidate name that is already resolved, else null.
+export function firstResolvedName(...names) {
+  for (const n of names) if (!isUnresolvedName(n)) return n;
+  return null;
+}
+
+// Heal a position's DISPLAY name. `name` already resolved → returned untouched
+// (factory). Otherwise: a freshly re-resolved `symbol` wins, else a mint prefix,
+// else the original (so the worst case is still today's "?").
+export function resolveDisplayPair(name, baseMint, symbol) {
+  if (!isUnresolvedName(name)) return name;
+  const quote = typeof name === "string" && name.includes("-") && !badNamePart(name.split("-").pop())
+    ? name.split("-").pop().trim()
+    : "SOL";
+  if (symbol && !badNamePart(symbol)) return `${String(symbol).trim()}-${quote}`;
+  return mintPrefixPair(baseMint, quote) || name || `?-${quote}`;
+}
+
 // ─── Meteora /pnl per pool (deposit history) ────────────────────
 // Exported because tools/dlmm.js (getPositionPnl + the Meteora fallback path)
 // also reads it.
@@ -82,20 +127,26 @@ export async function fetchDlmmPnlForPool(poolAddress, walletAddress) {
   }
 }
 
-// ─── Jupiter prices (never cached) ──────────────────────────────
+// ─── Jupiter prices + symbols (never cached) ────────────────────
+// The asset-search endpoint already returns `symbol` per asset, so we harvest
+// it here at zero extra cost — used only to heal unresolved DISPLAY names (F6).
 async function getJupiterPrices(mints) {
   const list = unique(mints.map((m) => String(m).trim()));
-  if (!list.length) return {};
+  if (!list.length) return { prices: {}, symbols: {} };
   try {
     const res = await fetch(`${JUP_SEARCH}?query=${list.join(",")}`, { headers: { accept: "application/json" } });
     if (!res.ok) throw new Error(`Jupiter ${res.status}`);
     const assets = await res.json();
-    const out = {};
-    for (const a of assets) out[a.id] = maybeNum(a.usdPrice);
-    return out;
+    const prices = {};
+    const symbols = {};
+    for (const a of assets) {
+      prices[a.id] = maybeNum(a.usdPrice);
+      if (a.symbol) symbols[a.id] = a.symbol;
+    }
+    return { prices, symbols };
   } catch (e) {
     log("pnl_price", `Jupiter price fetch failed: ${e.message}`);
-    return {};
+    return { prices: {}, symbols: {} };
   }
 }
 
@@ -150,7 +201,7 @@ function mapEntries(map) {
 }
 
 // ─── Build the shaped position object (matches getMyPositions output) ──
-function buildPosition(f, prices, solUsd, meteora, solMode) {
+function buildPosition(f, prices, symbols, solUsd, meteora, solMode) {
   const priceX = f.baseMint ? (prices[f.baseMint] ?? 0) : 0;
 
   const xHuman = safeNum(f.xRaw) / 10 ** f.decX;
@@ -213,7 +264,11 @@ function buildPosition(f, prices, solUsd, meteora, solMode) {
   return {
     position:           f.position,
     pool:               f.pool,
-    pair:               tracked?.pool_name || (meteora ? `${meteora.tokenX ?? "?"}-${meteora.tokenY ?? "SOL"}` : "?-SOL"),
+    pair:               resolveDisplayPair(
+                          tracked?.pool_name || (meteora ? `${meteora.tokenX ?? "?"}-${meteora.tokenY ?? "SOL"}` : "?-SOL"),
+                          f.baseMint,
+                          f.baseMint ? symbols[f.baseMint] : null,
+                        ),
     base_mint:          f.baseMint,
     lower_bin:          f.lower ?? tracked?.bin_range?.min ?? null,
     upper_bin:          f.upper ?? tracked?.bin_range?.max ?? null,
@@ -283,13 +338,13 @@ export async function computePositions(walletAddress) {
     return { wallet: walletAddress, total_positions: 0, positions: [], source: "rpc" };
   }
 
-  const [prices, meteoraByPosition] = await Promise.all([
+  const [{ prices, symbols }, meteoraByPosition] = await Promise.all([
     getJupiterPrices([SOL_MINT, ...flat.map((f) => f.baseMint)]),
     getMeteoraData(conn, walletAddress, flat),
   ]);
   const solUsd = prices[SOL_MINT] ?? null;
 
-  const positions = flat.map((f) => buildPosition(f, prices, solUsd, meteoraByPosition[f.position], solMode));
+  const positions = flat.map((f) => buildPosition(f, prices, symbols, solUsd, meteoraByPosition[f.position], solMode));
 
   return { wallet: walletAddress, total_positions: positions.length, positions, source: "rpc" };
 }

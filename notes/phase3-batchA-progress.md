@@ -5,9 +5,17 @@ Workstream: 🅴 layer presentasi modular — lanjutan pilot /positions (e9bd6a3
 Brief: migrasi 3 position-view (⑤) ke views/ + FIX bug unit ◎/$-campur di /status (#12).
 
 - [x] 0  env + progress file
-- [ ] 1  /status  → views/status.js  (FIX bug ◎/$ campur #12)
+- [x] 1  /status  → views/status.js  (FIX bug ◎/$ campur #12)
 - [ ] 2  /wallet  → views/wallet.js
 - [ ] 3  /pool    → views/pool.js
+
+## FASE 1 — /status (DONE)
+- views/format.js: + fmtWib (WIB UTC+7, deterministik) + ICON perf/brain/arrow.
+- views/wallet.js: shared helpers walletBlockLines() + systemLines() (dipakai status & wallet; anti-divergen). buildView/telegram /wallet menyusul FASE 2.
+- views/status.js: buildView(input)+telegram(vm). Section: 👛 Wallet → 📈 Performa → realized-tracker(embed) → 🧠 Insight → ⚙️ Sistem(dry-run/hive/OpenRouter) → hint /positions.
+- index.js: + import statusView; + helper buildOpenRouterLines() (array, verbatim); handler shared `/wallet||/status` DIPECAH → blok `/status` (view baru) + blok `/wallet` (kode LAMA byte-identik, fix FASE 2). condenseRule/perf/lessons/tracker/disclosure tetap di-gather handler.
+- FIX #12 terbukti smoke-test: mode ON semua ◎ (Saldo/per-slot/bebas/All-time), mode OFF semua $ (per-slot=◎×price), held tetap ◎, SOL-price tetap $.
+- Cross-check §C(82-110) NOL hilang: Saldo(2 basis)·SOLprice·Posisi x/max·per-slot(+anotasi)·bebas(+anotasi)·held(+info,+est)·Dry-run·HiveMind·OpenRouter(+warn)·All-time PnL+ROI(+"61 closed")·Win/avg·last good/bad·realized 1D/7D/30D·disclosure·hint. node --check semua LULUS.
 
 ## Keputusan arsitektur (berlaku Batch A)
 - Wallet block = RE-RENDER di views/ pakai fmtCur → FIX #12 (formatWalletStatus index.js:1681 hard-$).

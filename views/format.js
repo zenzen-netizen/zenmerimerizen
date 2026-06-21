@@ -80,6 +80,14 @@ export function fmtAge(m) {
   return x >= 60 ? `${(x / 60).toFixed(1)}h` : `${x}m`;
 }
 
+/** Timestamp WIB (UTC+7, tanpa DST) → "YYYY-MM-DD HH:MM WIB". Deterministik
+ *  (tak bergantung locale runtime). Default sekarang; bisa di-pass utk test. */
+export function fmtWib(ms = Date.now()) {
+  const s = new Date(Number(ms) + 7 * 3600000); // geser ke WIB, baca komponen UTC
+  const p = (n) => String(n).padStart(2, "0");
+  return `${s.getUTCFullYear()}-${p(s.getUTCMonth() + 1)}-${p(s.getUTCDate())} ${p(s.getUTCHours())}:${p(s.getUTCMinutes())} WIB`;
+}
+
 // ── bahasa desain (tree) ─────────────────────────────────────────────────────
 
 export const SEP = "━━━━━━━━━━━━━━━━";
@@ -89,7 +97,8 @@ export const ICON = {
   pnl: "💰", value: "💵", yield: "📊", time: "⏱", range: "📐", rule: "🎯", held: "🔒",
   inRange: "🟢", oor: "🔴", best: "🏆", worst: "💀", warn: "⚠️", deploy: "🚀",
   manage: "🔄", closed: "✅", stay: "✋", entry: "🪙", wallet: "💼", fee: "💧",
-  swap: "🔄", briefing: "📊", config: "⚙️", bolt: "⚡",
+  swap: "🔄", briefing: "📊", config: "⚙️", bolt: "⚡", perf: "📈", brain: "🧠",
+  arrow: "→",
 };
 
 /** Keycap-emoji untuk nomor 1–10; >10 → "<n>.". */

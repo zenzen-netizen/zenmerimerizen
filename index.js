@@ -53,6 +53,7 @@ import { formatPnlTracker } from "./pnl-tracker.js";
 import { getOpenRouterBalance, getOpenRouterCredits } from "./openrouter-usage.js";
 import { render } from "./views/render.js";
 import * as positionsView from "./views/positions.js";
+import * as statusView from "./views/status.js";
 
 import { REPO_ROOT, repoPath } from "./repo-root.js";
 
@@ -1704,6 +1705,33 @@ function formatWalletStatus(wallet, positions, rent = null) {
     `HiveMind: ${hive}`,
   );
   return lines.join("\n");
+}
+
+// OpenRouter balance/usage → array baris (logika verbatim dari /status+/wallet lama).
+// Array (bukan string) supaya tree() di views/ bisa kasih prefix per baris (incl
+// baris ⚠️ "menipis"). USD by-design — tetap `$`. Kosong → [].
+function buildOpenRouterLines(orBalance, orCredits) {
+  const lines = [];
+  if (orCredits?.balance != null) {
+    // Actual purchased-credit balance — the number to watch for top-ups.
+    let l = `💳 OpenRouter saldo: $${orCredits.balance.toFixed(2)}`;
+    if (orBalance?.usageDaily != null) l += ` | hari ini $${orBalance.usageDaily.toFixed(4)}`;
+    else if (orBalance?.usageMonthly != null) l += ` | bln ini $${orBalance.usageMonthly.toFixed(2)}`;
+    lines.push(l);
+    if (orCredits.balance < 5) lines.push(`⚠️ Saldo OpenRouter menipis — pertimbangkan top up`);
+  } else if (orBalance) {
+    if (orBalance.remaining != null) {
+      let l = `💳 OpenRouter: $${orBalance.remaining.toFixed(2)} remaining`;
+      if (orBalance.usageMonthly != null) l += ` | $${orBalance.usageMonthly.toFixed(2)} this month`;
+      else if (orBalance.usage != null) l += ` | $${orBalance.usage.toFixed(4)} total spent`;
+      lines.push(l);
+    } else if (orBalance.usageDaily != null) {
+      lines.push(`💳 OpenRouter: $${orBalance.usageDaily.toFixed(4)} today | $${(orBalance.usageMonthly ?? 0).toFixed(2)} this month`);
+    } else if (orBalance.usage != null) {
+      lines.push(`💳 OpenRouter: $${orBalance.usage.toFixed(4)} total spent`);
+    }
+  }
+  return lines;
 }
 
 // Condense a learning rule into a short, COMPLETE one-liner for /status.
@@ -3544,7 +3572,49 @@ async function telegramHandler(msg) {
     return;
   }
 
-  if (text === "/wallet" || text === "/status") {
+  if (text === "/status") {
+    try {
+      const [wallet, positions, orBalance, orCredits] = await Promise.all([
+        getWalletBalances(),
+        getMyPositions({ force: true }),
+        getOpenRouterBalance(),
+        getOpenRouterCredits(),
+      ]);
+      // Held rent across open positions → total tertahan (info; SOL bebas tak dikurangi).
+      let rentInfo = null;
+      if (positions.total_positions > 0) {
+        const rentMap = await getPositionsRentSol(positions.positions.map((p) => p.position)).catch(() => ({}));
+        const vals = Object.values(rentMap);
+        rentInfo = { totalRentSol: vals.reduce((s, r) => s + (r?.sol ?? 0), 0), estimated: vals.some((r) => r?.estimated) };
+      }
+      const slotsRemaining = Math.max(1, config.risk.maxPositions - (positions?.total_positions ?? 0));
+      const { lessons } = listLessons({ limit: 10, full: true });
+      const lastBad = lessons.filter((l) => l.outcome === "bad" || l.outcome === "poor").slice(-1)[0];
+      const lastGood = lessons.filter((l) => l.outcome === "good").slice(-1)[0];
+      // Render delegated to views/status.js (Phase 3 🅴, FIX unit #12). Data fetch unchanged.
+      const vm = statusView.buildView({
+        cfg: config,
+        sol: wallet.sol, solUsd: wallet.sol_usd, solPrice: wallet.sol_price,
+        totalPositions: positions.total_positions, maxPositions: config.risk.maxPositions,
+        deployAmount: computeDeployAmount(wallet.sol, { slotsRemaining }),
+        gasReserve: config.management?.gasReserve ?? 0,
+        heldSol: rentInfo?.totalRentSol ?? 0, heldEst: rentInfo?.estimated ?? false,
+        dryRun: process.env.DRY_RUN === "true", hive: isHiveMindEnabled(),
+        orLines: buildOpenRouterLines(orBalance, orCredits),
+        perf: getPerformanceSummary(),
+        lastGoodRule: lastGood ? condenseRule(lastGood.rule) : null,
+        lastBadRule: lastBad ? condenseRule(lastBad.rule) : null,
+        pnlBlock: formatPnlTracker(getModePerformance(), { solPriceUsd: wallet?.sol_price ?? null }),
+        disclosure: racikanScopeDisclosure(),
+      });
+      await sendHTML(render(vm, "telegram"));
+    } catch (e) {
+      await sendMessage(`Error: ${e.message}`).catch(() => {});
+    }
+    return;
+  }
+
+  if (text === "/wallet") {
     try {
       const [wallet, positions, orBalance, orCredits] = await Promise.all([
         getWalletBalances(),
@@ -3563,44 +3633,11 @@ async function telegramHandler(msg) {
         };
       }
       let msg = formatWalletStatus(wallet, positions, rentInfo);
-      if (orCredits?.balance != null) {
-        // Actual purchased-credit balance — the number to watch for top-ups.
-        msg += `\n💳 OpenRouter saldo: $${orCredits.balance.toFixed(2)}`;
-        if (orBalance?.usageDaily != null) msg += ` | hari ini $${orBalance.usageDaily.toFixed(4)}`;
-        else if (orBalance?.usageMonthly != null) msg += ` | bln ini $${orBalance.usageMonthly.toFixed(2)}`;
-        if (orCredits.balance < 5) msg += `\n⚠️ Saldo OpenRouter menipis — pertimbangkan top up`;
-      } else if (orBalance) {
-        if (orBalance.remaining != null) {
-          msg += `\n💳 OpenRouter: $${orBalance.remaining.toFixed(2)} remaining`;
-          if (orBalance.usageMonthly != null) msg += ` | $${orBalance.usageMonthly.toFixed(2)} this month`;
-          else if (orBalance.usage != null) msg += ` | $${orBalance.usage.toFixed(4)} total spent`;
-        } else if (orBalance.usageDaily != null) {
-          msg += `\n💳 OpenRouter: $${orBalance.usageDaily.toFixed(4)} today | $${(orBalance.usageMonthly ?? 0).toFixed(2)} this month`;
-        } else if (orBalance.usage != null) {
-          msg += `\n💳 OpenRouter: $${orBalance.usage.toFixed(4)} total spent`;
-        }
-      }
-      if (text === "/wallet") {
-        // SOL balance growth tracker (calendar 1d/7d/30d) — /wallet only.
-        msg += `\n\n${formatSolTracker(wallet.sol)}`;
-      }
-      if (text === "/status") {
-        if (positions.total_positions) msg += `\n\nUse /positions for the numbered list.`;
-        const perf = getPerformanceSummary();
-        const { lessons } = listLessons({ limit: 10, full: true });
-        if (perf) {
-          const cur = config.management.solMode ? "◎" : "$";
-          const sign = perf.total_pnl_usd >= 0 ? "+" : "-";
-          const roiStr = perf.roi_pct != null ? ` (${perf.roi_pct >= 0 ? "+" : ""}${perf.roi_pct}%)` : "";
-          msg += `\n\n💰 All-time PnL: ${sign}${cur}${Math.abs(perf.total_pnl_usd)}${roiStr} over ${perf.total_positions_closed} closed`;
-          msg += `\n🧠 Learning: ${perf.win_rate_pct}% win | avg PnL ${perf.avg_pnl_pct >= 0 ? "+" : ""}${perf.avg_pnl_pct}%`;
-        }
-        const lastBad = lessons.filter(l => l.outcome === "bad" || l.outcome === "poor").slice(-1)[0];
-        const lastGood = lessons.filter(l => l.outcome === "good").slice(-1)[0];
-        if (lastBad) msg += `\n⚠️ ${condenseRule(lastBad.rule)}`;
-        if (lastGood) msg += `\n✅ ${condenseRule(lastGood.rule)}`;
-      }
-      // Realized-PnL & net-of-cost tracker (1d/7d/30d) — both /wallet and /status.
+      const orLines = buildOpenRouterLines(orBalance, orCredits);
+      if (orLines.length) msg += `\n${orLines.join("\n")}`;
+      // SOL balance growth tracker (calendar 1d/7d/30d) — /wallet only.
+      msg += `\n\n${formatSolTracker(wallet.sol)}`;
+      // Realized-PnL & net-of-cost tracker (1d/7d/30d).
       const pnlBlock = formatPnlTracker(getModePerformance(), { solPriceUsd: wallet?.sol_price ?? null });
       if (pnlBlock) msg += `\n\n${pnlBlock}`;
       msg += racikanScopeDisclosure();

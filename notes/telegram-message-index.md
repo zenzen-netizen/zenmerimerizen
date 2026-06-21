@@ -389,10 +389,10 @@
 | 9 | notifyClose | ④ | telegram.js:651 ← executor.js:802 / index.js:1240 | 🟡 | DETAIL | ⬜ |
 | 10 | /close <n> | ④ | index.js:3703,3708 | 🔴🟡 | §C | ⬜ |
 | 11 | /closeall | ④ | index.js:3720,3730 | 🔴 | §C | ⬜ |
-| 12 | /status | ⑤ | index.js:3605 | 🟡 | §C | ⬜ |
-| 13 | /wallet (+trackstart) | ⑤ | index.js:3528-3543,3581 | 🟡 | §C | ⬜ |
+| 12 | /status | ⑤ | index.js → views/status.js | 🟡 | §C | ✅ (8ea2454, FIX #12) |
+| 13 | /wallet (+trackstart) | ⑤ | index.js → views/wallet.js | 🟡 | §C | ✅ (6afae59) |
 | 14 | **/positions** (PILOT) | ⑤ | index.js:3627 → views/positions.js | 🟡 | §C+DETAIL | ✅ (e9bd6a3) |
-| 15 | /pool <n> | ⑤ | index.js:3689 | 🟡 | §C | ⬜ |
+| 15 | /pool <n> | ⑤ | index.js → views/pool.js | 🟡 | §C | ✅ (3560f84) |
 | 16 | /report (semua varian) | ⑥ | index.js:3510 | 🟡 | §C | ⬜ |
 | 17 | Daily briefing | ⑦ | index.js:372 → 190 | 🟡 | §C | ⬜ |
 | 18 | Weekly/Monthly briefing | ⑦ | index.js:414 | 🟡 | DETAIL | ⬜ |
@@ -416,7 +416,7 @@
 
 **Catatan migrasi (hotspot uang — dari command-inventory §E + temuan baru):**
 - **#9 notifyClose HARD-`$`** vs #14/#15 solMode-aware → unit campur antar-pesan. Renderer wajib pusatkan unit (rule #3 governing).
-- **#12 /status** campur ◎/$ dalam SATU pesan (formatWalletStatus hard-$, sisanya solMode-aware).
+- **#12 /status** campur ◎/$ dalam SATU pesan (formatWalletStatus hard-$, sisanya solMode-aware). ✅ FIXED (8ea2454): wallet block via views/wallet.js walletBlockLines ikut solMode; formatWalletStatus dihapus. /wallet (#13) ikut kena fix.
 - **Held/rent selalu ◎** (SOL intrinsik) — JANGAN dikonversi ke $; bukan "value display".
 - **#14 /positions** = PILOT: simbol sudah benar (data mode-correct), tinggal pindah render ke `views/` + jaga 💧 fee-density.
 - `*_usd` field = SOL saat solMode on (dlmm.js:2009-2035) — view-model cukup bawa angka + simbol, JANGAN dobel-konversi.

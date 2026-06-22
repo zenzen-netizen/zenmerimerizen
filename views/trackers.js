@@ -60,3 +60,32 @@ export function renderSolTracker(d) {
   if (!ss) out.push("💡 set anchor: /wallet trackstart YYYY-MM-DD");
   return out.join("\n");
 }
+
+// ── Realized PnL & Net ($) ───────────────────────────────────────────────────
+function usdSigned(n) { return `${n >= 0 ? "+" : "-"}$${Math.abs(n).toFixed(2)}`; }
+
+/**
+ * @param rows array dari getPnlTracker(): [{label,realized,trades,gasUsd,llmUsd,
+ *   costUsd,net,hasCost,gasIsEst}]. Disclosure racikan TIDAK di sini (di-embed
+ *   terpisah di view, di luar blok — apa adanya).
+ */
+export function renderPnlTracker(rows) {
+  const out = [`${ICON.pnl} Realized PnL & Net`, SEP];
+  let anyEst = false;
+  const gasIncluded = (rows || []).some((r) => r.gasUsd != null);
+
+  const data = [];
+  for (const r of rows || []) {
+    if (r.hasCost) {
+      const tilde = r.gasIsEst && r.gasUsd != null ? "~" : "";
+      if (r.gasIsEst && r.gasUsd != null) anyEst = true;
+      data.push(`${r.label.padEnd(3)} ${dot(r.net)} ${usdSigned(r.net)} net (PnL ${usdSigned(r.realized)} − biaya ${tilde}$${r.costUsd.toFixed(2)} · ${r.trades} tr)`);
+    } else {
+      // Tanpa data biaya sama sekali → realized saja.
+      data.push(`${r.label.padEnd(3)} ${dot(r.realized)} ${usdSigned(r.realized)} PnL (${r.trades} tr)`);
+    }
+  }
+  out.push(tree(data));
+  out.push(`ℹ️ Net = PnL − ${gasIncluded ? "gas − " : ""}LLM${gasIncluded ? (anyEst ? " (~ = gas estimasi)" : "") : " (gas blm dihitung — tanpa harga SOL)"}`);
+  return out.join("\n");
+}

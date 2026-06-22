@@ -6,7 +6,7 @@ Display-only, restart owner-only.
 - [x] 0  poles format.js (2dp money · ikon 👛/💼/📋 · + fmtBoth) + re-verify /positions·/status·/wallet ✅
 - [x] 1  recon renderer tracker (formatSolTracker / formatPnlTracker) — output EXACT + batas compute|format ✅
 - [x] 2  SOL Tracker → tree-style (◎ tetap), update embed /wallet ✅
-- [ ] 3  Realized PnL & Net → tree-style ($ tetap), update embed /status + /wallet
+- [x] 3  Realized PnL & Net → tree-style ($ tetap), update embed /status + /wallet ✅
 
 ## Catatan recon awal (sebelum eksekusi)
 - **Rute X dipilih** (extract render ke `views/trackers.js`). Alasan: boundary compute|format sudah bersih —

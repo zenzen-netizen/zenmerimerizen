@@ -4,7 +4,7 @@ Workstream 🅴 — Batch B (notif live). Bot MAIN (`pm2 id 0` = meridian, branc
 Display-only, restart owner-only. Render notif → `views/notifs.js`; `telegram.js` jadi wrapper tipis.
 
 - [x] 0  tuntasin 2dp fmtCur ($ branch) + literal Saldo wallet.js + re-verify msg ter-migrasi ✅
-- [ ] 1  recon EXACT notifyDeploy/OOR/Swap/Close (telegram.js) — semua field + baseline
+- [x] 1  recon EXACT notifyDeploy/OOR/Swap/Close (telegram.js) — semua field + baseline ✅
 - [ ] 2  notifyDeploy → views/notifs.js renderDeploy (tree, SEMUA field)
 - [ ] 3  notifyOutOfRange + notifySwap → renderOOR + renderSwap (tree)
 - [ ] 4  notifyClose → renderClose (tree + fmtBoth $+◎, SEMUA field)
@@ -26,6 +26,31 @@ Display-only, restart owner-only. Render notif → `views/notifs.js`; `telegram.
 - Re-verify: USD mode Saldo `$185.10` · per-slot `$75.00` · bebas `$155.10` (semua 2dp via fmtCur);
   solMode ON ◎-branch tak berubah (◎1.234/◎0.5/◎1.034), secondary $ ikut 2dp. node --check OK.
 - Catatan: baris `SOL @ $<price>` (round) di luar enumerasi brief FASE 0 → dibiarkan (harga referensi).
+
+## FASE 1 — recon EXACT (telegram.js:575-671), baseline /tmp/bl_{deploy,close,swap,oor}.txt
+Guard semua: `if (hasActiveLiveMessage()) return;` (JANGAN diubah). Divider lama `NOTIF_DIV` = 16×`─`
+(light) → diseragamkan ke `SEP` format.js 16×`━` (heavy). Header lama `<b>`→pakai `header()` (tanpa bold,
+selaras semua view ter-migrasi) + ikon per brief. Inline HTML field (`<code>`/`<i>`/`<b>label`) DIPERTAHANKAN.
+
+**notifyDeploy** (data: pair, amountSol, position, tx, priceRange?, rangeCoverage?, binStep?, baseFee?; racikan dari activeRacikan()):
+1. `✅ <b>Deployed</b> <pair>` → ikon `🚀` (brief). 2. DIV. 3. `💵 Amount: <amountSol> SOL` + IF racikan `  ·  🗂️ <racikan>` (always).
+4. IF priceRange: `📐 Price range: <fmtP(min)> – <fmtP(max)>` (fmtP: v<0.0001→toExponential(3) else toFixed(6)).
+5. IF rangeCoverage: `↕️ Cover: <fmtPct(down)> ↓ | <fmtPct(up)> ↑ | <fmtPct(width)> total`.
+6. IF binStep||baseFee: `🧱 Bin step <binStep??"?"> · base fee <baseFee!=null?baseFee+"%":"?">`.
+7. `🆔 Position: <code><pos[0:8]>...</code>` (always). 8. `🔗 Tx: <code><tx[0:16]>...</code>` (always).
+
+**notifyOutOfRange** (pair, minutesOOR): `⚠️ <b>Out of Range</b> <pair>`→ikon `🔴` + `⏱️ Been OOR for <minutesOOR> minutes`.
+**notifySwap** (inputSymbol, outputSymbol, amountIn, amountOut, tx): `🔄 <b>Swapped</b> <in> → <out>` + `💱 In: <amountIn??"?"> · Out: <amountOut??"?">` + `🔗 Tx: <code><tx[0:16]>...</code>`.
+
+**notifyClose** (pair, pnlUsd, pnlPct, peakPnlPct?, reason?, lesson?, feesUsd?) — HARD-$ hotspot:
+1. `<🟢/🔴> <b>Closed</b> <pair>` (win=pnlUsd>=0). 2. DIV.
+3. `📊 Net PnL: <usd(net)> (<±pct>%)` — `usd(v)`=`±$abs.toFixed(2)` **HARD-$**.
+4. IF feesUsd!=null: `   💎 Fee panen <usd(fee)>  ·  📈 Efek-harga <usd(net-fee)>` + `   ⛽ Gas ~<gasSol.toFixed(5)> SOL (est, di luar PnL — dari wallet)` (gasSol=estimateGasSol close+claim+swap).
+5. IF peak&pct finite & peak>=3 & (peak-pct)>=1: `📈 Give-back: peak +<peak>% → exit <±pct>% (tinggal <gb>pp di meja)`.
+6. IF reason match /PnL (-?n)%/ & gap>=5: `⚠️ Trigger di <t>%, realisasi <pct>% — harga terus bergerak selama eksekusi close (gap <g>pp).`
+7. IF reason: `📋 <b>Reason:</b> <esc(reason[0:200])>`. 8. IF lesson: `📚 <b>Lesson:</b> <i><esc(lesson[0:300])></i>`.
+- **Sumber `$`**: semua dari `pnlUsd`/`feesUsd` (mode-correct 1-unit) — TAK ada nilai ◎/sol_price → `fmtBoth`
+  butuh 2 nilai ⇒ blok di FASE 4 (lihat Temuan kritis). Gas SUDAH ◎/SOL (tanpa $, tak ada harga).
 
 ## Catatan/limit-recovery
 (kosong)

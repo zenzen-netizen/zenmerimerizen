@@ -7,7 +7,7 @@ restart owner-only. Workstream 🅴 — Report & Briefing (⑥⑦) → tree-styl
 ## Checklist (report/briefing)
 - [x] 0  recon EXACT /report (semua varian) + briefing harian/mingguan/bulanan + milestone — field + baseline
 - [x] 1  /report → tree-style (SEMUA stat dipertahankan)
-- [ ] 2  Daily briefing → tree-style
+- [x] 2  Daily briefing → tree-style
 - [ ] 3  Weekly/Monthly briefing → tree-style
 - [ ] 4  Milestone learning report → tree-style (render ekstrak dari index.js, 1-baris call)
 
@@ -23,6 +23,21 @@ urutan rank dibawa branch tree) · buildRecommendations (`• ` → tree) · bui
 formatStatsBlock/Quant/Movement/Breakdown/Recs yg dipanggil langsung briefing.js juga auto-tree (FASE 2 sisanya).
 **Cross-check token-multiset (HTML+tree/list-marker+SEP di-strip) IDENTIK**: report_default 437=437 · report_all
 549=549 · report_milestone 423=423 tok → nol stat hilang. `node --check reports.js` OK. Commit `feat(views): /report tree-style`.
+
+---
+
+## FASE 2 — Daily briefing → tree-style — SELESAI
+`briefing.js`: import `{ SEP, tree }` + helper `section(header, body)=[header, tree(body)].join`. Seksi reports.js
+(stats/verdict/quant/movement/breakdown/recs) SUDAH tree dari FASE 1 → auto-ikut. Yang di-tree di FASE 2 (lokal):
+inline Activity · Performance (24h) · Lessons Learned (24h) (+config-change masuk body) · Current Portfolio →
+`section()`; buildCostSection (header + tree body; role-line `  •` di-strip jadi branch) · buildLearningSection
+(sub-section warnings/patterns + tail tree) · buildTimeProfileSection (drop ordinal `N.`) · buildSkipReviewSection.
+`────` (2×) → SEP. buildFeatureStatus dibiarkan 2-baris flat (status ringkas, bukan list — house style boleh mix).
+`/briefing` (#20) pakai render yg sama → auto-ikut. **Cross-check**: week/month token-multiset IDENTIK (757=757,
+800=800). Daily: token COUNT sama (911=911) tapi 9 nilai drift — DIBUKTIKAN live-drift, BUKAN migrasi: (a) dua run
+NEW berturut beda sendiri (LLM call/lessons akru real-time), (b) **STRUCTURAL diff (semua angka di-mask) baseline-vs-new
+IDENTIK** → semua label/field/kata utuh, cuma nilai live (LLM cost/token/runway/call-count) yg gerak. `node --check` OK.
+Commit `feat(views): daily briefing tree-style`.
 
 ---
 

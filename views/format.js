@@ -35,7 +35,7 @@ export function curSym(solMode) {
  * Dipakai pesan yang punya kedua basis (mis. blok wallet /status, /report).
  */
 export function fmtCur(sol, usd, solMode) {
-  return solMode ? `◎${round(sol, 4)}` : `$${round(usd, 2)}`;
+  return solMode ? `◎${round(sol, 4)}` : `$${Number(usd).toFixed(2)}`;
 }
 
 /**

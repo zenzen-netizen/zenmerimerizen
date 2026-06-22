@@ -29,8 +29,8 @@ export function walletBlockLines(d) {
   // Saldo: tampilkan KEDUA basis (primary ikut solMode, secondary info) — versi
   // lama selalu nampilin SOL + ($usd), jadi dua-duanya dipertahankan.
   lines.push(solMode
-    ? `${ICON.value} Saldo: ◎${round(d.sol, 4)} (≈$${round(d.solUsd, 2)})`
-    : `${ICON.value} Saldo: $${round(d.solUsd, 2)} (≈◎${round(d.sol, 4)})`);
+    ? `${ICON.value} Saldo: ◎${round(d.sol, 4)} (≈$${Number(d.solUsd).toFixed(2)})`
+    : `${ICON.value} Saldo: $${Number(d.solUsd).toFixed(2)} (≈◎${round(d.sol, 4)})`);
   lines.push(`${ICON.entry} SOL @ $${round(d.solPrice, 2)}`);          // harga SOL = USD selalu
   lines.push(`${ICON.position} Posisi: ${d.totalPositions}/${d.maxPositions}`);
   // per-slot & bebas = jumlah SOL → fmtCur (◎ saat solMode, $ via ×price saat off).

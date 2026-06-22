@@ -7,7 +7,7 @@ Display-only, restart owner-only. Render notif → `views/notifs.js`; `telegram.
 - [x] 1  recon EXACT notifyDeploy/OOR/Swap/Close (telegram.js) — semua field + baseline ✅
 - [x] 2  notifyDeploy → views/notifs.js renderDeploy (tree, SEMUA field) ✅
 - [x] 3  notifyOutOfRange + notifySwap → renderOOR + renderSwap (tree) ✅
-- [ ] 4  notifyClose → renderClose (tree + fmtBoth $+◎, SEMUA field)
+- [x] 4  notifyClose → renderClose (tree + HARD-$ fix mode-correct; fmtBoth TER-BLOK, lihat bawah) ✅
 
 ## Temuan kritis (pra-eksekusi, ngaruh ke FASE 4)
 - **solMode MAIN = undefined → USD mode** ($).
@@ -68,6 +68,22 @@ selaras semua view ter-migrasi) + ikon per brief. Inline HTML field (`<code>`/`<
 - Cross-check baseline: multiset token IDENTIK kecuali `<b>` (bold header sengaja). Data ADA: swap
   in→out/amountIn/amountOut/Tx[0:16]; OOR pair/minutesOOR. node --check OK.
 - Intended: OOR ⚠️→🔴, ⏱️→⏱, +" — ", DIV→SEP16, tree ├/└, `  ·  `→` · `.
+
+## FASE 4 — hasil + KEPUTUSAN DIPERLUKAN (fmtBoth)
+- `renderClose(d)` di views/notifs.js: tree-style, SEMUA field dipertahankan (Net PnL, Fee panen·Efek-harga,
+  Gas, Give-back, Trigger-gap, Reason, Lesson) + kondisionalnya persis. `telegram.js` notifyClose → wrapper
+  tipis (guard tetap; gasSol via estimateGasSol + solMode via solModeOn() di-resolve di sini).
+- **HARD-$ #9 FIXED**: uang via `fmtMoneySigned(_, solMode)` (mode-correct). solMode off (MAIN) → byte-identik
+  `$` lama; solMode ON → `◎` (uji: `-◎0.1234`/`+◎0.0042`). Cross-check data multiset (HTML-stripped) IDENTIK;
+  beda cuma `<b>` header 3→2 (bold sengaja dilepas pakai header()); `<i>` Lesson tetap. Win/loss 🟢/🔴
+  DIPERTAHANKAN (TIDAK diturunkan ke ✅ generik — itu reduksi sinyal menang/kalah).
+- ⚠️ **fmtBoth ($+◎) TIDAK terpasang** — bukan kelalaian: payload notifyClose cuma bawa SATU nilai
+  mode-correct + TANPA sol_price (recon FASE 1 / dlmm.js:2354-2369). Nurunin unit kedua = (a) ubah
+  executor.js:802 kirim sol_price [DILARANG governing #3] atau (b) ngarang konversi [DILARANG governing #2].
+  Sesuai fallback brief ("tampilkan apa adanya + catat"), dirender 1-unit mode-correct. `renderClose` siap
+  jadi seam: kalau kelak executor kirim sol_price/nilai-◎, tinggal swap `m()`→`fmtBoth`.
+  → **KEPUTUSAN OWNER:** mau follow-up brief kecil yg sentuh executor.js:802 (+ mungkin wallet sol_price)
+  biar notifyClose beneran 2-unit? Atau cukup mode-correct 1-unit (sekarang)?
 
 ## Catatan/limit-recovery
 (kosong)

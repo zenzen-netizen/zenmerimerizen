@@ -1,15 +1,70 @@
 # PHASE 3 BATCH C — PROGRESS
 
 Bot MAIN (`pm2 id 0` = meridian, branch `experimental`, LOCAL = sumber kebenaran). Display-only,
-restart owner-only.
+restart owner-only. Workstream 🅴 — Report & Briefing (⑥⑦) → tree-style. Zona aman: `reports.js`,
+`briefing.js`, render-ekstrak ke `views/` bila perlu; `index.js` cuma 1-baris (milestone).
 
-> ⚠️ **Catatan keadaan:** Sesi ini HANYA menjalankan **FASE 5 (TAMBAHAN)** — notifyClose both-units
-> ($+◎). Batch C FASE 0–4 **belum ada** di repo saat sesi ini jalan (tak ada `phase3-batchC-progress.md`
-> sebelumnya, tak ada commit Batch C; HEAD = `1a0cd5e` = Batch B #9). FASE 5 **independen** dari Batch C
-> 0–4 — ia nyambung ke Batch B (notifyClose→renderClose, sudah landed & commit). Restart owner-only →
-> tak ada risiko double-restart dari sisi Claude. Owner: urutkan restart sesuai rencana.
+## Checklist (report/briefing)
+- [x] 0  recon EXACT /report (semua varian) + briefing harian/mingguan/bulanan + milestone — field + baseline
+- [ ] 1  /report → tree-style (SEMUA stat dipertahankan)
+- [ ] 2  Daily briefing → tree-style
+- [ ] 3  Weekly/Monthly briefing → tree-style
+- [ ] 4  Milestone learning report → tree-style (render ekstrak dari index.js, 1-baris call)
 
 ---
+
+## FASE 0 — Recon EXACT (READ-ONLY) — SELESAI
+Baseline real disimpan `/tmp/bl_report_{default,all,milestone}.txt` + `/tmp/bl_briefing_{daily,week,month}.txt`
+(146 perf record di lessons.json). Cross-check pasca-migrasi = multiset token (HTML+tree-prefix+SEP di-strip) IDENTIK.
+
+**Builder utama (reports.js, dipanggil index.js:3517/4065 & briefing.js):**
+- `buildTradeReport(perf,{title,subtitle,statsLabel,trendN,identity,quant})` (reports.js:575) — komposer.
+  Urutan: `<b>title</b>` → `<i>subtitle?</i>` → identity (formatIdentity: 🧬 Profil + 🗂️ Racikan) →
+  `────────────────` (16×─ light) → **formatStatsBlock** → **buildVerdict?** → ""+**formatQuantBlock?** →
+  ""+**formatTrend?** → ""+**formatMovement?** → ""+**formatBreakdown?** → ""+**buildRecommendations?** →
+  `────────────────`. Empty-window → "<b>title</b>… No closed positions in this window yet."
+- `formatStatsBlock` (265): `<b>📊 label — N closed</b>` + 💰PnL/ROI/fees · 🎯Win(W/L)/PF/expectancy ·
+  ⚖️avg win/loss(payoff) · 📉MaxDD(%)/streak/hold/in-range · 🏆Best|💀Worst? · 🩸Tail?
+- `buildVerdict` (553): `<b>🧭 Verdict:</b> <emoji status + kalimat>` (1 baris, n≥4).
+- `formatQuantBlock` (305): `<b>🧮 Quant Edge — n=N?:</b>` + RR/break-even · EV/trade · MaxDD recovery? ·
+  💧Fee-density? · Cost-drag? · `<i>noisy flag?</i>`.
+- `formatTrend` (404): `<b>📈 Trend — last N vs prior N:</b>` + PnL · Win rate · Profit factor (arrow 📈/📉/➡️).
+- `formatMovement` (202): `<b>📈 PnL Movement (N tracked):</b>` + avg peak→exit(give-back) · avg trough? ·
+  left-on-table? ; `<b>💹 Price Movement vs entry (N tracked):</b>` + avg peak(best)|drawdown(worst) ·
+  winners dip? · losers dip?
+- `formatBreakdown` (379): per blok `<b>title</b>` + baris `  N. key: ±$net net, W% win, avg/trade ±$avg (count)`.
+  Blok: 📦 By strategy · 🗂️ By racikan? · 🕒 By session (WIB)? · 🏷️ By narrative? · 🛑 By close rule (urut dampak $)?
+- `buildRecommendations` (425): `💡 <b>Recommendations:</b>` + `  • <rec>` (≤7, HTML inline `<code>`/`<b>`).
+- `buildRoleCostLines` (616): `  • Role [model]: $x (n calls)` — dipakai cost-section briefing.
+
+**Varian /report (index.js buildReportForArg:286):** default=racikan aktif (getModePerformance) · all/lifetime
+(getLifetimePerformance, +subtitle warning) · setups (list racikan, BUKAN buildTradeReport — list sendiri pakai
+`────`) · `<racikan>` (getPerformanceForRacikan) · week/month/day → generatePeriodicBriefing. Tiap varian
+buildTradeReport SAMA strukturnya, beda title/subtitle/perf. index.js NAMBAH di luar builder: `formatPnlTracker`
+(renderPnlTracker, SUDAH tree — cuma dipanggil) + suspectLine? + racikanScopeDisclosure?.
+
+**Briefing harian (generateBriefing, briefing.js:284):** ☀️ header + identity → `────` → Activity(opened/closed)
+→ Performance 24h(PnL/fees/winrate) → formatPnlTracker(tree) → formatStatsBlock(All-time)+verdict+quant+movement →
+formatStatsBlock(Racikan)+disclosure → Lessons 24h → Portfolio → buildFeatureStatus → buildCostSection →
+buildLearningSection → buildTimeProfileSection → buildSkipReviewSection → formatBreakdown → buildRecommendations →
+`────`. (Seksi reports.js auto-ikut tree dari FASE 1; seksi LOKAL briefing.js di-tree FASE 2.)
+
+**Briefing periodik (generatePeriodicBriefing, briefing.js:411):** buildTradeReport(window) + formatStatsBlock(Racikan)
++ disclosure + formatPnlTracker + Activity(Nd) + buildFeatureStatus + costLines + buildTimeProfileSection. Join `\n\n`.
+
+**Milestone (maybeFireLearningReport, index.js:216):** buildTradeReport(perf,{title:"🎓 Learning Report — N closed",
+statsLabel:"All-time",trendN,identity:formatIdentity()}) → sendHTML. FASE 4: ekstrak render ke file aman, index.js 1-baris.
+
+**Catatan unit (governing #2):** report = $ by-design (`money()` reports.js:23 selalu `±$`); realized tracker =
+renderPnlTracker (sudah tree, $). TIDAK ngarang konversi. Hanya rakitan string → tree; perhitungan stat NOL ubah.
+
+---
+
+---
+
+# ADDENDUM — FASE 5: notifyClose both-units ($+◎)
+> Dikerjakan lebih dulu (sebelum Batch C report/briefing) atas keputusan owner; sudah LIVE (commit a383eb2,
+> restart MAIN). Independen dari FASE 0–4 di atas. Detail di bawah.
 
 ## FASE 5.1 — Recon (READ-ONLY) — SELESAI
 

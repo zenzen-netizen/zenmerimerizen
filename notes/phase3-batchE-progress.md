@@ -5,7 +5,7 @@ Display-only, restart owner-only. Render `/config` → `views/config.js`; sistem
 guide/help di `guide.js`/views. index.js = 1-baris call per pesan + registrasi `/config origin`.
 
 - [x] 0  recon EXACT: /config(+keys+origin) · guide · help · hive · pause/resume · queue · error — field+baseline ✅
-- [ ] 1  /config (default) → tree function-grouped + marker origin (🧩/⚙️)
+- [x] 1  /config (default) → tree function-grouped + marker origin (🧩/⚙️) ✅
 - [ ] 2  /config origin → command BARU (aditif), grouped per-asal
 - [ ] 3  guide + help → tree (guide.js, aman)
 - [ ] 4  hive + pause/resume + queue + error → tree (ekstrak inline index.js, minimal)
@@ -80,6 +80,24 @@ jadi nol detail hilang secara agregat. Inline `ORIGIN_NOTES` TETAP dibawa per-ba
 - **error-reply** generik `"Error: <e.message>"` (banyak call-site) + varian `Settings error:` / `HiveMind error:`.
 - Konfirmasi: `/config`,`/help`,`/hive`,`/pause`,`/resume` **TIDAK ada di REPL/CLI** (Telegram-only). REPL cuma
   /briefing /candidates /guide /preset /report /status /thresholds.
+
+## FASE 1 — hasil ✅
+- `config-origin.js` +`FUNCTION_GROUPS` (12 grup fungsi) + `KEY_ORIGIN` (turunan dari ORIGIN_SECTIONS,
+  rule #3 — nol logic origin baru). Parity node-check: 166 unik · 0 hilang · 0 dobel · 0 unknown ·
+  marker 94⚙️+72🧩 lengkap (nol undefined).
+- `views/config.js` BARU (`buildView`+`telegram`, dua mode "function"/"origin"). FASE 1 pakai `renderFunction`:
+  header `🛠 Config · 🗂 <racikan>` + SEP + identity (Profil/Racikan ✎) + SEP + 12 grup (header+tree ├/└,
+  tiap baris `<marker> label: value<note>`) + SEP + legenda + pointer. value-string verbatim dari rowMap;
+  inline `ORIGIN_NOTES` dipertahankan; safety-net `❓ Belum terpetakan` (nol key bisa hilang diam-diam).
+  GMGN dapat hint hidup aktif/nonaktif (`screeningSource`).
+- `views/format.js` +ikon `tools:"🛠"`, `dev:"⚙️"`, `zen:"🧩"` (aditif, kamus ikon).
+- `views/render.js` +register `config`.
+- `index.js`: +import configView · +helper `formatFunctionConfig()` (build rowMap+identity, fail-open
+  racikanName) · dispatch `/config` → function view (`/config core` tetap formatCoreConfig). **formatFullConfig
+  TIDAK disentuh** (masih layani tombol /settings :3044; di-delegasi ke view di FASE 2).
+- Render uji (mock rowMap 166 key): **166 baris key persis**, semua marker/notes/identity/GMGN-hint muncul.
+  5028 char → 2 chunk auto-split (splitText motong di newline, tak putus baris). node --check semua OK.
+- **Belum** ada command `/config origin` (FASE 2) — footer pointer ke situ aktif setelah FASE 2.
 
 ## Catatan/limit-recovery
 (kosong)

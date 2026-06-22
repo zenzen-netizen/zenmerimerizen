@@ -415,3 +415,122 @@ export const CORE_GROUPS = [
     keys: [["enabled", "chartIndicatorsEnabled"], ["entryPreset", "indicatorEntryPreset"]],
   },
 ];
+
+// ── FUNCTION grouping (default /config, Batch E FASE 1) ───────────────────────
+// Second layout over the SAME 166 rowMap keys, grouped by daily-practical FUNCTION
+// (twin dev+zen keys merged) instead of by origin. RENDER-ONLY: owns WHERE each
+// row lands in the function view; values stay in buildConfigRowMap (index.js).
+// Each key's ASAL (dev/zen) is shown as an inline marker (⚙️/🧩) via KEY_ORIGIN.
+// Parity invariant: the union of every group's keys == the 166 rowMap keys (a
+// node check guards this; any unplaced key still falls into the view's "❓"
+// safety bucket). Identity (Profil/Racikan) is rendered by the view header, not
+// a group here. `gmgnDynamic` flags the GMGN block so the view can append the
+// live source-active hint.
+export const FUNCTION_GROUPS = [
+  {
+    emoji: "📊", title: "Sizing & Posisi",
+    keys: [
+      "maxPositions", "maxDeployAmount", "deployAmountSol", "positionSizePct", "minSolToOpen",
+      "gasReserve", "sizingMode", "rentPerPositionSol",
+      "gasReserveAutoTune", "gasReserveBufferDays", "gasReserveFloorSol",
+    ],
+  },
+  {
+    emoji: "🔍", title: "Screening",
+    keys: [
+      "screeningSource", "screeningCategories", "timeframe", "category",
+      "minTvl", "maxTvl", "minVolume", "minMcap", "maxMcap", "minHolders",
+      "minFeeActiveTvlRatio", "minTokenFeesSol", "minOrganic", "minQuoteOrganic",
+      "minBinStep", "maxBinStep", "minTokenAgeHours", "maxTokenAgeHours",
+      "excludeHighSupplyConcentration", "maxBotHoldersPct", "maxTop10Pct",
+      "avoidPvpSymbols", "blockPvpSymbols", "allowedLaunchpads", "blockedLaunchpads",
+      "useDiscordSignals", "discordSignalMode",
+    ],
+  },
+  {
+    emoji: "🔎", title: "Screening-GMGN", gmgnDynamic: true,
+    keys: [
+      "gmgn.interval", "gmgn.orderBy", "gmgn.direction", "gmgn.platforms", "gmgn.filters",
+      "gmgn.minMcap", "gmgn.maxMcap", "gmgn.minTvl", "gmgn.minVolume", "gmgn.minHolders",
+      "gmgn.minTokenAgeHours", "gmgn.maxTokenAgeHours", "gmgn.athFilterPct", "gmgn.minTotalFeeSol",
+      "gmgn.requireKol", "gmgn.minKolCount", "gmgn.minSmartDegenCount", "gmgn.maxRugRatio",
+      "gmgn.maxBundlerRate", "gmgn.maxRatTraderRate", "gmgn.maxFreshWalletRate", "gmgn.maxDevTeamHoldRate",
+      "gmgn.maxBotDegenRate", "gmgn.maxSniperCount", "gmgn.maxSniperHoldRate",
+      "gmgn.preferredKolNames", "gmgn.preferredKolMinHoldPct", "gmgn.dumpKolNames", "gmgn.dumpKolMinHoldPct",
+      "gmgn.indicatorFilter", "gmgn.indicatorInterval",
+      "gmgn.rules.requireBullishSupertrend", "gmgn.rules.rejectAlreadyAtBottom",
+      "gmgn.rules.requireAboveSupertrend", "gmgn.rules.minRsi", "gmgn.rules.maxRsi", "gmgn.rules.requireBbPosition",
+    ],
+  },
+  {
+    emoji: "🚪", title: "Exit & Trailing",
+    keys: [
+      "stopLossPct", "takeProfitPct", "trailingTakeProfit", "trailingTriggerPct", "trailingDropPct",
+      "outOfRangeBinsToClose", "outOfRangeWaitMinutes", "oorCooldownTriggerCount", "oorCooldownHours",
+      "minFeePerTvl24h", "minAgeBeforeYieldCheck", "minVolumeToRebalance", "minClaimAmount", "autoSwapAfterClaim",
+      "repeatDeployCooldownEnabled", "repeatDeployCooldownTriggerCount", "repeatDeployCooldownHours",
+      "repeatDeployCooldownScope", "repeatDeployCooldownMinFeeEarnedPct",
+    ],
+  },
+  {
+    emoji: "📐", title: "Strategy & Range",
+    keys: ["strategy", "minBinsBelow", "maxBinsBelow", "defaultBinsBelow", "strategyLock"],
+  },
+  {
+    emoji: "📊", title: "Indikator",
+    keys: [
+      "enabled", "entryPreset", "exitPreset", "rsiLength", "intervals", "candles",
+      "rsiOversold", "rsiOverbought", "requireAllIntervals",
+      "exitEnabled", "rejectAlreadyAtBottom", "smiPdLookback", "smiPaLookback", "smiCrossWindow",
+    ],
+  },
+  {
+    emoji: "⏱", title: "Jadwal",
+    keys: [
+      "managementIntervalMin", "screeningIntervalMin", "healthCheckIntervalMin",
+      "adaptiveScreening", "maxScreeningIntervalMin",
+    ],
+  },
+  {
+    emoji: "🧠", title: "LLM",
+    keys: ["managementModel", "screeningModel", "generalModel", "temperature", "maxTokens", "maxSteps", "generalMaxTokens"],
+  },
+  {
+    emoji: "🧬", title: "Darwin",
+    keys: [
+      "darwinEnabled", "darwinWindowDays", "darwinRecalcEvery", "darwinBoost",
+      "darwinDecay", "darwinFloor", "darwinCeiling", "darwinMinSamples",
+    ],
+  },
+  {
+    emoji: "📑", title: "Reports & Learning",
+    keys: ["learningReportEvery", "learningReportTrendN", "evolveEnabled"],
+  },
+  {
+    emoji: "🧪", title: "Eksperimen (GRUP 16)",
+    keys: [
+      "exitLiquidityCheck", "exitLiquidityMaxSlippagePct", "marketRegimeGate", "marketRegimeMaxDrop24hPct",
+      "candidateMomentum", "narrativeProfileSignal", "expectedYieldSignal",
+      "convictionSizing", "convictionSizingMaxAdjustPct", "counterfactualReview", "counterfactualMinMcapGainPct",
+      "smartWalletMomentum", "idleScreeningCooldown", "idleScreeningCooldownMin",
+      "paperTrading", "usePaperHistoryWhenLive",
+    ],
+  },
+  {
+    emoji: "🌐", title: "Sistem/Infra",
+    keys: [
+      "lpAgentRelayEnabled", "agentId", "publicApiKey", "pnlSource", "pnlRpcUrl",
+      "pnlPollIntervalSec", "pnlDepositCacheTtlSec", "pnlSanityMaxDiffPct", "gmgnFeeSource",
+      "hiveMindStatus", "hiveMindPullMode", "hiveMindUrl", "dryRun", "solMode",
+    ],
+  },
+];
+
+// key → "dev" | "zen", derived ONCE from ORIGIN_SECTIONS (rule #3: reuse existing
+// origin data, no new origin logic). The function view reads this for the inline
+// ⚙️/🧩 marker; the origin view doesn't need it (origin is its grouping axis).
+export const KEY_ORIGIN = (() => {
+  const m = {};
+  for (const sec of ORIGIN_SECTIONS) for (const sg of sec.subgroups) for (const k of sg.keys) m[k] = sec.id;
+  return m;
+})();

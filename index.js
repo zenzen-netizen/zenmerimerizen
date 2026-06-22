@@ -56,6 +56,7 @@ import * as positionsView from "./views/positions.js";
 import * as statusView from "./views/status.js";
 import * as walletView from "./views/wallet.js";
 import * as poolView from "./views/pool.js";
+import * as configView from "./views/config.js";
 
 import { REPO_ROOT, repoPath } from "./repo-root.js";
 
@@ -2065,6 +2066,21 @@ export function formatCoreConfig() {
   return `${head}\n\n${racikan}\n\n${blocks.join("\n\n")}\n\n${tail}`;
 }
 
+// Default /config (Batch E 🅴): dikelompokkan per FUNGSI (praktis harian) + marker
+// ASAL ⚙️/🧩 per baris. Render delegated to views/config.js; data (rowMap/identity)
+// unchanged. SEMUA 166 key kebawa (FUNCTION_GROUPS parity + safety-net orphan).
+function formatFunctionConfig() {
+  let racikanName = "—";
+  try { racikanName = getActiveSetupStatus().name || "—"; } catch { /* fail-open */ }
+  return render(configView.buildView({
+    mode: "function",
+    rowMap: buildConfigRowMap(),
+    identity: formatIdentityLines(),
+    racikanName,
+    screeningSource: config.screening.source,
+  }), "telegram");
+}
+
 function parseConfigValue(raw) {
   const value = String(raw ?? "").trim();
   if (!value.length) return "";
@@ -3623,8 +3639,12 @@ async function telegramHandler(msg) {
     return;
   }
 
-  if (text === "/config" || text === "/config core") {
-    await sendMessage(text === "/config core" ? formatCoreConfig() : formatFullConfig()).catch(() => {});
+  if (text === "/config core") {
+    await sendMessage(formatCoreConfig()).catch(() => {});
+    return;
+  }
+  if (text === "/config") {
+    await sendMessage(formatFunctionConfig()).catch(() => {});
     return;
   }
 

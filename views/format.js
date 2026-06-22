@@ -128,8 +128,8 @@ export const ICON = {
   pnl: "💰", value: "💵", yield: "📊", time: "⏱", range: "📐", rule: "🎯", held: "🔒",
   inRange: "🟢", oor: "🔴", best: "🏆", worst: "💀", warn: "⚠️", deploy: "🚀",
   manage: "🔄", closed: "✅", stay: "✋", entry: "🪙", fee: "💧",
-  swap: "🔄", briefing: "📊", config: "⚙️", bolt: "⚡", perf: "📈", brain: "🧠",
-  arrow: "→",
+  swap: "🔄", briefing: "📊", config: "⚙️", tools: "🛠", bolt: "⚡", perf: "📈", brain: "🧠",
+  arrow: "→", dev: "⚙️", zen: "🧩",
   // 1 konsep = 1 ikon (anti-tabrakan): dompet/saldo · daftar-posisi · ringkasan-status.
   wallet: "👛", position: "💼", status: "📋",
 };

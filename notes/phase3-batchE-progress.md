@@ -7,7 +7,7 @@ guide/help di `guide.js`/views. index.js = 1-baris call per pesan + registrasi `
 - [x] 0  recon EXACT: /config(+keys+origin) · guide · help · hive · pause/resume · queue · error — field+baseline ✅
 - [x] 1  /config (default) → tree function-grouped + marker origin (🧩/⚙️) ✅
 - [x] 2  /config origin → command BARU (aditif), grouped per-asal ✅
-- [ ] 3  guide + help → tree (guide.js, aman)
+- [x] 3  guide + help → tree (guide.js, aman) ✅
 - [ ] 4  hive + pause/resume + queue + error → tree (ekstrak inline index.js, minimal)
 
 ---
@@ -116,6 +116,18 @@ jadi nol detail hilang secara agregat. Inline `ORIGIN_NOTES` TETAP dibawa per-ba
   `/help` (+baris /config origin & revisi /config), `BOT_COMMANDS` config desc (telegram.js). `/config origin`
   = subcommand (Telegram setMyCommands tak bisa spasi) → registrasi = handler + desc, bukan entri terpisah.
 - node --check index.js/config.js/telegram.js OK.
+
+## FASE 3 — hasil ✅
+- **guide.js** (file aman): +import `{SEP,tree}` dari views/format.js. `guideToc()` → TOC tree-style
+  (`tree()` list ├/└ + SEP framing pengganti baris kosong). Divider hasil-cari/all `──────────`(10) →
+  `SEP`(16×━) di 2 occurrence (guideSearch). Isi doc (plainify markdown) + hint + header 📘 UTUH. Render
+  uji: TOC 22 seksi tampil, hint verbatim, search OK. Edit otomatis kena Telegram + CLI (renderGuide).
+- **/help** → `views/system.js` BARU `renderHelp()` (tree-style: header `🤖 Meridian · Commands` + 4 seksi
+  header+tree). SEMUA 27 baris command verbatim (incl /config origin FASE 2); cuma judul seksi → Title-Case.
+  `index.js`: hapus `formatHelpText()` (39 baris) → 1-baris call `systemView.renderHelp()`. node --check OK.
+- Catatan arsitektur: views/system.js = modul direct-call (pola sama guide.js renderGuide), TIDAK lewat
+  render.js dispatcher (itu utk view-model bertipe; pesan sistem = string sederhana). `<n>`/`<key>` literal
+  aman di sendMessage plain (no parse_mode), sama seperti versi lama.
 
 ## Catatan/limit-recovery
 (kosong)

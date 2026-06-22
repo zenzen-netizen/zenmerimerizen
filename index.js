@@ -57,6 +57,7 @@ import * as statusView from "./views/status.js";
 import * as walletView from "./views/wallet.js";
 import * as poolView from "./views/pool.js";
 import * as configView from "./views/config.js";
+import * as systemView from "./views/system.js";
 
 import { REPO_ROOT, repoPath } from "./repo-root.js";
 
@@ -3179,46 +3180,7 @@ async function applySettingsMenuCallback(msg) {
   await showSettingsMenu({ messageId: msg.messageId, page });
 }
 
-function formatHelpText() {
-  return [
-    "🤖 Meridian — Commands",
-    "",
-    "📊 LAPORAN & STATUS",
-    "/status — wallet + positions snapshot",
-    "/wallet — wallet, SOL bebas (cair) + real deploy/slot + rent tertahan + SOL tracker (1d/7d/30d)",
-    "/wallet trackstart <YYYY-MM-DD|off> — anchor tracker SOL ke tanggal",
-    "/positions — list open positions (+ rent tertahan)",
-    "/pool <n> — detail 1 posisi (+ range-efficiency + rent)",
-    "/briefing — morning briefing (auto-pinned)",
-    "/report — racikan aktif · /report all = lifetime · /report setups · /report <racikan>",
-    "/report [week|month|day] — digest periodik",
-    "",
-    "🛠️ POSISI & DEPLOY",
-    "/close <n> — close one position by index",
-    "/closeall — close all open positions",
-    "/set <n> <note> — set note/instruction on position",
-    "/screen — refresh deterministic candidate list",
-    "/candidates — show latest cached candidates",
-    "/deploy <n> — deploy candidate by cached index",
-    "",
-    "⚙️ KONFIGURASI",
-    "/config — config per-fungsi (praktis, + marker asal ⚙️/🧩)",
-    "/config origin — config per-asal (⚙️ origin dev vs 🧩 add by zen)",
-    "/config core — ringkasan key inti saja",
-    "/settings — button menu for common config",
-    "/setcfg <key> <value> — update persisted config",
-    "/preset [list|save|use|show <nama>] — simpan/ganti profil config",
-    "/guide [no|katakunci|all] — panduan setting",
-    "",
-    "🔧 SISTEM",
-    "/hive — HiveMind sync status",
-    "/hive pull — manual HiveMind pull now",
-    "/pause — stop cron cycles",
-    "/resume — start cron cycles again",
-    "/stop — shut down agent",
-    "/help — show this list",
-  ].join("\n");
-}
+// /help → views/system.js renderHelp() (Batch E 🅴, tree-style). 1-baris call di handler.
 
 // ─── Config presets (/preset) ───────────────────────────────────
 function presetUsageText() {
@@ -3516,7 +3478,7 @@ async function telegramHandler(msg) {
   }
 
   if (text === "/help") {
-    await sendMessage(formatHelpText()).catch(() => {});
+    await sendMessage(systemView.renderHelp()).catch(() => {});
     return;
   }
 

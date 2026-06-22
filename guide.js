@@ -7,6 +7,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { SEP, tree } from "./views/format.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GUIDE_PATH = path.join(__dirname, "SETTINGS-GUIDE.md");
@@ -81,14 +82,12 @@ function guideToc() {
   const blocks = parseBlocks();
   const title = blocks[0]?.title || "Panduan Setting";
   const sections = getSections();
-  const list = sections
-    .map((s) => `${String(s.num).padStart(2, " ")}. ${s.short}`)
-    .join("\n");
+  const list = tree(sections.map((s) => `${String(s.num).padStart(2, " ")}. ${s.short}`));
   return [
     `📘 ${title}`,
-    "",
+    SEP,
     list,
-    "",
+    SEP,
     "Ketik /guide <no> untuk buka satu bagian (mis. /guide 5)",
     "Ketik /guide <katakunci> untuk cari (mis. /guide claim)",
     "Ketik /guide all untuk tampilkan semua",
@@ -138,7 +137,7 @@ function guideSearch(query) {
   // 1) Topic-level: a GRUP title contains the keyword → return whole group(s).
   const titleHits = sections.filter((s) => s.title.toLowerCase().includes(kw));
   if (titleHits.length) {
-    return titleHits.map((s) => plainify(s.raw)).join("\n\n──────────\n\n");
+    return titleHits.map((s) => plainify(s.raw)).join(`\n\n${SEP}\n\n`);
   }
 
   // 2) Key-level: `### key` heading contains the keyword.
@@ -155,7 +154,7 @@ function guideSearch(query) {
     header +
     keyHits
       .map((b) => `📘 ${b.group}\n\n${plainify(b.lines.join("\n"))}`)
-      .join("\n\n──────────\n\n")
+      .join(`\n\n${SEP}\n\n`)
   );
 }
 

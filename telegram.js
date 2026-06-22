@@ -2,6 +2,7 @@ import fs from "fs";
 import { log } from "./logger.js";
 import { repoPath } from "./repo-root.js";
 import { estimateGasSol } from "./reports.js";
+import { renderDeploy } from "./views/notifs.js";
 
 const USER_CONFIG_PATH = repoPath("user-config.json");
 
@@ -572,28 +573,11 @@ function activeRacikan() {
 // Shared notification divider — keeps all four notifs visually consistent.
 const NOTIF_DIV = "────────────────";
 
-export async function notifyDeploy({ pair, amountSol, position, tx, priceRange, rangeCoverage, binStep, baseFee }) {
+export async function notifyDeploy(data) {
   if (hasActiveLiveMessage()) return;
-  const safePair = escapeHtml(pair || "?");
-  const racikan = activeRacikan();
-  const lines = [
-    `✅ <b>Deployed</b> ${safePair}`,
-    NOTIF_DIV,
-    `💵 Amount: ${amountSol} SOL${racikan ? `  ·  🗂️ ${escapeHtml(racikan)}` : ""}`,
-  ];
-  if (priceRange) {
-    const fmtP = (v) => (v < 0.0001 ? v.toExponential(3) : v.toFixed(6));
-    lines.push(`📐 Price range: ${fmtP(priceRange.min)} – ${fmtP(priceRange.max)}`);
-  }
-  if (rangeCoverage) {
-    lines.push(`↕️ Cover: ${fmtPct(rangeCoverage.downside_pct)} ↓ | ${fmtPct(rangeCoverage.upside_pct)} ↑ | ${fmtPct(rangeCoverage.width_pct)} total`);
-  }
-  if (binStep || baseFee) {
-    lines.push(`🧱 Bin step ${binStep ?? "?"}  ·  base fee ${baseFee != null ? baseFee + "%" : "?"}`);
-  }
-  lines.push(`🆔 Position: <code>${position?.slice(0, 8)}...</code>`);
-  lines.push(`🔗 Tx: <code>${tx?.slice(0, 16)}...</code>`);
-  await sendHTML(lines.join("\n"));
+  // Render dipindah ke views/notifs.js (renderDeploy). racikan di-resolve di sini
+  // (config-read tetap di telegram.js); guard/trigger TIDAK diubah.
+  await sendHTML(renderDeploy({ ...data, racikan: activeRacikan() }));
 }
 
 export async function notifyClose({ pair, pnlUsd, pnlPct, peakPnlPct, reason, lesson, feesUsd }) {

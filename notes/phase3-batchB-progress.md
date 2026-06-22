@@ -5,7 +5,7 @@ Display-only, restart owner-only. Render notif → `views/notifs.js`; `telegram.
 
 - [x] 0  tuntasin 2dp fmtCur ($ branch) + literal Saldo wallet.js + re-verify msg ter-migrasi ✅
 - [x] 1  recon EXACT notifyDeploy/OOR/Swap/Close (telegram.js) — semua field + baseline ✅
-- [ ] 2  notifyDeploy → views/notifs.js renderDeploy (tree, SEMUA field)
+- [x] 2  notifyDeploy → views/notifs.js renderDeploy (tree, SEMUA field) ✅
 - [ ] 3  notifyOutOfRange + notifySwap → renderOOR + renderSwap (tree)
 - [ ] 4  notifyClose → renderClose (tree + fmtBoth $+◎, SEMUA field)
 
@@ -51,6 +51,15 @@ selaras semua view ter-migrasi) + ikon per brief. Inline HTML field (`<code>`/`<
 7. IF reason: `📋 <b>Reason:</b> <esc(reason[0:200])>`. 8. IF lesson: `📚 <b>Lesson:</b> <i><esc(lesson[0:300])></i>`.
 - **Sumber `$`**: semua dari `pnlUsd`/`feesUsd` (mode-correct 1-unit) — TAK ada nilai ◎/sol_price → `fmtBoth`
   butuh 2 nilai ⇒ blok di FASE 4 (lihat Temuan kritis). Gas SUDAH ◎/SOL (tanpa $, tak ada harga).
+
+## FASE 2 — hasil
+- `views/notifs.js` BARU: `renderDeploy(d)` pakai `header(ICON.deploy,...)`+`SEP`+`tree`; `pct2` lokal
+  (Cover tanpa-+, mirror telegram.js fmtPct) + `fmtPrice` lokal. `telegram.js` `notifyDeploy` → wrapper
+  tipis (guard → `renderDeploy({...data, racikan: activeRacikan()})` → sendHTML).
+- Cross-check vs baseline: multiset token IDENTIK kecuali `<b>`/`</b>` (bold header sengaja dilepas via
+  header primitive). SEMUA field/nilai ADA: pair, amount SOL, racikan, priceRange, Cover ↓↑|, binStep/
+  baseFee, Position[0:8], Tx[0:16]. Kondisional-OFF OK (esc &→&amp;, baris opsional hilang, └ pindah).
+- Intended diff: ✅→🚀, +" — ", DIV `─`16→SEP `━`16, tree ├/└, `  ·  `→` · `. node --check OK.
 
 ## Catatan/limit-recovery
 (kosong)

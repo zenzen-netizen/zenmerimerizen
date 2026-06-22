@@ -6,7 +6,7 @@ DICAMPUR + tiap key dikasih marker ⚙️/🧩**. Yang dibuang HANYA split L1 `�
 Bot MAIN (`pm2 id 0`, branch experimental). `/config origin` + tombol /settings "Config penuh" TAK diubah.
 
 - [x] 0  recon merge-map: pasangan (origin,subgroup) → grup fungsi + sub-cluster/anak per grup ✅
-- [ ] 1  renderFunction v2: grup → sub-cluster → key dev/zen dicampur + marker; parity 166
+- [x] 1  renderFunction v2: grup → sub-cluster → key dev/zen dicampur + marker; parity 166 ✅
 
 ---
 
@@ -56,5 +56,24 @@ Bot MAIN (`pm2 id 0`, branch experimental). `/config origin` + tombol /settings 
 6. Detail dipertahankan: 166 key · L3 sub-cluster · 14 anak ↳ · ORIGIN_NOTES inline · identity ·
    safety-net orphan. Satu-satunya yang dibuang = pemisah L1 DEV/ZEN.
 
+## FASE 1 — hasil ✅
+- **config-origin.js** FUNCTION_GROUPS: `dryRun` pindah ke Sizing & Posisi (depan, sebelum maxPositions
+  → Risiko utuh {dryRun,maxPositions,maxDeployAmount}); `dryRun` dibuang dari Sistem/Infra; rename grup
+  "Exit & Trailing"→"Exit & Management"; komentar di-update (sub-cluster dipertahankan + campur). `solMode`
+  tetap di Sistem (Display).
+- **views/config.js**: `renderSubclusterRows` +param `marked` (true → sisip `MARK[KEY_ORIGIN[k]]` ⚙️/🧩 di
+  depan label, juga di anak ↳; false → tanpa marker). `renderFunction` v2: iterasi 12 grup fungsi → tiap
+  grup `renderSubclusterRows(g.keys,rowMap,true)` (sub-cluster L3 + anak ↳ L4 muncul, dev+zen tercampur,
+  marker per-key) + header `▸ <emoji> <title>` + GMGN hint. Orphan-net + identity + legenda (+↳) tetap.
+  `treeRows` flat lama DIHAPUS (tak dipakai lagi). renderOrigin TAK diubah (marked default false).
+- **Parity node-check**: 166 unik · 0 hilang · 0 dobel · 0 unknown · marker 94⚙️+72🧩 (semua 166 baris
+  ber-marker, incl 14 anak ↳ `↳ ⚙️ trailingTriggerPct`) · 0 key ke _misc. Render uji: 12 grup ▸, sub-cluster
+  ┈ + anak ↳ muncul, dev/zen tercampur dalam cluster (cek Sizing: dryRun/maxPositions⚙️ + sizingMode/
+  rentPerPositionSol🧩), ORIGIN_NOTES inline (minSolToOpen) kebawa, GMGN hint aktif/nonaktif, Sistem bersih
+  (Display=solMode, nol Risiko nyasar). 6222 char → ~2 chunk auto-split.
+- **`/config origin` + tombol /settings "Config penuh" TAK berubah**: render origin = 166 baris, **0 marker,
+  masih Zen-first + L1 DEV/ZEN split** (dispatch test). `/config` = L1 split dibuang. node --check index/
+  config-origin/config OK. NOL ubah-nilai-logic, NOL engine/money/tools.
+
 ## Catatan/limit-recovery
-(kosong)
+(kosong — FASE 0–1 tuntas tanpa limit)

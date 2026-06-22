@@ -416,11 +416,15 @@ export const CORE_GROUPS = [
   },
 ];
 
-// ── FUNCTION grouping (default /config, Batch E FASE 1) ───────────────────────
+// ── FUNCTION grouping (default /config, Batch E) ──────────────────────────────
 // Second layout over the SAME 166 rowMap keys, grouped by daily-practical FUNCTION
-// (twin dev+zen keys merged) instead of by origin. RENDER-ONLY: owns WHERE each
-// row lands in the function view; values stay in buildConfigRowMap (index.js).
-// Each key's ASAL (dev/zen) is shown as an inline marker (⚙️/🧩) via KEY_ORIGIN.
+// instead of by origin. RENDER-ONLY: owns WHICH function-group each row lands in;
+// values stay in buildConfigRowMap (index.js). The view does NOT render these key
+// lists flat — it pipes each group's keys through renderSubclusterRows so the L3
+// sub-clusters + L4 ↳ children survive (the SAME taxonomy as /config origin), and
+// dev+zen twins MIX inside each sub-cluster (KEY_SUBCLUSTER is already cross-origin).
+// Each key's ASAL (dev/zen) shows as an inline marker (⚙️/🧩) via KEY_ORIGIN. So
+// only the top-level L1 ⚙️DEV/🧩ZEN split is dropped vs the origin view.
 // Parity invariant: the union of every group's keys == the 166 rowMap keys (a
 // node check guards this; any unplaced key still falls into the view's "❓"
 // safety bucket). Identity (Profil/Racikan) is rendered by the view header, not
@@ -430,7 +434,7 @@ export const FUNCTION_GROUPS = [
   {
     emoji: "📊", title: "Sizing & Posisi",
     keys: [
-      "maxPositions", "maxDeployAmount", "deployAmountSol", "positionSizePct", "minSolToOpen",
+      "dryRun", "maxPositions", "maxDeployAmount", "deployAmountSol", "positionSizePct", "minSolToOpen",
       "gasReserve", "sizingMode", "rentPerPositionSol",
       "gasReserveAutoTune", "gasReserveBufferDays", "gasReserveFloorSol",
     ],
@@ -463,7 +467,7 @@ export const FUNCTION_GROUPS = [
     ],
   },
   {
-    emoji: "🚪", title: "Exit & Trailing",
+    emoji: "🚪", title: "Exit & Management",
     keys: [
       "stopLossPct", "takeProfitPct", "trailingTakeProfit", "trailingTriggerPct", "trailingDropPct",
       "outOfRangeBinsToClose", "outOfRangeWaitMinutes", "oorCooldownTriggerCount", "oorCooldownHours",
@@ -521,7 +525,7 @@ export const FUNCTION_GROUPS = [
     keys: [
       "lpAgentRelayEnabled", "agentId", "publicApiKey", "pnlSource", "pnlRpcUrl",
       "pnlPollIntervalSec", "pnlDepositCacheTtlSec", "pnlSanityMaxDiffPct", "gmgnFeeSource",
-      "hiveMindStatus", "hiveMindPullMode", "hiveMindUrl", "dryRun", "solMode",
+      "hiveMindStatus", "hiveMindPullMode", "hiveMindUrl", "solMode",
     ],
   },
 ];

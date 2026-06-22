@@ -51,42 +51,34 @@ function renderFunction(vm) {
   // Identitas (Profil + Racikan, dengan status edit ✎) — verbatim dari index.js.
   if (vm.identity) out.push(vm.identity, SEP);
 
+  // Tiap grup fungsi → renderSubclusterRows (marked): sub-cluster L3 + anak ↳ L4
+  // dipertahankan, key dev+zen TERCAMPUR dalam sub-cluster (KEY_SUBCLUSTER lintas-
+  // asal), tiap baris diberi marker ⚙️/🧩. Cuma split L1 DEV/ZEN yang hilang.
   for (const g of FUNCTION_GROUPS) {
-    const rows = [];
-    for (const k of g.keys) {
-      if (!rowMap[k]) continue;
-      placed.add(k);
-      const [label, value] = rowMap[k];
-      rows.push(`${MARK[KEY_ORIGIN[k]] || "·"} ${label}: ${value}${note(k)}`);
-    }
-    if (!rows.length) continue;
-    let head = `${g.emoji} ${g.title}`;
+    const { text, placed: pl } = renderSubclusterRows(g.keys, rowMap, true);
+    if (!pl.length) continue;
+    pl.forEach((k) => placed.add(k));
+    let head = `▸ ${g.emoji} ${g.title}`;
     // Hint hidup blok GMGN (mempertahankan detail aktif/nonaktif dari subgroupDesc).
     if (g.gmgnDynamic && vm.screeningSource != null) {
       head += String(vm.screeningSource).toLowerCase() === "gmgn"
         ? " · 🟢 aktif (source=gmgn)"
         : ` · ⚪ nonaktif (source=${vm.screeningSource})`;
     }
-    out.push(head, treeRows(rows));
+    out.push(head, text);
   }
 
   // Safety-net: rowMap key yang tak ter-grup mana pun tetap tampil (nol hilang).
   const orphans = Object.keys(rowMap).filter((k) => !placed.has(k));
   if (orphans.length) {
-    out.push("❓ Belum terpetakan (auto — cek config-origin.js)",
-      treeRows(orphans.map((k) => { const [l, v] = rowMap[k]; return `${MARK[KEY_ORIGIN[k]] || "·"} ${l}: ${v}${note(k)}`; })));
+    const rows = orphans.map((k) => { const [l, v] = rowMap[k]; return `    ${MARK[KEY_ORIGIN[k]] || "·"} ${l}: ${v}${note(k)}`; });
+    out.push("▸ ❓ Belum terpetakan (auto — cek config-origin.js)", rows.join("\n"));
   }
 
   out.push(SEP,
-    "Legenda: 🧩 custom by Zen · ⚙️ origin dev · 🟢 on · ⚪ off",
-    `${ICON.arrow} /config origin (per-asal) · /config core (ringkas) · /guide (detail)`);
+    "Legenda: 🧩 custom by Zen · ⚙️ origin dev · 🟢 on · ⚪ off · ↳ anak setelan",
+    `${ICON.arrow} /config origin (dipisah per-asal) · /config core (ringkas) · /guide (detail)`);
   return out.join("\n");
-}
-
-/** Susun baris jadi tree ├/└ (terakhir └). Array kosong → "". */
-function treeRows(rows) {
-  const xs = (rows || []).filter(Boolean);
-  return xs.map((r, i) => `${i === xs.length - 1 ? "└" : "├"} ${r}`).join("\n");
 }
 
 // ── mode "origin" — /config origin (4-lapis, tree-style, Zen di atas) ─────────
@@ -128,9 +120,10 @@ function renderOrigin(vm) {
 }
 
 // Bucket key per sub-cluster (first-seen), header L3 bila >1 cluster, indent L4 ↳.
-// MIRROR renderSubclusterRows (index.js) — satu sumber layout, beda cuma gaya
-// pemanggilan (di sini render-only, value dari rowMap yang sama).
-function renderSubclusterRows(keys, rowMap) {
+// MIRROR renderSubclusterRows (index.js) — satu sumber layout. `marked=true`
+// (view fungsi) menyisipkan marker asal ⚙️/🧩 di depan label tiap key; origin view
+// (marked=false) tidak (asal = sumbu pengelompokannya). Value verbatim dari rowMap.
+function renderSubclusterRows(keys, rowMap, marked = false) {
   const dash = "┈┈┈┈┈┈┈┈┈┈";
   const order = [];
   const members = {};
@@ -153,7 +146,8 @@ function renderSubclusterRows(keys, rowMap) {
       placed.push(k);
       const [label, value] = rowMap[k];
       const indent = L4_CHILDREN.has(k) ? "      ↳ " : "    ";
-      out.push(`${indent}${label}: ${value}${note(k)}`);
+      const mk = marked ? `${MARK[KEY_ORIGIN[k]] || "·"} ` : "";
+      out.push(`${indent}${mk}${label}: ${value}${note(k)}`);
     }
   }
   return { text: out.join("\n"), placed };

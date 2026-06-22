@@ -14,6 +14,7 @@
 
 import { config } from "./config.js";
 import { getHourlyProfile, classifySession, getNarrativeProfile, classifyNarrative, sessionLabel } from "./lessons.js";
+import { SEP, tree } from "./views/format.js"; // bahasa-desain tree-style (Batch C) — primitif murni, no cycle
 
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const fin = (arr) => arr.filter((n) => Number.isFinite(n));
@@ -203,28 +204,24 @@ export function formatMovement(st) {
   const m = st?.movement;
   const pm = st?.price_movement;
   if (!m && !pm) return null;
-  const lines = [];
+  const out = [];
   if (m) {
-    lines.push(
-      `<b>📈 PnL Movement (${m.samples} tracked):</b>`,
-      `  avg peak ${pct(m.avg_peak_pct)} → avg exit ${pct(m.avg_exit_pct)} (give-back ${pct(m.giveback_pct)})`,
-    );
-    if (m.avg_trough_pct != null) lines.push(`  avg trough (worst dip) ${pct(m.avg_trough_pct)}`);
-    if (m.left_on_table > 0) lines.push(`  ${m.left_on_table} trade(s) gave back ≥5pp from peak`);
+    const b = [`avg peak ${pct(m.avg_peak_pct)} → avg exit ${pct(m.avg_exit_pct)} (give-back ${pct(m.giveback_pct)})`];
+    if (m.avg_trough_pct != null) b.push(`avg trough (worst dip) ${pct(m.avg_trough_pct)}`);
+    if (m.left_on_table > 0) b.push(`${m.left_on_table} trade(s) gave back ≥5pp from peak`);
+    out.push(`<b>📈 PnL Movement (${m.samples} tracked):</b>`, tree(b));
   }
   if (pm) {
-    lines.push(
-      `<b>💹 Price Movement vs entry (${pm.samples} tracked):</b>`,
-      `  avg peak ${pct(pm.avg_peak_pct)} (best ${pct(pm.best_peak_pct)}) | avg drawdown ${pct(pm.avg_trough_pct)} (worst ${pct(pm.worst_trough_pct)})`,
-    );
+    const b = [`avg peak ${pct(pm.avg_peak_pct)} (best ${pct(pm.best_peak_pct)}) | avg drawdown ${pct(pm.avg_trough_pct)} (worst ${pct(pm.worst_trough_pct)})`];
     if (pm.win_avg_trough_pct != null) {
-      lines.push(`  winners dipped avg ${pct(pm.win_avg_trough_pct)} (deepest ${pct(pm.win_worst_trough_pct)}) before recovering — SL must survive this`);
+      b.push(`winners dipped avg ${pct(pm.win_avg_trough_pct)} (deepest ${pct(pm.win_worst_trough_pct)}) before recovering — SL must survive this`);
     }
     if (pm.loss_avg_trough_pct != null) {
-      lines.push(`  losers dipped avg ${pct(pm.loss_avg_trough_pct)}`);
+      b.push(`losers dipped avg ${pct(pm.loss_avg_trough_pct)}`);
     }
+    out.push(`<b>💹 Price Movement vs entry (${pm.samples} tracked):</b>`, tree(b));
   }
-  return lines.join("\n");
+  return out.join("\n");
 }
 
 // Buckets carry an N-fair "score" = shrunk per-trade expectancy ($): each
@@ -270,19 +267,19 @@ export function formatStatsBlock(st, label) {
   // ratio explode — show the solid $ figure alone in that case).
   const ddPct = (st.max_drawdown_pct != null && st.max_drawdown_pct > 0 && st.max_drawdown_pct <= 100)
     ? ` (${pct(-st.max_drawdown_pct)} dari puncak)` : "";
-  const lines = [
-    `<b>📊 ${esc(label)} — ${st.count} closed</b>`,
+  const header = `<b>📊 ${esc(label)} — ${st.count} closed</b>`;
+  const body = [
     `💰 PnL: ${money(st.net_pnl_usd)}${st.roi_pct != null ? ` (${pct(st.roi_pct)} ROI)` : ""} | 💎 fees $${st.fees_usd.toFixed(2)}`,
     `🎯 Win ${st.win_rate_pct}% (${st.wins}W/${st.losses}L) | profit factor ${pf(st.profit_factor)} | expectancy ${money(st.expectancy_usd)}${expPct}/trade`,
     `⚖️ Avg win ${pct(st.avg_win_pct)} vs avg loss ${pct(st.avg_loss_pct)}${st.payoff_ratio != null ? ` (payoff ${st.payoff_ratio.toFixed(2)}×)` : ""}`,
     `📉 Max drawdown -$${(st.max_drawdown_usd ?? 0).toFixed(2)}${ddPct} | worst streak ${st.max_consecutive_losses}L | avg hold ${fmtHold(st.avg_hold_min)} | in-range ${st.avg_range_efficiency ?? "?"}%`,
   ];
-  if (st.biggest_win) lines.push(`🏆 Best: ${esc(st.biggest_win.name)} ${pct(st.biggest_win.pnl_pct)} | 💀 Worst: ${st.biggest_loss ? `${esc(st.biggest_loss.name)} ${pct(st.biggest_loss.pnl_pct)}` : "—"}`);
+  if (st.biggest_win) body.push(`🏆 Best: ${esc(st.biggest_win.name)} ${pct(st.biggest_win.pnl_pct)} | 💀 Worst: ${st.biggest_loss ? `${esc(st.biggest_loss.name)} ${pct(st.biggest_loss.pnl_pct)}` : "—"}`);
   // Tail dominance: the single worst loser in $ and what net would be without it.
   if (st.worst_trade_usd != null && st.worst_trade_usd < 0) {
-    lines.push(`🩸 Tail: trade terburuk ${esc(st.worst_trade_name)} ${money(st.worst_trade_usd)} → tanpa itu PnL ${money(st.net_excl_worst_usd)}`);
+    body.push(`🩸 Tail: trade terburuk ${esc(st.worst_trade_name)} ${money(st.worst_trade_usd)} → tanpa itu PnL ${money(st.net_excl_worst_usd)}`);
   }
-  return lines.join("\n");
+  return [header, tree(body)].join("\n");
 }
 
 function fmtHold(m) {
@@ -307,7 +304,7 @@ export function formatQuantBlock(st, { costDragPct = null, costDragHealthyMax = 
   const n = st.count;
   const noisy = n < noisyBelow;
   const header = `<b>🧮 Quant Edge${noisy ? ` — n=${n}` : ""}:</b>`;
-  const lines = [header];
+  const body = [];
 
   // RR + break-even WR. No losses yet → RR effectively ∞, break-even 0%.
   const aw = st.avg_win_pct, al = st.avg_loss_pct;
@@ -323,7 +320,7 @@ export function formatQuantBlock(st, { costDragPct = null, costDragHealthyMax = 
     rrStr = "∞"; // no losing trades in window
     beStr = `break-even WR 0% vs aktual ${st.win_rate_pct}% (belum ada trade rugi)`;
   }
-  lines.push(`  RR (avg win/loss) ${rrStr}${beStr ? ` | ${beStr}` : ""}`);
+  body.push(`RR (avg win/loss) ${rrStr}${beStr ? ` | ${beStr}` : ""}`);
 
   // EV per trade in R units. WR·RR − (1−WR), with WR as a fraction.
   if (aw != null && al != null && al !== 0) {
@@ -331,7 +328,7 @@ export function formatQuantBlock(st, { costDragPct = null, costDragHealthyMax = 
     const rr = aw / Math.abs(al);
     const evR = wr * rr - (1 - wr);
     const evMark = evR > 0 ? "✅ positif" : evR < 0 ? "🔴 negatif" : "⚪ impas";
-    lines.push(`  EV/trade ${evR >= 0 ? "+" : ""}${evR.toFixed(2)}R (${evMark})`);
+    body.push(`EV/trade ${evR >= 0 ? "+" : ""}${evR.toFixed(2)}R (${evMark})`);
   }
 
   // Recovery needed from the max drawdown (gain required on current equity to
@@ -339,14 +336,14 @@ export function formatQuantBlock(st, { costDragPct = null, costDragHealthyMax = 
   if (st.max_drawdown_pct != null && st.max_drawdown_pct > 0 && st.max_drawdown_pct < 100) {
     const dd = st.max_drawdown_pct / 100;
     const recov = (1 / (1 - dd) - 1) * 100;
-    lines.push(`  Max DD -$${(st.max_drawdown_usd ?? 0).toFixed(2)} (−${st.max_drawdown_pct.toFixed(0)}% dari puncak) → butuh +${recov.toFixed(0)}% buat pulih`);
+    body.push(`Max DD -$${(st.max_drawdown_usd ?? 0).toFixed(2)} (−${st.max_drawdown_pct.toFixed(0)}% dari puncak) → butuh +${recov.toFixed(0)}% buat pulih`);
   }
 
   // Fee density — income side (how hard capital works as fees), the counterpart
   // to cost-drag below. v2.1 lens: did narrower bins pack fees denser?
   if (Number.isFinite(st.fee_pct_capital)) {
     const aprStr = Number.isFinite(st.fee_apr_pct) ? ` · ~${st.fee_apr_pct}%/th in-range` : "";
-    lines.push(`  💧 Fee-density ${st.fee_pct_capital}% modal-deploy${aprStr} (total fee $${(st.fees_usd ?? 0).toFixed(2)})`);
+    body.push(`💧 Fee-density ${st.fee_pct_capital}% modal-deploy${aprStr} (total fee $${(st.fees_usd ?? 0).toFixed(2)})`);
   }
 
   // Cost drag — only when the caller supplied it (it owns cost/wallet fetch).
@@ -356,11 +353,11 @@ export function formatQuantBlock(st, { costDragPct = null, costDragHealthyMax = 
   if (Number.isFinite(costDragPct)) {
     const ok = costDragPct < costDragHealthyMax;
     const verdict = ok ? "✅ sehat" : "⚠️ berat";
-    lines.push(`  Cost-drag ~${costDragPct.toFixed(0)}%/th (biaya jalan ÷ modal wallet) — ${verdict} (ambang <${costDragHealthyMax}%)`);
+    body.push(`Cost-drag ~${costDragPct.toFixed(0)}%/th (biaya jalan ÷ modal wallet) — ${verdict} (ambang <${costDragHealthyMax}%)`);
   }
 
-  if (noisy) lines.push(`  <i>⚠️ n=${n} (<${noisyBelow}) — noisy ±10%, baca arah saja, jangan overfit angka.</i>`);
-  return lines.join("\n");
+  if (noisy) body.push(`<i>⚠️ n=${n} (<${noisyBelow}) — noisy ±10%, baca arah saja, jangan overfit angka.</i>`);
+  return [header, tree(body)].join("\n");
 }
 
 /**
@@ -383,9 +380,8 @@ export function formatBreakdown(st, opts = {}) {
     const shown = rows.filter((r) => r.count >= minCount).slice(0, maxRows);
     if (shown.length === 0) return;
     out.push(`<b>${title}</b>`);
-    shown.forEach((r, i) => {
-      out.push(`  ${i + 1}. ${esc(keyFmt(r.key))}: ${money(r.net_usd)} net, ${r.win_rate_pct}% win, avg/trade ${money(r.avg_net_usd)} (${r.count})`);
-    });
+    // tree branch conveys rank-order (best-first); row data unchanged.
+    out.push(tree(shown.map((r) => `${esc(keyFmt(r.key))}: ${money(r.net_usd)} net, ${r.win_rate_pct}% win, avg/trade ${money(r.avg_net_usd)} (${r.count})`)));
   };
   block("📦 By strategy:", st.by_strategy);
   if (st.by_setup && st.by_setup.length) block("🗂️ By racikan:", st.by_setup);
@@ -410,9 +406,11 @@ export function formatTrend(allPerf, n) {
   const arrow = (a, b) => (a == null || b == null ? "" : a > b ? " 📈" : a < b ? " 📉" : " ➡️");
   return [
     `<b>📈 Trend — last ${n} vs prior ${n}:</b>`,
-    `  PnL: ${money(prior.net_pnl_usd)} → ${money(recent.net_pnl_usd)}${arrow(recent.net_pnl_usd, prior.net_pnl_usd)}`,
-    `  Win rate: ${prior.win_rate_pct}% → ${recent.win_rate_pct}%${arrow(recent.win_rate_pct, prior.win_rate_pct)}`,
-    `  Profit factor: ${pf(prior.profit_factor)} → ${pf(recent.profit_factor)}${arrow(recent.profit_factor === Infinity ? 99 : recent.profit_factor, prior.profit_factor === Infinity ? 99 : prior.profit_factor)}`,
+    tree([
+      `PnL: ${money(prior.net_pnl_usd)} → ${money(recent.net_pnl_usd)}${arrow(recent.net_pnl_usd, prior.net_pnl_usd)}`,
+      `Win rate: ${prior.win_rate_pct}% → ${recent.win_rate_pct}%${arrow(recent.win_rate_pct, prior.win_rate_pct)}`,
+      `Profit factor: ${pf(prior.profit_factor)} → ${pf(recent.profit_factor)}${arrow(recent.profit_factor === Infinity ? 99 : recent.profit_factor, prior.profit_factor === Infinity ? 99 : prior.profit_factor)}`,
+    ]),
   ].join("\n");
 }
 
@@ -543,7 +541,7 @@ export function buildRecommendations(allPerf, st = null, opts = {}) {
   }
 
   if (recs.length === 0) return null;
-  return ["💡 <b>Recommendations:</b>", ...recs.slice(0, 7).map((r) => `  • ${r}`)].join("\n");
+  return ["💡 <b>Recommendations:</b>", tree(recs.slice(0, 7))].join("\n");
 }
 
 /**
@@ -577,14 +575,14 @@ export function buildTradeReport(perf, { title, subtitle = null, statsLabel = "S
   const idLine = identity ? `${identity}\n` : ""; // 🧬 Profil + 🗂️ Racikan, passed by caller (keeps this module config-free)
   if (records.length === 0) return `<b>${esc(title || "Trade Report")}</b>\n${subtitle ? `<i>${esc(subtitle)}</i>\n` : ""}${idLine}No closed positions in this window yet.`;
   const st = computeTradeStats(records);
-  const parts = [`<b>${esc(title)}</b>`, ...(subtitle ? [`<i>${esc(subtitle)}</i>`] : []), ...(identity ? [identity] : []), "────────────────", formatStatsBlock(st, statsLabel)];
+  const parts = [`<b>${esc(title)}</b>`, ...(subtitle ? [`<i>${esc(subtitle)}</i>`] : []), ...(identity ? [identity] : []), SEP, formatStatsBlock(st, statsLabel)];
   const verdict = buildVerdict(st); if (verdict) parts.push(verdict);
   const quantBlock = formatQuantBlock(st, quant || {}); if (quantBlock) parts.push("", quantBlock);
   if (includeTrend) { const t = formatTrend(records, trendN); if (t) parts.push("", t); }
   const mv = formatMovement(st); if (mv) parts.push("", mv);
   if (includeBreakdown) { const b = formatBreakdown(st); if (b) parts.push("", b); }
   const recs = buildRecommendations(records, st); if (recs) parts.push("", recs);
-  parts.push("────────────────");
+  parts.push(SEP);
   return parts.filter((l) => l != null).join("\n");
 }
 

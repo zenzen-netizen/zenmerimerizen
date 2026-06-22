@@ -6,10 +6,23 @@ restart owner-only. Workstream 🅴 — Report & Briefing (⑥⑦) → tree-styl
 
 ## Checklist (report/briefing)
 - [x] 0  recon EXACT /report (semua varian) + briefing harian/mingguan/bulanan + milestone — field + baseline
-- [ ] 1  /report → tree-style (SEMUA stat dipertahankan)
+- [x] 1  /report → tree-style (SEMUA stat dipertahankan)
 - [ ] 2  Daily briefing → tree-style
 - [ ] 3  Weekly/Monthly briefing → tree-style
 - [ ] 4  Milestone learning report → tree-style (render ekstrak dari index.js, 1-baris call)
+
+---
+
+## FASE 1 — /report → tree-style — SELESAI
+`reports.js`: import `{ SEP, tree }` dari `./views/format.js` (primitif murni, no cycle). Tiap sub-block jadi
+`<b>header</b>` + `tree(body)` (├/└), SEP (16×━ heavy) ganti `────` (16×─ light) di buildTradeReport (atas+bawah).
+Diubah (rakitan string SAJA, perhitungan NOL ubah): formatStatsBlock · formatQuantBlock · formatTrend ·
+formatMovement (2 sub-block, masing-masing tree) · formatBreakdown (per-blok header+tree; ordinal `N.` dibuang —
+urutan rank dibawa branch tree) · buildRecommendations (`• ` → tree) · buildTradeReport (SEP). buildVerdict tetap
+1-baris. **buildTradeReport DIPAKAI BERSAMA** → /report (semua varian), milestone, briefing periodik auto-ikut;
+formatStatsBlock/Quant/Movement/Breakdown/Recs yg dipanggil langsung briefing.js juga auto-tree (FASE 2 sisanya).
+**Cross-check token-multiset (HTML+tree/list-marker+SEP di-strip) IDENTIK**: report_default 437=437 · report_all
+549=549 · report_milestone 423=423 tok → nol stat hilang. `node --check reports.js` OK. Commit `feat(views): /report tree-style`.
 
 ---
 

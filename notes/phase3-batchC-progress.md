@@ -8,7 +8,7 @@ restart owner-only. Workstream 🅴 — Report & Briefing (⑥⑦) → tree-styl
 - [x] 0  recon EXACT /report (semua varian) + briefing harian/mingguan/bulanan + milestone — field + baseline
 - [x] 1  /report → tree-style (SEMUA stat dipertahankan)
 - [x] 2  Daily briefing → tree-style
-- [ ] 3  Weekly/Monthly briefing → tree-style
+- [x] 3  Weekly/Monthly briefing → tree-style
 - [ ] 4  Milestone learning report → tree-style (render ekstrak dari index.js, 1-baris call)
 
 ---
@@ -38,6 +38,16 @@ inline Activity · Performance (24h) · Lessons Learned (24h) (+config-change ma
 NEW berturut beda sendiri (LLM call/lessons akru real-time), (b) **STRUCTURAL diff (semua angka di-mask) baseline-vs-new
 IDENTIK** → semua label/field/kata utuh, cuma nilai live (LLM cost/token/runway/call-count) yg gerak. `node --check` OK.
 Commit `feat(views): daily briefing tree-style`.
+
+---
+
+## FASE 3 — Weekly/Monthly briefing → tree-style — SELESAI
+`briefing.js` generatePeriodicBriefing: report (buildTradeReport), formatStatsBlock, formatPnlTracker,
+buildTimeProfileSection SUDAH tree (FASE 1/2). FASE 3 nge-tree sisanya: inline `Activity (Nd)` → `section()`
+(2 branch 📥/📤; separator `|` lama dibuang — kosmetik) + `costLines` → `section(costHeader, costBody)` (role
+`  •`→branch). **Cross-check STRUCTURAL (angka di-mask, `|` diabaikan): week & month IDENTIK** — nol field/label
+hilang; diff cuma `|` (disengaja) + nilai live drift (realized 1D + activity count window). `node --check` OK.
+Commit `feat(views): weekly/monthly briefing tree-style`.
 
 ---
 

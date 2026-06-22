@@ -461,44 +461,45 @@ export async function generatePeriodicBriefing(period = "week") {
     quant: Number.isFinite(costDragPct) ? { costDragPct } : {},
   });
 
-  const costLines = [`<b>💵 Costs (${days}d)${paper ? " — 🧪 simulasi" : ""}:</b>`];
+  const costHeader = `<b>💵 Costs (${days}d)${paper ? " — 🧪 simulasi" : ""}:</b>`;
+  const costBody = [];
   if (llmStats.hasData) {
-    costLines.push(`🤖 LLM: $${llmStats.totalCost.toFixed(4)} (${llmStats.calls} calls)`);
+    costBody.push(`🤖 LLM: $${llmStats.totalCost.toFixed(4)} (${llmStats.calls} calls)`);
     for (const [role, s] of Object.entries(llmStats.byRole).sort((a, b) => b[1].cost - a[1].cost)) {
-      costLines.push(`  • ${role}: $${s.cost.toFixed(4)} (${s.calls} calls)`);
+      costBody.push(`${role}: $${s.cost.toFixed(4)} (${s.calls} calls)`); // "  •" → branch
     }
   } else if (paper) {
-    costLines.push(`🤖 LLM: $0.0000 (belum ada call tercatat lokal)`);
+    costBody.push(`🤖 LLM: $0.0000 (belum ada call tercatat lokal)`);
   } else if (llmWindow != null) {
-    costLines.push(`🤖 LLM (${period}): $${llmWindow.toFixed(4)}`);
+    costBody.push(`🤖 LLM (${period}): $${llmWindow.toFixed(4)}`);
   }
   if (gasSol > 0) {
     const gasTag = paper ? " (simulasi)" : gasIsEst ? " (est)" : "";
     const approx = paper || gasIsEst ? "~" : "";
-    costLines.push(`⛽ Gas${gasTag}: ${approx}${gasSol.toFixed(4)} SOL${gasUsd != null ? ` (${approx}$${gasUsd.toFixed(2)})` : ""}${paper ? " — estimasi biaya bila live" : ""}`);
+    costBody.push(`⛽ Gas${gasTag}: ${approx}${gasSol.toFixed(4)} SOL${gasUsd != null ? ` (${approx}$${gasUsd.toFixed(2)})` : ""}${paper ? " — estimasi biaya bila live" : ""}`);
     const reserve = config.management?.gasReserve;
     const dailyBurn = gasSol / days;
     if (reserve > 0 && dailyBurn > 0) {
       const runwayDays = reserve / dailyBurn;
       const mode = config.management?.gasReserveAutoTune ? " (auto-tune)" : " (manual)";
-      costLines.push(`🪫 gasReserve ${reserve} SOL${mode} ≈ ${runwayDays.toFixed(0)}d runway @ ${dailyBurn.toFixed(4)} SOL/hari${runwayDays < 7 ? " ⚠️ tipis" : ""}`);
+      costBody.push(`🪫 gasReserve ${reserve} SOL${mode} ≈ ${runwayDays.toFixed(0)}d runway @ ${dailyBurn.toFixed(4)} SOL/hari${runwayDays < 7 ? " ⚠️ tipis" : ""}`);
     }
   }
   const totalCost = llmTotal + (gasUsd ?? 0);
   if (totalCost > 0) {
     const real = netPnl - totalCost;
-    costLines.push(`📊 Net − biaya${paper ? " (simulasi)" : ""}: PnL ${money(netPnl)} − biaya $${totalCost.toFixed(4)} = ${money(real)} ${real >= 0 ? "✅" : "🔴"}`);
+    costBody.push(`📊 Net − biaya${paper ? " (simulasi)" : ""}: PnL ${money(netPnl)} − biaya $${totalCost.toFixed(4)} = ${money(real)} ${real >= 0 ? "✅" : "🔴"}`);
   }
-  if (credits?.balance != null) costLines.push(`💳 Saldo OpenRouter: $${credits.balance.toFixed(2)}`);
+  if (credits?.balance != null) costBody.push(`💳 Saldo OpenRouter: $${credits.balance.toFixed(2)}`);
 
   const parts = [
     report,
     formatStatsBlock(computeTradeStats(racikanWindowPerf), racikanLabel),
     racikanScopeDisclosure() || null,
     formatPnlTracker((lessonsData.performance || []).filter(keepMode), { solPriceUsd: solPrice || null }) || null,
-    `<b>Activity (${days}d):</b> 📥 ${opened} opened | 📤 ${windowPerf.length} closed`,
+    section(`<b>Activity (${days}d):</b>`, [`📥 ${opened} opened`, `📤 ${windowPerf.length} closed`]),
     buildFeatureStatus(),
-    costLines.length > 1 ? costLines.join("\n") : null,
+    costBody.length ? section(costHeader, costBody) : null,
     buildTimeProfileSection(),
   ];
   return parts.filter(Boolean).join("\n\n");

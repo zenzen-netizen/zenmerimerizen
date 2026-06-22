@@ -11,7 +11,7 @@
  * Pemisah dalam-baris `  ·  `→` · ` (normalisasi, sama dgn /positions /status).
  */
 
-import { ICON, SEP, tree, header, esc, fmtMoneySigned } from "./format.js";
+import { ICON, SEP, tree, header, esc, fmtMoneySigned, fmtBothSigned } from "./format.js";
 
 /** Persen TANPA + (mirror fmtPct lokal telegram.js — beda dari format.js fmtPct yg bertanda). */
 function pct2(v) {
@@ -63,22 +63,32 @@ export function renderSwap(d) {
   ].join("\n");
 }
 
-// ── notifyClose (#9) — fix HARD-$ ────────────────────────────────────────────
+// ── notifyClose (#9) — both-units ($+◎) ──────────────────────────────────────
 /**
  * @param d { pair, pnlUsd, pnlPct, peakPnlPct?, reason?, lesson?, feesUsd?,
- *   gasSol, solMode }
+ *   gasSol, solMode, solPrice? }
  *
- * HARD-$ #9: uang dirender MODE-CORRECT via fmtMoneySigned(_, solMode) — di USD-mode
- * byte-identik `$` lama, di ◎-mode jadi ◎ (bukan `$` salah). `fmtBoth($+◎)` TIDAK
- * dipakai: payload close cuma bawa SATU nilai mode-correct (no sol_price); nurunin
- * unit kedua = ubah executor (di luar scope) / ngarang konversi (DILARANG governing #2)
- * → tampil 1 unit apa adanya. Win/loss 🟢/🔴 DIPERTAHANKAN (bukan ✅ generik = reduksi).
- * Field icon (📊/💎/📈/⛽/📋/📚) + inline HTML (<b>/<i>) dipertahankan apa adanya.
+ * FASE 5 both-units: payload close cuma bawa SATU nilai mode-correct (no sol_price di
+ * result). `solPrice` di-resolve di wrapper (telegram.js, read-only getSolMarketRegime)
+ * → unit kedua DITURUNKAN di sini (display-only): mode off punya $, ◎=$/px; mode on
+ * punya ◎, $=◎×px. Dirender `fmtBothSigned` dgn `≈` di unit turunan (harga = saat ini,
+ * bukan saat close → approx). **Fail-safe (governing #3): solPrice hilang/≤0 → fall back
+ * 1-unit mode-correct `fmtMoneySigned` (byte-identik Batch B).** Gas TIDAK dikonversi
+ * (sudah ◎/SOL). Win/loss 🟢/🔴 dipertahankan. Field icon + inline HTML apa adanya.
  */
 export function renderClose(d) {
   const net = d.pnlUsd ?? 0;
   const solMode = !!d.solMode;
-  const m = (v) => fmtMoneySigned(v, solMode);                       // mode-correct
+  const px = Number(d.solPrice);
+  const havePrice = Number.isFinite(px) && px > 0;
+  // Satu formatter uang utk semua baris ($-line): both-units kalau harga ada, else
+  // fall back 1-unit mode-correct. `v` SUDAH mode-correct (off=$, on=◎).
+  const m = (v) => {
+    if (!havePrice) return fmtMoneySigned(v, solMode);              // governing #3 fallback
+    const usd = solMode ? v * px : v;
+    const sol = solMode ? v : v / px;
+    return fmtBothSigned(usd, sol, solMode);
+  };
   const spct = (v) => `${v >= 0 ? "+" : ""}${(v ?? 0).toFixed(2)}%`;
 
   const lines = [`📊 Net PnL: ${m(net)} (${spct(d.pnlPct)})`];

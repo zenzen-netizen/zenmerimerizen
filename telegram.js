@@ -587,9 +587,17 @@ export async function notifyDeploy(data) {
 export async function notifyClose(data) {
   if (hasActiveLiveMessage()) return;
   // Render → views/notifs.js (renderClose). gasSol (estimasi) + solMode di-resolve di
-  // sini; guard/trigger/logic TIDAK diubah. fmtBoth tak dipakai (payload 1-unit, no price).
+  // sini; guard/trigger/logic TIDAK diubah.
+  // FASE 5 both-units: harga SOL diambil read-only via getSolMarketRegime (Jupiter,
+  // nol side-effect; dynamic import biar static-graph telegram.js tetap ringan). Fail-open
+  // → solPrice null → renderClose fall back ke 1-unit mode-correct (governing #3).
   const gasSol = estimateGasSol({ close_position: 1, claim_fees: 1, swap_token: 1 });
-  await sendHTML(renderClose({ ...data, gasSol, solMode: solModeOn() }));
+  let solPrice = null;
+  try {
+    const { getSolMarketRegime } = await import("./tools/wallet.js");
+    solPrice = (await getSolMarketRegime())?.usdPrice || null;
+  } catch { /* fail-open: 1-unit */ }
+  await sendHTML(renderClose({ ...data, gasSol, solMode: solModeOn(), solPrice }));
 }
 
 export async function notifySwap(data) {

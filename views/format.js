@@ -63,8 +63,8 @@ export function fmtMoneySigned(value, solMode, dp) {
 }
 
 /**
- * Pesan yang menampilkan DUA unit ($+◎) sekaligus (mis. notifyClose, Batch B):
- * primary ikut solMode, secondary dlm kurung. $ selalu 2dp, ◎ 4dp.
+ * Pesan yang menampilkan DUA unit ($+◎) sekaligus (mis. saldo): primary ikut
+ * solMode, secondary dlm kurung. $ selalu 2dp, ◎ 4dp. UNSIGNED (saldo/value).
  *   mode $  → "$0.14 (≈◎0.0019)"   ·   mode ◎ → "◎0.0019 ($0.14)"
  */
 export function fmtBoth(usd, sol, solMode) {
@@ -72,6 +72,21 @@ export function fmtBoth(usd, sol, solMode) {
   const u = `$${Number.isFinite(uX) ? uX.toFixed(2) : "?"}`;
   const s = `◎${Number.isFinite(sX) ? round(sX, 4) : "?"}`;
   return solMode ? `${s} (${u})` : `${u} (≈${s})`;
+}
+
+/**
+ * Versi BERTANDA dua unit ($+◎) untuk PnL/delta (mis. notifyClose both-units).
+ * Sign di primary (sign-before-symbol, mirror fmtMoneySigned); secondary diturunkan
+ * dari harga SOL → ditandai `≈` di KEDUA mode (sign dipahami dari primary, secondary
+ * tampil magnitude). $ selalu 2dp, ◎ 4dp.
+ *   mode $  → "-$1.10 (≈◎0.0073)"   ·   mode ◎ → "+◎0.0042 (≈$0.61)"
+ */
+export function fmtBothSigned(usd, sol, solMode) {
+  const uX = Number(usd), sX = Number(sol);
+  const sign = (solMode ? sX : uX) >= 0 ? "+" : "-";
+  const u = `$${Number.isFinite(uX) ? Math.abs(uX).toFixed(2) : "?"}`;
+  const s = `◎${Number.isFinite(sX) ? round(Math.abs(sX), 4) : "?"}`;
+  return solMode ? `${sign}${s} (≈${u})` : `${sign}${u} (≈${s})`;
 }
 
 /** SOL eksplisit (rent/held & sejenisnya), selalu ◎, default 3dp padded (toFixed,

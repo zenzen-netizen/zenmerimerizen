@@ -9,7 +9,7 @@ restart owner-only. Workstream 🅴 — Report & Briefing (⑥⑦) → tree-styl
 - [x] 1  /report → tree-style (SEMUA stat dipertahankan)
 - [x] 2  Daily briefing → tree-style
 - [x] 3  Weekly/Monthly briefing → tree-style
-- [ ] 4  Milestone learning report → tree-style (render ekstrak dari index.js, 1-baris call)
+- [x] 4  Milestone learning report → tree-style (render ekstrak dari index.js, 1-baris call)
 
 ---
 
@@ -50,6 +50,24 @@ hilang; diff cuma `|` (disengaja) + nilai live drift (realized 1D + activity cou
 Commit `feat(views): weekly/monthly briefing tree-style`.
 
 ---
+
+## FASE 4 — Milestone learning report → tree-style + ekstrak — SELESAI
+Render milestone SUDAH tree (lewat buildTradeReport, FASE 1; report_milestone token-IDENTIK di FASE 1).
+FASE 4 = EKSTRAK komposisi render dari index.js (file panas) → `buildMilestoneReport(perf, milestone)` di
+`briefing.js` (file aman, sudah import buildTradeReport+formatIdentity+config). index.js: maybeFireLearningReport
+tinggal `const report = buildMilestoneReport(perf, milestone)` — **diff index.js MINIMAL: +2/−7 (net −5), cuma import
++ swap 1-baris** (orkestrasi counter/dedup/send tetap). Verifikasi: `buildMilestoneReport === inline composition`
+**BYTE-IDENTIK**. Tak ada import orphan (buildTradeReport masih dipakai 3× di buildReportForArg; formatIdentity 9×).
+`node --check` index.js + briefing.js OK. Commit `feat(views): milestone report tree-style + ekstrak render dari index.js`.
+
+---
+
+## VERIFIKASI AKHIR (Batch C report/briefing)
+- Berubah: `reports.js` (FASE 1) · `briefing.js` (FASE 2/3/4) · `index.js` (FASE 4, +2/−7 minimal) · `notes/`.
+  **Tidak ada engine/money-logic/tools kesentuh.** Perhitungan stat NOL ubah — rakitan string → tree saja.
+- `node --check` semua lulus. Cross-check nol detail hilang: report (token-multiset IDENTIK 3 varian) · briefing
+  (STRUCTURAL IDENTIK; diff = live-drift + 1 separator `|` disengaja).
+- **Restart owner-only** (Claude TIDAK restart). Owner restart MAIN → cek `/report` (semua varian) & `/briefing` di Telegram.
 
 ## FASE 0 — Recon EXACT (READ-ONLY) — SELESAI
 Baseline real disimpan `/tmp/bl_report_{default,all,milestone}.txt` + `/tmp/bl_briefing_{daily,week,month}.txt`

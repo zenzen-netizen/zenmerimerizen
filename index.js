@@ -33,7 +33,7 @@ import {
   unpinMessage,
   escapeHtml as escapeHtmlSafe,
 } from "./telegram.js";
-import { generateBriefing, generatePeriodicBriefing } from "./briefing.js";
+import { generateBriefing, generatePeriodicBriefing, buildMilestoneReport } from "./briefing.js";
 import { renderGuide } from "./guide.js";
 import { getLastBriefingDate, setLastBriefingDate, getLastBriefingPinId, setLastBriefingPinId, getLastReportedMilestone, setLastReportedMilestone, getLastPeriodicBriefing, setLastPeriodicBriefing, getTrackedPosition, getTrackedPositions, setPositionInstruction, updatePnlAndCheckExits, queuePeakConfirmation, resolvePendingPeak, queueTrailingDropConfirmation, resolvePendingTrailingDrop } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
@@ -221,12 +221,7 @@ async function maybeFireLearningReport() {
     const milestone = Math.floor(perf.length / every) * every;
     if (milestone < every) return;                       // first milestone not reached
     if (milestone <= getLastReportedMilestone()) return; // already reported this milestone
-    const report = buildTradeReport(perf, {
-      title: `🎓 Learning Report — ${milestone} closed positions`,
-      statsLabel: "All-time",
-      trendN: config.reports?.learningReportTrendN ?? 10,
-      identity: formatIdentity(),
-    });
+    const report = buildMilestoneReport(perf, milestone); // render diekstrak ke briefing.js (file aman)
     if (telegramEnabled() && report) await sendHTML(report);
     setLastReportedMilestone(milestone);
     log("cron", `Learning report fired at milestone ${milestone} closes`);

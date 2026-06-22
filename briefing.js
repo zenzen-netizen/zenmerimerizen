@@ -505,6 +505,21 @@ export async function generatePeriodicBriefing(period = "week") {
   return parts.filter(Boolean).join("\n\n");
 }
 
+/**
+ * Milestone learning report render (every N closes). Komposisi render diekstrak dari
+ * index.js (file panas) ke sini (file aman) — index.js tinggal panggil 1-baris +
+ * orkestrasi (counter/dedup/send). Tree-style otomatis lewat buildTradeReport (FASE 1).
+ * SEMUA field dipertahankan (title/statsLabel/trendN/identity identik dgn versi inline).
+ */
+export function buildMilestoneReport(perf, milestone) {
+  return buildTradeReport(perf, {
+    title: `🎓 Learning Report — ${milestone} closed positions`,
+    statsLabel: "All-time",
+    trendN: config.reports?.learningReportTrendN ?? 10,
+    identity: formatIdentity(),
+  });
+}
+
 function loadJson(file) {
   if (!fs.existsSync(file)) return null;
   try {

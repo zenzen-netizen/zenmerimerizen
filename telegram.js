@@ -521,7 +521,7 @@ const BOT_COMMANDS = [
   { command: "screen",     description: "Refresh deterministic candidate list" },
   { command: "candidates", description: "Show latest cached candidates" },
   { command: "deploy",     description: "Deploy candidate by cached index" },
-  { command: "config",     description: "Show important runtime config" },
+  { command: "config",     description: "Config per-fungsi (·origin per-asal ·core ringkas)" },
   { command: "settings",   description: "Button menu for common config" },
   { command: "setcfg",     description: "Update persisted config key" },
   { command: "preset",     description: "Save/load full config presets" },

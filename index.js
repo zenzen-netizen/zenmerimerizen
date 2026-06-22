@@ -2012,40 +2012,19 @@ function subgroupDesc(sg) {
     : `Pipeline screening GMGN tidak aktif (source=${config.screening.source}, blok ini diabaikan).`;
 }
 
-// RENDER-ONLY 4-layer /config: L1 origin section (⚙️ Origin Dev / 🧩 Add by zen)
-// → L2 grup (▸) → L3 sub-cluster (emoji + ┈ line, shown when a grup has >1
-// cluster) → L4 mini-grup (the four beranak families indent their anak under the
-// induk via ↳). Layout/placement lives in config-origin.js; this owns no values.
+// /config origin (Batch E 🅴): view per-ASAL 4-lapis (L1 seksi ⚙️/🧩 → L2 grup ▸
+// → L3 sub-cluster → L4 ↳ anak), Zen di atas, tree-style. Render delegated to
+// views/config.js (mode "origin"); layout/placement tetap di config-origin.js,
+// value tetap dari buildConfigRowMap. SHARED: dipakai command /config origin DAN
+// tombol /settings "📋 Config penuh" (:3044) — keduanya ikut gaya tree baru.
 export function formatFullConfig() {
-  const rowMap = buildConfigRowMap();
-  const placed = new Set();
-
-  const sectionBlocks = ORIGIN_SECTIONS.map((sec) => {
-    const subBlocks = sec.subgroups.map((sg) => {
-      // Racikan/Identitas sub-group renders the identity banner, not key rows.
-      if (sg.identity) {
-        const body = formatIdentityLines().split("\n").map((l) => `    ${l}`).join("\n");
-        return `▸ ${sg.title} · ${sg.desc}\n${body}`;
-      }
-      const { text, placed: pl } = renderSubclusterRows(sg.keys, rowMap);
-      pl.forEach((k) => placed.add(k));
-      return `▸ ${sg.title} · ${subgroupDesc(sg)}\n${text}`;
-    });
-    const bar = "━━━━━━━━━━━━━━━━━━━━━━";
-    return `${bar}\n${sec.title} — ${sec.blurb}\n${bar}\n\n${subBlocks.join("\n\n")}`;
-  });
-
-  // Safety net: any computed row the layout did not place is surfaced (never
-  // dropped) so old key count == new key count even if a key is mis-listed.
-  const orphans = Object.keys(rowMap).filter((k) => !placed.has(k));
-  if (orphans.length) {
-    const rows = orphans.map((k) => { const [label, value] = rowMap[k]; return `    ${label}: ${value}`; });
-    sectionBlocks.push(`▸ ❓ Belum terpetakan (auto — cek config-origin.js)\n${rows.join("\n")}`);
-  }
-
-  const intro = "⚙️ Config lengkap — per ASAL (⚙️ Origin Dev vs 🧩 Add by zen)\nLegenda: 🟢 on · ⚪ off · ↳ anak setelan · ringkas → /config core";
-  const outro = "Ubah lewat /settings (menu tombol) atau chat biasa. Detail tiap setting: ketik /guide";
-  return `${intro}\n\n${sectionBlocks.join("\n\n\n")}\n\n${outro}`;
+  return render(configView.buildView({
+    mode: "origin",
+    rowMap: buildConfigRowMap(),
+    identity: formatIdentityLines(),
+    racikanName: activeRacikanName(),
+    subgroupDesc, // GMGN desc flip (zen-gmgn) — fn lama dipakai apa adanya
+  }), "telegram");
 }
 
 // /config core — compact view: only the core-tagged keys (full key names), 2 per
@@ -2066,17 +2045,20 @@ export function formatCoreConfig() {
   return `${head}\n\n${racikan}\n\n${blocks.join("\n\n")}\n\n${tail}`;
 }
 
+// Nama racikan aktif untuk header /config (fail-open → "—").
+function activeRacikanName() {
+  try { return getActiveSetupStatus().name || "—"; } catch { return "—"; }
+}
+
 // Default /config (Batch E 🅴): dikelompokkan per FUNGSI (praktis harian) + marker
 // ASAL ⚙️/🧩 per baris. Render delegated to views/config.js; data (rowMap/identity)
 // unchanged. SEMUA 166 key kebawa (FUNCTION_GROUPS parity + safety-net orphan).
 function formatFunctionConfig() {
-  let racikanName = "—";
-  try { racikanName = getActiveSetupStatus().name || "—"; } catch { /* fail-open */ }
   return render(configView.buildView({
     mode: "function",
     rowMap: buildConfigRowMap(),
     identity: formatIdentityLines(),
-    racikanName,
+    racikanName: activeRacikanName(),
     screeningSource: config.screening.source,
   }), "telegram");
 }
@@ -3220,7 +3202,8 @@ function formatHelpText() {
     "/deploy <n> — deploy candidate by cached index",
     "",
     "⚙️ KONFIGURASI",
-    "/config — show full runtime config (grouped)",
+    "/config — config per-fungsi (praktis, + marker asal ⚙️/🧩)",
+    "/config origin — config per-asal (⚙️ origin dev vs 🧩 add by zen)",
     "/config core — ringkasan key inti saja",
     "/settings — button menu for common config",
     "/setcfg <key> <value> — update persisted config",
@@ -3641,6 +3624,10 @@ async function telegramHandler(msg) {
 
   if (text === "/config core") {
     await sendMessage(formatCoreConfig()).catch(() => {});
+    return;
+  }
+  if (text === "/config origin") {
+    await sendMessage(formatFullConfig()).catch(() => {});
     return;
   }
   if (text === "/config") {

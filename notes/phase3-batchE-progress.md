@@ -6,7 +6,7 @@ guide/help di `guide.js`/views. index.js = 1-baris call per pesan + registrasi `
 
 - [x] 0  recon EXACT: /config(+keys+origin) · guide · help · hive · pause/resume · queue · error — field+baseline ✅
 - [x] 1  /config (default) → tree function-grouped + marker origin (🧩/⚙️) ✅
-- [ ] 2  /config origin → command BARU (aditif), grouped per-asal
+- [x] 2  /config origin → command BARU (aditif), grouped per-asal ✅
 - [ ] 3  guide + help → tree (guide.js, aman)
 - [ ] 4  hive + pause/resume + queue + error → tree (ekstrak inline index.js, minimal)
 
@@ -98,6 +98,24 @@ jadi nol detail hilang secara agregat. Inline `ORIGIN_NOTES` TETAP dibawa per-ba
 - Render uji (mock rowMap 166 key): **166 baris key persis**, semua marker/notes/identity/GMGN-hint muncul.
   5028 char → 2 chunk auto-split (splitText motong di newline, tak putus baris). node --check semua OK.
 - **Belum** ada command `/config origin` (FASE 2) — footer pointer ke situ aktif setelah FASE 2.
+
+## FASE 2 — hasil ✅
+- `views/config.js` `renderOrigin` di-upgrade: header `🛠 Config by origin · 🗂 <racikan>` (brief), **Zen di
+  atas** (salinan lokal `[...ORIGIN_SECTIONS].sort` — array sumber TAK diubah → /settings aman), **count
+  per-asal** (`· <n>` di header seksi), separator SEP (16) ganti bar lama (22). Struktur 4-lapis PENUH
+  dipertahankan: L2 grup ▸ (19) · L3 sub-cluster ┈ (43) · L4 ↳ anak (14) · identity · subgroupDesc (GMGN
+  flip via callback fn lama) · safety-net orphan. Render uji: 166 baris value, Zen(72)→Dev(94).
+- `index.js` `formatFullConfig()` → **delegasi** ke view (mode origin), kirim rowMap+identity+racikanName+
+  subgroupDesc. Body lama (37 baris) → 8 baris. `renderSubclusterRows` & `subgroupDesc` index.js TETAP
+  (dipakai /settings :2909 + callback). +helper `activeRacikanName()` (dipakai function & origin).
+- **SHARED**: `formatFullConfig` kini layani command `/config origin` DAN tombol /settings "📋 Config penuh"
+  (:3044) — keduanya ikut tree-style + Zen-first baru. Ini perubahan **tampilan** (bukan mekanika) ke output
+  tombol /settings; isi tetap config penuh. ⚠️ owner: kalau mau tombol itu mirror /config function view,
+  ganti :3044 (di luar scope batch ini).
+- Dispatch `/config origin` ditambah (exact-match, sebelum `/config`). Full-sync command surface:
+  `/help` (+baris /config origin & revisi /config), `BOT_COMMANDS` config desc (telegram.js). `/config origin`
+  = subcommand (Telegram setMyCommands tak bisa spasi) → registrasi = handler + desc, bukan entri terpisah.
+- node --check index.js/config.js/telegram.js OK.
 
 ## Catatan/limit-recovery
 (kosong)

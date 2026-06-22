@@ -89,15 +89,19 @@ function treeRows(rows) {
   return xs.map((r, i) => `${i === xs.length - 1 ? "└" : "├"} ${r}`).join("\n");
 }
 
-// ── mode "origin" — /config origin (4-lapis, tree-style) ─────────────────────
-// Port struktur penuh formatFullConfig (L1 seksi → L2 grup → L3 sub-cluster →
-// L4 ↳ anak) ke gaya tree, plus safety-net orphan. Layout/placement tetap milik
-// config-origin.js; value tetap dari rowMap.
+// ── mode "origin" — /config origin (4-lapis, tree-style, Zen di atas) ─────────
+// Port struktur penuh formatFullConfig (L1 seksi → L2 grup ▸ → L3 sub-cluster →
+// L4 ↳ anak) ke gaya tree, plus count per-asal + safety-net orphan. Layout/
+// placement tetap milik config-origin.js; value tetap dari rowMap. Urutan seksi
+// di-ZEN-dulu (brief) tanpa mengubah array ORIGIN_SECTIONS (dipakai /settings).
 function renderOrigin(vm) {
   const { rowMap } = vm;
   const placed = new Set();
+  // Zen di atas, Dev di bawah — salinan lokal, tak menyentuh sumber.
+  const ordered = [...ORIGIN_SECTIONS].sort((a, b) => (a.id === "zen" ? -1 : 1) - (b.id === "zen" ? -1 : 1));
 
-  const sectionBlocks = ORIGIN_SECTIONS.map((sec) => {
+  const sectionBlocks = ordered.map((sec) => {
+    let secCount = 0;
     const subBlocks = sec.subgroups.map((sg) => {
       if (sg.identity) {
         const body = (vm.identity || "🧬 Profil: —\n🗂️ Racikan: —").split("\n").map((l) => `    ${l}`).join("\n");
@@ -105,10 +109,11 @@ function renderOrigin(vm) {
       }
       const { text, placed: pl } = renderSubclusterRows(sg.keys, rowMap);
       pl.forEach((k) => placed.add(k));
-      const desc = vm.subgroupDesc ? vm.subgroupDesc(sg.id, sg.desc) : sg.desc;
+      secCount += pl.length;
+      const desc = vm.subgroupDesc ? vm.subgroupDesc(sg) : sg.desc;
       return `▸ ${sg.title} · ${desc}\n${text}`;
     });
-    return `${SEP}\n${sec.title} — ${sec.blurb}\n${SEP}\n\n${subBlocks.join("\n\n")}`;
+    return `${SEP}\n${sec.title} · ${secCount} — ${sec.blurb}\n${SEP}\n\n${subBlocks.join("\n\n")}`;
   });
 
   const orphans = Object.keys(rowMap).filter((k) => !placed.has(k));
@@ -117,7 +122,7 @@ function renderOrigin(vm) {
     sectionBlocks.push(`▸ ❓ Belum terpetakan (auto — cek config-origin.js)\n${rows.join("\n")}`);
   }
 
-  const intro = `${ICON.tools} Config — per ASAL (⚙️ Origin Dev vs 🧩 Add by zen)\nLegenda: 🟢 on · ⚪ off · ↳ anak setelan · per-fungsi → /config · ringkas → /config core`;
+  const intro = `${ICON.tools} Config by origin · 🗂 ${vm.racikanName || "—"}\nLegenda: 🟢 on · ⚪ off · ↳ anak setelan · per-fungsi → /config · ringkas → /config core`;
   const outro = "Ubah lewat /settings (menu tombol) atau chat biasa. Detail tiap setting: ketik /guide";
   return `${intro}\n\n${sectionBlocks.join("\n\n\n")}\n\n${outro}`;
 }

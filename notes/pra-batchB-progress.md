@@ -5,7 +5,7 @@ Display-only, restart owner-only.
 
 - [x] 0  poles format.js (2dp money · ikon 👛/💼/📋 · + fmtBoth) + re-verify /positions·/status·/wallet ✅
 - [x] 1  recon renderer tracker (formatSolTracker / formatPnlTracker) — output EXACT + batas compute|format ✅
-- [ ] 2  SOL Tracker → tree-style (◎ tetap), update embed /wallet
+- [x] 2  SOL Tracker → tree-style (◎ tetap), update embed /wallet ✅
 - [ ] 3  Realized PnL & Net → tree-style ($ tetap), update embed /status + /wallet
 
 ## Catatan recon awal (sebelum eksekusi)
@@ -71,6 +71,20 @@ PnL (gasIncluded, no est → tanpa ~):
 - SOL baris SINCE → `sejak` (label, jadi `└` terakhir). PnL `net␣␣(`→`net␣(` (double→single space).
 - DIPERTAHANKAN: tiap window, Δ, %, anchorBal, tanggal, `*`, `ℹ️`, `💡`(saat tanpa anchor), `~`/est, `⚠️`
   disclosure (disclosure tetap embed terpisah di view, di LUAR blok tracker — apa adanya).
+
+## FASE 2 & 3 — hasil (Rute X)
+- `views/trackers.js` BARU: `renderSolTracker(d)` (◎ tetap) + `renderPnlTracker(rows)` ($ tetap),
+  pakai `ICON`/`SEP`/`tree` dari format.js; angka pakai `.toFixed` lokal (byte-fidelity padding).
+- `sol-tracker.js`: `formatSolTracker` kini COMPUTE + map display-data → panggil `renderSolTracker`
+  (helper string lama fmtSol/signedSol/signedPct/dot dibuang; `labelFromKey` dipakai di mapping).
+- `pnl-tracker.js`: `formatPnlTracker` kini panggil `renderPnlTracker` (helper dot/sd dibuang); fail-open tetap.
+- Embed view (status.js/wallet.js `out.push vm.solTracker/vm.pnlBlock`) TIDAK diubah — string yg mengalir
+  sudah tree-style karena format* panggil renderer baru (index.js tak disentuh, di luar scope).
+- CROSS-CHECK byte-level (data real, /tmp/{baseline,new}_{sol,pnl}.txt): multiset angka (13 SOL/9 PnL),
+  tanggal, jumlah-trade, dot, footnote, tanda minus U+2212 → IDENTIK OLD↔NEW. Edge-case OK: tanpa-anchor→💡,
+  no-baseline, gas-est `~` + ℹ️ "(~ = gas estimasi)", branch no-cost, varian "gas blm dihitung".
+- Import-graph bersih (briefing.js→pnl-tracker→views/trackers→format) nol circular-dep. End-to-end /wallet
+  satu gaya tree SEP-16; disclosure ⚠️ tetap di luar blok.
 
 ## Catatan/limit-recovery
 (kosong)

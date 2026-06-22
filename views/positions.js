@@ -74,7 +74,7 @@ export function buildView(positions, cfg, rentMap = {}) {
 export function telegram(vm) {
   const { solMode } = vm;
   const out = [
-    `${ICON.wallet} Open Positions (${vm.count})`,
+    `${ICON.position} Open Positions (${vm.count})`,
     SEP,
   ];
 

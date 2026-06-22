@@ -32,7 +32,7 @@ export function walletBlockLines(d) {
     ? `${ICON.value} Saldo: ◎${round(d.sol, 4)} (≈$${round(d.solUsd, 2)})`
     : `${ICON.value} Saldo: $${round(d.solUsd, 2)} (≈◎${round(d.sol, 4)})`);
   lines.push(`${ICON.entry} SOL @ $${round(d.solPrice, 2)}`);          // harga SOL = USD selalu
-  lines.push(`📊 Posisi: ${d.totalPositions}/${d.maxPositions}`);
+  lines.push(`${ICON.position} Posisi: ${d.totalPositions}/${d.maxPositions}`);
   // per-slot & bebas = jumlah SOL → fmtCur (◎ saat solMode, $ via ×price saat off).
   const free = d.sol - d.gasReserve;
   lines.push(`📦 per slot: ${fmtCur(d.deployAmount, d.deployAmount * d.solPrice, solMode)} (ukuran per posisi baru)`);

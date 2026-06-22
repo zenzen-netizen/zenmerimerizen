@@ -41,21 +41,37 @@ export function fmtCur(sol, usd, solMode) {
 /**
  * Satu angka yang SUDAH mode-correct (getMyPositions *_usd) → simbol + angka.
  * dp default: 4 (SOL) / 2 (USD). value non-finite → "<sym>?" (jaga fallback lama).
+ * Mode $ SELALU 2 desimal (toFixed, "$22.90") — jangan strip trailing zero;
+ * mode ◎ tetap apa adanya (round, buang trailing zero).
  */
 export function fmtMoney(value, solMode, dp) {
   const sym = curSym(solMode);
   const d = dp ?? (solMode ? 4 : 2);
   const x = Number(value);
   if (value == null || !Number.isFinite(x)) return `${sym}?`;
-  return `${sym}${round(x, d)}`;
+  return `${sym}${solMode ? round(x, d) : x.toFixed(d)}`;
 }
 
-/** Versi bertanda untuk delta/PnL: "+◎0.0047" / "-$1.10". */
+/** Versi bertanda untuk delta/PnL: "+◎0.0047" / "-$1.10". Mode $ SELALU 2dp. */
 export function fmtMoneySigned(value, solMode, dp) {
   const sym = curSym(solMode);
   const d = dp ?? (solMode ? 4 : 2);
   const x = Number(value) || 0;
-  return `${x >= 0 ? "+" : "-"}${sym}${round(Math.abs(x), d)}`;
+  const abs = Math.abs(x);
+  const num = solMode ? round(abs, d) : abs.toFixed(d);
+  return `${x >= 0 ? "+" : "-"}${sym}${num}`;
+}
+
+/**
+ * Pesan yang menampilkan DUA unit ($+◎) sekaligus (mis. notifyClose, Batch B):
+ * primary ikut solMode, secondary dlm kurung. $ selalu 2dp, ◎ 4dp.
+ *   mode $  → "$0.14 (≈◎0.0019)"   ·   mode ◎ → "◎0.0019 ($0.14)"
+ */
+export function fmtBoth(usd, sol, solMode) {
+  const uX = Number(usd), sX = Number(sol);
+  const u = `$${Number.isFinite(uX) ? uX.toFixed(2) : "?"}`;
+  const s = `◎${Number.isFinite(sX) ? round(sX, 4) : "?"}`;
+  return solMode ? `${s} (${u})` : `${u} (≈${s})`;
 }
 
 /** SOL eksplisit (rent/held & sejenisnya), selalu ◎, default 3dp padded (toFixed,
@@ -96,9 +112,11 @@ export const SEP = "━━━━━━━━━━━━━━━━";
 export const ICON = {
   pnl: "💰", value: "💵", yield: "📊", time: "⏱", range: "📐", rule: "🎯", held: "🔒",
   inRange: "🟢", oor: "🔴", best: "🏆", worst: "💀", warn: "⚠️", deploy: "🚀",
-  manage: "🔄", closed: "✅", stay: "✋", entry: "🪙", wallet: "💼", fee: "💧",
+  manage: "🔄", closed: "✅", stay: "✋", entry: "🪙", fee: "💧",
   swap: "🔄", briefing: "📊", config: "⚙️", bolt: "⚡", perf: "📈", brain: "🧠",
   arrow: "→",
+  // 1 konsep = 1 ikon (anti-tabrakan): dompet/saldo · daftar-posisi · ringkasan-status.
+  wallet: "👛", position: "💼", status: "📋",
 };
 
 /** Keycap-emoji untuk nomor 1–10; >10 → "<n>.". */

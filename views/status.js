@@ -35,7 +35,7 @@ export function buildView(input) {
 
 export function telegram(vm) {
   const { solMode } = vm;
-  const out = [`${ICON.wallet} Status · ${fmtWib(vm.nowMs)}`, SEP];
+  const out = [`${ICON.status} Status · ${fmtWib(vm.nowMs)}`, SEP];
 
   // 👛 Wallet
   out.push(`${ICON.wallet} Wallet`);

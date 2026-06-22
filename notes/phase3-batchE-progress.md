@@ -8,7 +8,7 @@ guide/help di `guide.js`/views. index.js = 1-baris call per pesan + registrasi `
 - [x] 1  /config (default) → tree function-grouped + marker origin (🧩/⚙️) ✅
 - [x] 2  /config origin → command BARU (aditif), grouped per-asal ✅
 - [x] 3  guide + help → tree (guide.js, aman) ✅
-- [ ] 4  hive + pause/resume + queue + error → tree (ekstrak inline index.js, minimal)
+- [x] 4  hive + pause/resume + queue + error → tree (ekstrak inline index.js, minimal) ✅
 
 ---
 
@@ -129,5 +129,19 @@ jadi nol detail hilang secara agregat. Inline `ORIGIN_NOTES` TETAP dibawa per-ba
   render.js dispatcher (itu utk view-model bertipe; pesan sistem = string sederhana). `<n>`/`<key>` literal
   aman di sendMessage plain (no parse_mode), sama seperti versi lama.
 
+## FASE 4 — hasil ✅
+- `views/system.js` +`renderHive(d)` (tree: disabled ⚪ / enabled 🟢, SEMUA field lama: Agent ID/URL/Pull
+  mode/Register ok|warn/Shared lessons/Presets/[Manual pull]; logika count array→jumlah else manual|0 sama
+  persis) · `renderPaused`/`renderResumed`/`renderAlreadyRunning` (teks verbatim) · `renderQueued(n,preview)`/
+  `renderQueueFull` · `renderError(msg,label="Error")` → `⚠️ <label>: <msg>`.
+- `index.js` call-swap (data-gathering /hive TAK diubah): /pause /resume(+already) /hive(3 cabang)/queue(2) →
+  systemView.* 1-baris. Data hive (registerHiveMindAgent/pullHiveMindLessons/pullHiveMindPresets) tetap di
+  index.js — cuma komposisi pesan yang pindah.
+- **Error terpusat**: SEMUA 13 `sendMessage(\`Error: ${e.message}\`)` (status/wallet/positions/pool/briefing/
+  report/setcfg-input/dll) + hive error → `systemView.renderError(...)` (call-swap murni). Output `Error: x`
+  → `⚠️ Error: x` seragam. **Sengaja TIDAK disentuh**: `Settings error:` (:3443, /settings out of scope) &
+  `console.error` (:3877, log bukan reply). Konsisten satu gaya (bukan setengah-setengah).
+- Render uji semua cabang OK (disabled/enabled-auto/enabled-manual + pause/resume/queue/error). node --check OK.
+
 ## Catatan/limit-recovery
-(kosong)
+(kosong — semua FASE 0–4 tuntas tanpa kena limit)

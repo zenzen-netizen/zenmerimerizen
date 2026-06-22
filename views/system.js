@@ -56,3 +56,56 @@ export function renderHelp() {
   for (const [title, cmds] of groups) out.push(SEP, title, tree(cmds));
   return out.join("\n");
 }
+
+// ── /hive · /hive pull ────────────────────────────────────────────────────────
+// d = { enabled, agentId, url?, pullMode?, register?, lessons?, presets?, manualPull? }.
+// Data gathering tetap di index.js; di sini cuma komposisi pesan (tree-style).
+// SEMUA field versi lama dipertahankan (recon FASE 0).
+export function renderHive(d) {
+  if (!d.enabled) {
+    return [`🐝 HiveMind · ⚪ disabled`, tree([
+      `Agent ID: ${d.agentId}`,
+      "Set hiveMindApiKey to connect.",
+    ])].join("\n");
+  }
+  // lessons/presets: array → jumlah, else "manual" (pull manual) atau 0 (sama logika lama).
+  const count = (v) => (Array.isArray(v) ? v.length : (d.pullMode === "manual" ? "manual" : 0));
+  return [`🐝 HiveMind · 🟢 enabled`, tree([
+    `Agent ID: ${d.agentId}`,
+    `URL: ${d.url}`,
+    `Pull mode: ${d.pullMode}`,
+    `Register: ${d.register ? "ok" : "warn"}`,
+    `Shared lessons: ${count(d.lessons)}`,
+    `Presets: ${count(d.presets)}`,
+    d.manualPull ? "Manual pull: completed" : null,
+  ])].join("\n");
+}
+
+// ── /pause · /resume ──────────────────────────────────────────────────────────
+// Teks asli dipertahankan verbatim (satu-baris status — tree tak menambah info;
+// dipusatkan di sini supaya index.js 1-baris & ikon konsisten).
+export function renderPaused() {
+  return "⏸ Paused autonomous cycles. Telegram control still works. Use /resume to start again.";
+}
+export function renderResumed() {
+  return "▶️ Autonomous cycles resumed.";
+}
+export function renderAlreadyRunning() {
+  return "Autonomous cycles are already running.";
+}
+
+// ── queue notice ──────────────────────────────────────────────────────────────
+export function renderQueued(n, preview) {
+  return `⏳ Queued (${n} in queue): "${preview}"`;
+}
+export function renderQueueFull() {
+  return "Queue is full (5 messages). Wait for the agent to finish.";
+}
+
+// ── error-reply terpusat ──────────────────────────────────────────────────────
+// Satu renderer error konsisten (ikon ⚠️ + label opsional). Menggantikan pola
+// ad-hoc "Error: <msg>" / "HiveMind error: <msg>" di handler yang disentuh batch
+// ini; tersedia untuk dipakai handler lain (sentralisasi penuh = follow-up).
+export function renderError(msg, label = "Error") {
+  return `⚠️ ${label}: ${msg}`;
+}

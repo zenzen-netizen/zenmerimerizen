@@ -3451,9 +3451,9 @@ async function telegramHandler(msg) {
   if (_managementBusy || _screeningBusy || busy) {
     if (_telegramQueue.length < 5) {
       _telegramQueue.push(msg);
-      sendMessage(`⏳ Queued (${_telegramQueue.length} in queue): "${text.slice(0, 60)}"`).catch(() => {});
+      sendMessage(systemView.renderQueued(_telegramQueue.length, text.slice(0, 60))).catch(() => {});
     } else {
-      sendMessage("Queue is full (5 messages). Wait for the agent to finish.").catch(() => {});
+      sendMessage(systemView.renderQueueFull()).catch(() => {});
     }
     return;
   }
@@ -3463,7 +3463,7 @@ async function telegramHandler(msg) {
       const briefing = await generateBriefing();
       await sendAndPinBriefing(briefing);
     } catch (e) {
-      await sendMessage(`Error: ${e.message}`).catch(() => {});
+      await sendMessage(systemView.renderError(e.message)).catch(() => {});
     }
     return;
   }
@@ -3472,7 +3472,7 @@ async function telegramHandler(msg) {
     try {
       await sendHTML(await buildReportForArg(text.slice("/report".length)));
     } catch (e) {
-      await sendMessage(`Error: ${e.message}`).catch(() => {});
+      await sendMessage(systemView.renderError(e.message)).catch(() => {});
     }
     return;
   }
@@ -3542,7 +3542,7 @@ async function telegramHandler(msg) {
       });
       await sendHTML(render(vm, "telegram"));
     } catch (e) {
-      await sendMessage(`Error: ${e.message}`).catch(() => {});
+      await sendMessage(systemView.renderError(e.message)).catch(() => {});
     }
     return;
   }
@@ -3579,7 +3579,7 @@ async function telegramHandler(msg) {
       });
       await sendHTML(render(vm, "telegram"));
     } catch (e) {
-      await sendMessage(`Error: ${e.message}`).catch(() => {});
+      await sendMessage(systemView.renderError(e.message)).catch(() => {});
     }
     return;
   }
@@ -3612,7 +3612,7 @@ async function telegramHandler(msg) {
       const rentMap = await getPositionsRentSol(positions.map((p) => p.position)).catch(() => ({}));
       const vm = positionsView.buildView(positions, config, rentMap);
       await sendHTML(render(vm, "telegram"));
-    } catch (e) { await sendMessage(`Error: ${e.message}`).catch(() => {}); }
+    } catch (e) { await sendMessage(systemView.renderError(e.message)).catch(() => {}); }
     return;
   }
 
@@ -3639,7 +3639,7 @@ async function telegramHandler(msg) {
       });
       await sendHTML(render(vm, "telegram"));
     } catch (e) {
-      await sendMessage(`Error: ${e.message}`).catch(() => {});
+      await sendMessage(systemView.renderError(e.message)).catch(() => {});
     }
     return;
   }
@@ -3660,7 +3660,7 @@ async function telegramHandler(msg) {
       } else {
         await sendMessage(`❌ Close failed: ${JSON.stringify(result)}`);
       }
-    } catch (e) { await sendMessage(`Error: ${e.message}`).catch(() => {}); }
+    } catch (e) { await sendMessage(systemView.renderError(e.message)).catch(() => {}); }
     return;
   }
 
@@ -3680,7 +3680,7 @@ async function telegramHandler(msg) {
       }
       await sendMessage(`Close-all finished.\n\n${results.join("\n")}`).catch(() => {});
     } catch (e) {
-      await sendMessage(`Error: ${e.message}`).catch(() => {});
+      await sendMessage(systemView.renderError(e.message)).catch(() => {});
     }
     return;
   }
@@ -3695,7 +3695,7 @@ async function telegramHandler(msg) {
       const pos = positions[idx];
       setPositionInstruction(pos.position, note);
       await sendMessage(`✅ Note set for ${pos.pair}:\n"${note}"`);
-    } catch (e) { await sendMessage(`Error: ${e.message}`).catch(() => {}); }
+    } catch (e) { await sendMessage(systemView.renderError(e.message)).catch(() => {}); }
     return;
   }
 
@@ -3714,7 +3714,7 @@ async function telegramHandler(msg) {
       }
       await sendMessage(`✅ Updated ${key} = ${JSON.stringify(value)}`).catch(() => {});
     } catch (e) {
-      await sendMessage(`Error: ${e.message}`).catch(() => {});
+      await sendMessage(systemView.renderError(e.message)).catch(() => {});
     }
     return;
   }
@@ -3723,7 +3723,7 @@ async function telegramHandler(msg) {
     try {
       await sendMessage(await runDeterministicScreen(5)).catch(() => {});
     } catch (e) {
-      await sendMessage(`Error: ${e.message}`).catch(() => {});
+      await sendMessage(systemView.renderError(e.message)).catch(() => {});
     }
     return;
   }
@@ -3750,7 +3750,7 @@ async function telegramHandler(msg) {
         result.txs?.length ? `Tx: ${result.txs[0]}` : null,
       ].filter(Boolean).join("\n")).catch(() => {});
     } catch (e) {
-      await sendMessage(`Error: ${e.message}`).catch(() => {});
+      await sendMessage(systemView.renderError(e.message)).catch(() => {});
     }
     return;
   }
@@ -3758,7 +3758,7 @@ async function telegramHandler(msg) {
   if (text === "/pause") {
     stopCronJobs();
     cronStarted = false;
-    await sendMessage("⏸ Paused autonomous cycles. Telegram control still works. Use /resume to start again.").catch(() => {});
+    await sendMessage(systemView.renderPaused()).catch(() => {});
     return;
   }
 
@@ -3768,9 +3768,9 @@ async function telegramHandler(msg) {
       timers.managementLastRun = Date.now();
       timers.screeningLastRun = Date.now();
       startCronJobs();
-      await sendMessage("▶️ Autonomous cycles resumed.").catch(() => {});
+      await sendMessage(systemView.renderResumed()).catch(() => {});
     } else {
-      await sendMessage("Autonomous cycles are already running.").catch(() => {});
+      await sendMessage(systemView.renderAlreadyRunning()).catch(() => {});
     }
     return;
   }
@@ -3780,7 +3780,7 @@ async function telegramHandler(msg) {
       const enabled = isHiveMindEnabled();
       const agentId = ensureAgentId();
       if (!enabled) {
-        await sendMessage(`HiveMind: disabled\nAgent ID: ${agentId}\nSet hiveMindApiKey to connect.`).catch(() => {});
+        await sendMessage(systemView.renderHive({ enabled: false, agentId })).catch(() => {});
         return;
       }
       const isManualPull = text === "/hive pull";
@@ -3790,18 +3790,12 @@ async function telegramHandler(msg) {
         (pullMode === "auto" || isManualPull) ? pullHiveMindLessons(12) : Promise.resolve(null),
         (pullMode === "auto" || isManualPull) ? pullHiveMindPresets() : Promise.resolve(null),
       ]);
-      await sendMessage([
-        "HiveMind: enabled",
-        `Agent ID: ${agentId}`,
-        `URL: ${config.hiveMind.url}`,
-        `Pull mode: ${pullMode}`,
-        `Register: ${registerResult ? "ok" : "warn"}`,
-        `Shared lessons: ${Array.isArray(lessons) ? lessons.length : (pullMode === "manual" ? "manual" : 0)}`,
-        `Presets: ${Array.isArray(presets) ? presets.length : (pullMode === "manual" ? "manual" : 0)}`,
-        isManualPull ? "Manual pull: completed" : null,
-      ].join("\n")).catch(() => {});
+      await sendMessage(systemView.renderHive({
+        enabled: true, agentId, url: config.hiveMind.url, pullMode,
+        register: registerResult, lessons, presets, manualPull: isManualPull,
+      })).catch(() => {});
     } catch (e) {
-      await sendMessage(`HiveMind error: ${e.message}`).catch(() => {});
+      await sendMessage(systemView.renderError(e.message, "HiveMind")).catch(() => {});
     }
     return;
   }
@@ -3830,7 +3824,7 @@ async function telegramHandler(msg) {
     else await sendMessage(stripThink(content));
   } catch (e) {
     if (liveMessage) await liveMessage.fail(e.message).catch(() => {});
-    else await sendMessage(`Error: ${e.message}`).catch(() => {});
+    else await sendMessage(systemView.renderError(e.message)).catch(() => {});
   } finally {
     busy = false;
     refreshPrompt();

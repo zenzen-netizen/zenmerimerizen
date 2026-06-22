@@ -2,7 +2,7 @@ import fs from "fs";
 import { log } from "./logger.js";
 import { repoPath } from "./repo-root.js";
 import { estimateGasSol } from "./reports.js";
-import { renderDeploy } from "./views/notifs.js";
+import { renderDeploy, renderOOR, renderSwap } from "./views/notifs.js";
 
 const USER_CONFIG_PATH = repoPath("user-config.json");
 
@@ -635,23 +635,14 @@ export async function notifyClose({ pair, pnlUsd, pnlPct, peakPnlPct, reason, le
   await sendHTML(lines.join("\n"));
 }
 
-export async function notifySwap({ inputSymbol, outputSymbol, amountIn, amountOut, tx }) {
+export async function notifySwap(data) {
   if (hasActiveLiveMessage()) return;
-  await sendHTML(
-    `🔄 <b>Swapped</b> ${escapeHtml(inputSymbol || "?")} → ${escapeHtml(outputSymbol || "?")}\n` +
-    NOTIF_DIV + "\n" +
-    `💱 In: ${amountIn ?? "?"}  ·  Out: ${amountOut ?? "?"}\n` +
-    `🔗 Tx: <code>${tx?.slice(0, 16)}...</code>`
-  );
+  await sendHTML(renderSwap(data)); // render → views/notifs.js; guard/trigger tak diubah
 }
 
-export async function notifyOutOfRange({ pair, minutesOOR }) {
+export async function notifyOutOfRange(data) {
   if (hasActiveLiveMessage()) return;
-  await sendHTML(
-    `⚠️ <b>Out of Range</b> ${escapeHtml(pair || "?")}\n` +
-    NOTIF_DIV + "\n" +
-    `⏱️ Been OOR for ${minutesOOR} minutes`
-  );
+  await sendHTML(renderOOR(data)); // render → views/notifs.js; guard/trigger tak diubah
 }
 
 function sleep(ms) {

@@ -6,7 +6,7 @@ Display-only, restart owner-only. Render notif → `views/notifs.js`; `telegram.
 - [x] 0  tuntasin 2dp fmtCur ($ branch) + literal Saldo wallet.js + re-verify msg ter-migrasi ✅
 - [x] 1  recon EXACT notifyDeploy/OOR/Swap/Close (telegram.js) — semua field + baseline ✅
 - [x] 2  notifyDeploy → views/notifs.js renderDeploy (tree, SEMUA field) ✅
-- [ ] 3  notifyOutOfRange + notifySwap → renderOOR + renderSwap (tree)
+- [x] 3  notifyOutOfRange + notifySwap → renderOOR + renderSwap (tree) ✅
 - [ ] 4  notifyClose → renderClose (tree + fmtBoth $+◎, SEMUA field)
 
 ## Temuan kritis (pra-eksekusi, ngaruh ke FASE 4)
@@ -60,6 +60,14 @@ selaras semua view ter-migrasi) + ikon per brief. Inline HTML field (`<code>`/`<
   header primitive). SEMUA field/nilai ADA: pair, amount SOL, racikan, priceRange, Cover ↓↑|, binStep/
   baseFee, Position[0:8], Tx[0:16]. Kondisional-OFF OK (esc &→&amp;, baris opsional hilang, └ pindah).
 - Intended diff: ✅→🚀, +" — ", DIV `─`16→SEP `━`16, tree ├/└, `  ·  `→` · `. node --check OK.
+
+## FASE 3 — hasil
+- `views/notifs.js` +`renderOOR(d)` (ikon 🔴, "Been OOR for N minutes" dipertahankan, ⏱️→ICON.time ⏱) +
+  `renderSwap(d)` (ikon 🔄, In/Out + Tx, ?? "?" fallback). `telegram.js` notifySwap/notifyOutOfRange →
+  wrapper tipis (guard tetap).
+- Cross-check baseline: multiset token IDENTIK kecuali `<b>` (bold header sengaja). Data ADA: swap
+  in→out/amountIn/amountOut/Tx[0:16]; OOR pair/minutesOOR. node --check OK.
+- Intended: OOR ⚠️→🔴, ⏱️→⏱, +" — ", DIV→SEP16, tree ├/└, `  ·  `→` · `.
 
 ## Catatan/limit-recovery
 (kosong)

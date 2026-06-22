@@ -38,3 +38,27 @@ export function renderDeploy(d) {
   lines.push(`🔗 Tx: <code>${d.tx?.slice(0, 16)}...</code>`);
   return [header(ICON.deploy, "Deployed", esc(d.pair || "?")), SEP, tree(lines)].join("\n");
 }
+
+// ── notifyOutOfRange (#7) ────────────────────────────────────────────────────
+/** @param d { pair, minutesOOR } */
+export function renderOOR(d) {
+  return [
+    header(ICON.oor, "Out of Range", esc(d.pair || "?")),
+    SEP,
+    tree([`${ICON.time} Been OOR for ${d.minutesOOR} minutes`]),
+  ].join("\n");
+}
+
+// ── notifySwap (#8) ──────────────────────────────────────────────────────────
+/** @param d { inputSymbol, outputSymbol, amountIn, amountOut, tx } */
+export function renderSwap(d) {
+  const subject = `${esc(d.inputSymbol || "?")} → ${esc(d.outputSymbol || "?")}`;
+  return [
+    header(ICON.swap, "Swapped", subject),
+    SEP,
+    tree([
+      `💱 In: ${d.amountIn ?? "?"} · Out: ${d.amountOut ?? "?"}`,
+      `🔗 Tx: <code>${d.tx?.slice(0, 16)}...</code>`,
+    ]),
+  ].join("\n");
+}

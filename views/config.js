@@ -140,14 +140,35 @@ function renderSubclusterRows(keys, rowMap, marked = false) {
     const meta = SUB_CLUSTER_META[cl];
     if (showL3 && meta) {
       out.push(`  ${meta.emoji} ${meta.label}`);
-      out.push(`  ${dash}`);
+      if (!marked) out.push(`  ${dash}`); // divider ┈ hanya gaya lama (origin)
     }
-    for (const k of members[cl]) {
-      placed.push(k);
-      const [label, value] = rowMap[k];
-      const indent = L4_CHILDREN.has(k) ? "      ↳ " : "    ";
-      const mk = marked ? `${MARK[KEY_ORIGIN[k]] || "·"} ` : "";
-      out.push(`${indent}${mk}${label}: ${value}${note(k)}`);
+    const mems = members[cl];
+    if (marked) {
+      // Gaya tree (view fungsi): induk (non-L4) dapat ├/└ — └ = induk TERAKHIR di
+      // sub-cluster ini; anak ↳ (L4) di-indent di bawah induknya, marker tetap,
+      // tanpa ├/└ (anak tak ikut dihitung dalam urutan ├/└). Header sub-cluster tetap.
+      const induks = mems.filter((k) => !L4_CHILDREN.has(k));
+      let seenInduk = 0;
+      for (const k of mems) {
+        placed.push(k);
+        const [label, value] = rowMap[k];
+        const mk = `${MARK[KEY_ORIGIN[k]] || "·"} `;
+        if (L4_CHILDREN.has(k)) {
+          out.push(`    ↳ ${mk}${label}: ${value}${note(k)}`);
+        } else {
+          seenInduk++;
+          const branch = seenInduk === induks.length ? "└" : "├";
+          out.push(`  ${branch} ${mk}${label}: ${value}${note(k)}`);
+        }
+      }
+    } else {
+      // Gaya lama (origin, marked=false): indent 4-spasi / ↳ 6-spasi, tanpa marker.
+      for (const k of mems) {
+        placed.push(k);
+        const [label, value] = rowMap[k];
+        const indent = L4_CHILDREN.has(k) ? "      ↳ " : "    ";
+        out.push(`${indent}${label}: ${value}${note(k)}`);
+      }
     }
   }
   return { text: out.join("\n"), placed };

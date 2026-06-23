@@ -5,7 +5,7 @@ Workstream 🅴 — layer presentasi modular. Display-only, scoping-inti NOL uba
 
 - [x] 1  /config: baris key sub-cluster → tree ├/└ (parity 166)
 - [x] 2  recon scope briefing (daily + periodik) — seksi + scope + lokasi analisis-dalam
-- [ ] 3  /briefing → Opsi B (all-time=stats; racikan-aktif=stats+analisis-dalam; disclosure)
+- [x] 3  /briefing → Opsi B (all-time=stats; racikan-aktif=stats+analisis-dalam; disclosure)
 - [ ] 4  /briefing alltime → command BARU Opsi A (all-time JUGA dapat analisis-dalam)
 
 ## Catatan/limit-recovery
@@ -59,3 +59,25 @@ Baseline: `/tmp/briefing-baseline-FASE2.js` (= working tree pra-FASE3) + `/tmp/b
 **Dispatch** (untuk FASE 4): `/briefing`(exact)→generateBriefing (index.js:3461 TG, :4013 REPL); `/report week|month|day`→generatePeriodicBriefing (index.js:285-287). Help: views/system.js:25-27. BOT_COMMANDS: telegram.js:510-518.
 
 **Rencana FASE 3/4**: helper `buildScopeBlock(perf,label,{deep,quantOpts,recOpts})` (stats selalu; deep→+verdict+quant+movement+breakdown+recs). Daily: all-time `{deep:allTimeDeep}`, racikan `{deep:true}`; hapus breakdown/recs bawah (folded). Periodik: buildTradeReport diretarget ke racikanWindowPerf (deep+TREND), all-racikan jadi stats-only. `generateBriefing({allTimeDeep})` + wrapper untuk `/briefing alltime`.
+
+### FASE 3 ✅ Opsi B (briefing.js, display-only)
+- **Helper baru** `buildScopeBlock(perf,label,{deep,quantOpts,recOpts})` (briefing.js:39-60): stats selalu;
+  deep→ +verdict +quant(`\n`) +movement(`\n`) +breakdown(`\n`,sessions:false) +recs(`\n`,bila recOpts). Spasi
+  meniru layout lama. Komponen fail-open.
+- **`generateBriefing({allTimeDeep=false})`**: signature ber-opsi. All-time = `buildScopeBlock(modePerf,"All-time
+  (semua racikan)",{deep:allTimeDeep,...})` → STATS only (default). Racikan = `buildScopeBlock(racikanPerf,
+  racikanLabel,{deep:true,...})` → STATS+DEEP. Disclosure tetap. **Breakdown + recommendations BAWAH dihapus**
+  (kini DI DALAM blok scope → analisis-dalam terkonsolidasi per-scope). `recOpts`(gas/trade 24h) + `quantOpts`
+  dihitung sekali, dipakai dua blok. Var lama `statsAll`/`statsRacikan` dibuang (bersih, 0 dangling).
+- **Emoji label**: formatStatsBlock SUDAH memprefiks `📊` → label cukup teks ("All-time (semua racikan)" vs
+  "Racikan aktif: <name>") biar tak double-emoji. Distinksi scope tetap jelas.
+- **`generatePeriodicBriefing` (Opsi B swap)**: `buildTradeReport` diretarget `windowPerf`→`racikanWindowPerf`
+  (statsLabel=racikanLabel) → report penuh+TREND scope RACIKAN; blok kedua jadi `formatStatsBlock(windowPerf,
+  "Semua racikan (Xd)")` STATS-only. Disclosure dipindah tepat di bawah report racikan.
+- **Bukti render** (`/tmp/render-full.mjs`, data live n=162/69):
+  - `/briefing`: All-time block = 6 baris STATS saja (`├…└🩸 Tail`). Racikan block = STATS+Verdict+Quant+Movement
+    +By strategy/racikan/narrative/close-rule+Recommendations+disclosure ("93 trade…dikecualikan PnL -$11.20").
+  - `/briefing alltime` (`{allTimeDeep:true}`): All-time block span 19→68 (49 baris) berisi Verdict/Quant/Movement
+    /By strategy/Recommendations → DEEP. Dua scope simetris.
+  - `/report week`: racikan label + "Semua racikan (7d)" + TREND semua hadir.
+- `node --check briefing.js` → OK. Scoping-inti (getModePerformance/keepMode/filter) NOL ubah.

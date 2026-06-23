@@ -36,6 +36,29 @@ function racikanScopeDisclosure() {
   } catch { return ""; }
 }
 
+/**
+ * Komposisi SATU blok scope untuk briefing harian (Opsi B / Opsi A). DISPLAY-ONLY:
+ * scoping (perf mana yang masuk) ditentukan PEMANGGIL — helper cuma menyusun tampilan.
+ *   - selalu: formatStatsBlock (PnL/ROI/win/PF/EV/payoff/DD/hold/in-range/best/worst).
+ *   - deep:true → + buildVerdict + formatQuantBlock + formatMovement + formatBreakdown
+ *     (+ buildRecommendations bila recOpts diberikan).
+ * Spasi antar sub-blok meniru layout lama: verdict rapat di bawah stats; quant/
+ * movement/breakdown/recs dipisah satu baris kosong. Tiap komponen fail-open (skip
+ * bila falsy). recs butuh perf+opts → recOpts (null = lewati recs).
+ */
+function buildScopeBlock(perf, label, { deep = false, quantOpts = {}, recOpts = null } = {}) {
+  const stats = computeTradeStats(perf);
+  const parts = [formatStatsBlock(stats, label)];
+  if (deep) {
+    const v = buildVerdict(stats); if (v) parts.push(v);
+    const q = formatQuantBlock(stats, quantOpts); if (q) parts.push("\n" + q);
+    const m = formatMovement(stats); if (m) parts.push("\n" + m);
+    const b = formatBreakdown(stats, { sessions: false }); if (b) parts.push("\n" + b);
+    if (recOpts) { const r = buildRecommendations(perf, stats, recOpts); if (r) parts.push("\n" + r); }
+  }
+  return parts.join("\n");
+}
+
 // On-chain tools whose successful calls cost network/gas fees.
 const ONCHAIN_TOOLS = ["deploy_position", "close_position", "claim_fees", "swap_token"];
 
@@ -274,7 +297,7 @@ function buildSkipReviewSection() {
   }
 }
 
-export async function generateBriefing() {
+export async function generateBriefing({ allTimeDeep = false } = {}) {
   const state = loadJson(STATE_FILE) || { positions: {}, recentEvents: [] };
   const lessonsData = loadJson(LESSONS_FILE) || { lessons: [], performance: [] };
 
@@ -304,15 +327,14 @@ export async function generateBriefing() {
   const tradingLessons = lessonsLast24h.filter(l => l.sourceType !== "config_change" && !(l.tags || []).includes("config_change"));
   const configChangeCount = lessonsLast24h.length - tradingLessons.length;
 
-  // 4. Current State + all-time stats (risk metrics, not just win-rate)
+  // 4. Current State + scope perf sets (risk metrics, not just win-rate).
+  //    Opsi B: dua scope sama-sama tampil, analisis-dalam difokus ke racikan aktif.
+  //    All-time = mode-scoped semua racikan; Racikan = mode + active-racikan + !suspect
+  //    (sama persis scope /report default → briefing rekonsiliasi). DISPLAY-ONLY.
   const openPositions = allPositions.filter(p => !p.closed);
   const modePerf = (lessonsData.performance || []).filter(keepMode);
-  const statsAll = computeTradeStats(modePerf);
-  // Racikan-scoped stats shown ALONGSIDE All-time so the briefing reconciles with
-  // /report default (same scope: getModePerformance = mode + active-racikan + !suspect).
-  // Display-only; does NOT change the existing all-live `modePerf`/`statsAll`.
-  const statsRacikan = computeTradeStats(getModePerformance());
-  const racikanLabel = config.activeSetup ? `Racikan: ${config.activeSetup}` : "Racikan aktif";
+  const racikanPerf = getModePerformance();
+  const racikanLabel = config.activeSetup ? `Racikan aktif: ${config.activeSetup}` : "Racikan aktif";
 
   // 5. Cost data (LLM + SOL price for gas USD) + gas estimate over the 24h window
   const [costData, balance, credits, wallet] = await Promise.all([
@@ -336,6 +358,10 @@ export async function generateBriefing() {
     ? computeCostDragPct({ costUsd: gasUsd24h + llmUsd24h, windowDays: 1, modalUsd })
     : null;
   const quantOpts = Number.isFinite(costDragPct) ? { costDragPct } : {};
+  // Recs opts (per-trade gas dari window 24h) — dipakai blok deep mana pun.
+  const recOpts = {
+    gasPerTradeUsd: solPrice && perfLast24h.length ? (gasSol * solPrice) / perfLast24h.length : 0,
+  };
 
   // 6. Format Message
   const lines = [
@@ -357,12 +383,12 @@ export async function generateBriefing() {
     "",
     formatPnlTracker(modePerf, { solPriceUsd: solPrice || null }),
     "",
-    formatStatsBlock(statsAll, "All-time (semua racikan)"),
-    buildVerdict(statsAll) || "",
-    formatQuantBlock(statsAll, quantOpts) ? "\n" + formatQuantBlock(statsAll, quantOpts) : "",
-    formatMovement(statsAll) ? "\n" + formatMovement(statsAll) : "",
+    // All-time (semua racikan) — STATS saja (Opsi B). /briefing alltime → deep (Opsi A).
+    // (formatStatsBlock sudah memprefiks 📊 — label cukup teks, distinksi scope jelas.)
+    buildScopeBlock(modePerf, "All-time (semua racikan)", { deep: allTimeDeep, quantOpts, recOpts }),
     "",
-    formatStatsBlock(statsRacikan, racikanLabel),
+    // Racikan aktif — STATS + analisis-dalam (verdict/quant/movement/breakdown/recs).
+    buildScopeBlock(racikanPerf, racikanLabel, { deep: true, quantOpts, recOpts }),
     racikanScopeDisclosure() || "",
     "",
     section(`<b>Lessons Learned (24h):</b>`, [
@@ -384,11 +410,8 @@ export async function generateBriefing() {
     "",
     buildSkipReviewSection() || "",
     "",
-    formatBreakdown(statsAll, { sessions: false }) || "",
-    "",
-    buildRecommendations(modePerf, statsAll, {
-      gasPerTradeUsd: solPrice && perfLast24h.length ? (gasSol * solPrice) / perfLast24h.length : 0,
-    }) || "",
+    // Opsi B: breakdown + recommendations kini di DALAM blok scope (buildScopeBlock
+    // deep) — analisis-dalam terkonsolidasi per-scope, tak lagi berdiri sendiri di bawah.
     SEP
   ];
 
@@ -423,11 +446,11 @@ export async function generatePeriodicBriefing(period = "week") {
   });
   const opened = allPositions.filter((p) => new Date(p.deployed_at).getTime() >= since).length;
   const netPnl = windowPerf.reduce((s, p) => s + (p.pnl_usd || 0), 0);
-  // Racikan-scoped windowed perf (same scope as /report default) for a second stats
-  // block, so the periodic digest reconciles with /report. Display-only; the all-live
-  // `windowPerf` report above is unchanged.
+  // Opsi B: analisis-dalam (report penuh + TREND) difokus ke RACIKAN aktif; window
+  // semua-racikan turun jadi blok STATS-only buat rekonsiliasi. Scope sama /report
+  // default (getModePerformance = mode + active-racikan + !suspect). DISPLAY-ONLY.
   const racikanWindowPerf = getModePerformance().filter((p) => new Date(p.closed_at || p.recorded_at || 0).getTime() >= since);
-  const racikanLabel = config.activeSetup ? `Racikan: ${config.activeSetup} (${days}d)` : `Racikan aktif (${days}d)`;
+  const racikanLabel = config.activeSetup ? `Racikan aktif: ${config.activeSetup} (${days}d)` : `Racikan aktif (${days}d)`;
 
   const [balance, credits, wallet] = await Promise.all([
     getOpenRouterBalance(),
@@ -453,9 +476,10 @@ export async function generatePeriodicBriefing(period = "week") {
   const windowCostUsd = (gasUsd ?? 0) + llmTotal;
   const costDragPct = modalUsd ? computeCostDragPct({ costUsd: windowCostUsd, windowDays: days, modalUsd }) : null;
 
-  const report = buildTradeReport(windowPerf, {
+  // Report penuh (stats+verdict+TREND+breakdown+recs) di-scope ke RACIKAN aktif (Opsi B).
+  const report = buildTradeReport(racikanWindowPerf, {
     title: `${emoji} ${label} Briefing — last ${days}d`,
-    statsLabel: `Last ${days}d (semua racikan)`,
+    statsLabel: racikanLabel,
     trendN: period === "month" ? 10 : 7,
     identity: (() => { try { return formatIdentity({ compact: true }); } catch { return null; } })(),
     quant: Number.isFinite(costDragPct) ? { costDragPct } : {},
@@ -494,8 +518,9 @@ export async function generatePeriodicBriefing(period = "week") {
 
   const parts = [
     report,
-    formatStatsBlock(computeTradeStats(racikanWindowPerf), racikanLabel),
     racikanScopeDisclosure() || null,
+    // Window semua-racikan → STATS-only (rekonsiliasi); analisis-dalam ada di report racikan.
+    formatStatsBlock(computeTradeStats(windowPerf), `Semua racikan (${days}d)`),
     formatPnlTracker((lessonsData.performance || []).filter(keepMode), { solPriceUsd: solPrice || null }) || null,
     section(`<b>Activity (${days}d):</b>`, [`📥 ${opened} opened`, `📤 ${windowPerf.length} closed`]),
     buildFeatureStatus(),

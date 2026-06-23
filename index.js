@@ -3458,9 +3458,11 @@ async function telegramHandler(msg) {
     return;
   }
 
-  if (text === "/briefing") {
+  // /briefing alltime = Opsi A (all-time block JUGA analisis-dalam) — exact-match
+  // subcommand dicek di kondisi yang sama (pola /config origin), default = Opsi B.
+  if (text === "/briefing" || text === "/briefing alltime") {
     try {
-      const briefing = await generateBriefing();
+      const briefing = await generateBriefing({ allTimeDeep: text === "/briefing alltime" });
       await sendAndPinBriefing(briefing);
     } catch (e) {
       await sendMessage(systemView.renderError(e.message)).catch(() => {});
@@ -3930,7 +3932,7 @@ Commands:
   auto           Let the agent pick and deploy automatically
   /status        Refresh wallet + positions
   /candidates    Refresh top pool list
-  /briefing      Show morning briefing (last 24h)
+  /briefing      Show morning briefing (last 24h) — /briefing alltime = all-time juga analisis-dalam
   /report        Trade report — /report [all|setups|<racikan>|week|month|day]
   /guide         Panduan setting (TOC) — /guide <no|katakunci|all>
   /learn         Study top LPers from the best current pool and save lessons
@@ -4010,9 +4012,9 @@ Commands:
       return;
     }
 
-    if (input === "/briefing") {
+    if (input === "/briefing" || input === "/briefing alltime") {
       await runBusy(async () => {
-        const briefing = await generateBriefing();
+        const briefing = await generateBriefing({ allTimeDeep: input === "/briefing alltime" });
         console.log(`\n${briefing.replace(/<[^>]*>/g, "")}\n`);
       });
       return;

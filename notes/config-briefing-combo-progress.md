@@ -6,7 +6,7 @@ Workstream 🅴 — layer presentasi modular. Display-only, scoping-inti NOL uba
 - [x] 1  /config: baris key sub-cluster → tree ├/└ (parity 166)
 - [x] 2  recon scope briefing (daily + periodik) — seksi + scope + lokasi analisis-dalam
 - [x] 3  /briefing → Opsi B (all-time=stats; racikan-aktif=stats+analisis-dalam; disclosure)
-- [ ] 4  /briefing alltime → command BARU Opsi A (all-time JUGA dapat analisis-dalam)
+- [x] 4  /briefing alltime → command BARU Opsi A (all-time JUGA dapat analisis-dalam)
 
 ## Catatan/limit-recovery
 
@@ -81,3 +81,20 @@ Baseline: `/tmp/briefing-baseline-FASE2.js` (= working tree pra-FASE3) + `/tmp/b
     /By strategy/Recommendations → DEEP. Dua scope simetris.
   - `/report week`: racikan label + "Semua racikan (7d)" + TREND semua hadir.
 - `node --check briefing.js` → OK. Scoping-inti (getModePerformance/keepMode/filter) NOL ubah.
+
+### FASE 4 ✅ command `/briefing alltime` (Opsi A, aditif)
+Subcommand exact-match (pola /config origin), bukan entri setMyCommands terpisah (spasi tak boleh).
+Wired di **5 permukaan**:
+1. **index.js Telegram** (:3461): `if (text === "/briefing" || text === "/briefing alltime")` →
+   `generateBriefing({ allTimeDeep: text === "/briefing alltime" })`. Default `/briefing` = Opsi B.
+2. **index.js REPL** (:4013): pola sama, `input === "/briefing alltime"` → allTimeDeep.
+3. **index.js console help** (:3933): baris `/briefing` di-append "· /briefing alltime = all-time juga analisis-dalam".
+4. **views/system.js renderHelp** (:25-27): +baris "/briefing alltime — … (dua scope simetris)" (tree ├ otomatis).
+5. **telegram.js BOT_COMMANDS** (:516): desc briefing → "Morning briefing (·alltime = all-time juga deep)".
+- Bukti: `generateBriefing({allTimeDeep:true})` render → all-time block deep (Verdict/Quant/Movement/By-strategy/
+  Recs hadir, span 49 baris). renderHelp → dua baris briefing tampil tree-style. `node --check` index/telegram/system OK.
+
+## RINGKAS VERIFIKASI AKHIR
+- Commits (branch experimental): cba4b75 (F1) · 465caad (F2) · 4e7bb6d (F3) · F4 (di bawah).
+- /config parity 166 lulus (F1). `node --check` semua file lulus. Tak ada engine/money-logic/tools/scoping-inti kesentuh.
+- ⚠️ Restart owner-only (Claude Code TIDAK restart). Sisa workstream 🅴: /settings (menu 2-mode) + Batch F.

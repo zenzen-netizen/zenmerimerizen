@@ -513,7 +513,7 @@ const BOT_COMMANDS = [
   { command: "wallet",     description: "Wallet + SOL growth tracker (1d/7d/30d)" },
   { command: "positions",  description: "List open positions" },
   { command: "pool",       description: "Detailed info for one open position" },
-  { command: "briefing",   description: "Morning briefing" },
+  { command: "briefing",   description: "Morning briefing (·alltime = all-time juga deep)" },
   { command: "report",     description: "Trade learning report (week|month|day)" },
   { command: "close",      description: "Close one position by index" },
   { command: "closeall",   description: "Close all open positions" },

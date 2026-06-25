@@ -5,7 +5,7 @@ Brief: Batch D BUILD — Mode Campur (per-fungsi, default) + Mode Pisah (per-asa
 - [x] 1  EKSTRAK builder keyboard → views/settings.js (Pisah BYTE-IDENTIK) ✅
 - [x] 2  ADD Mode Campur (fn-landing + kontrol + marker + toggle + default=Campur) ✅
 - [x] 3  return-after-edit sadar-mode (MENU_KEY_TO_FNGROUP) ✅
-- [ ] 4  (opsional) marker 🟠 money (MONEY_KEYS)
+- [x] 4  (opsional) marker 🟠 money (MONEY_KEYS) ✅
 
 ## FASE 1 ✅ (commit berikut)
 - `views/settings.js` (baru, 475 baris): 21 builder dipindah verbatim (settingValue, fmtSettingValue, settingButton, toggleButton, categoryButton, stepButtons, inputButton, MENU consts, chunkRows, cycleControl, findSubgroup, editableCountFor, settingsHeaderRows/GroupRows/ControlRows, formatSettingsLandingSummary, renderSettingsMain/Section/Group/Presets/Menu) + `initSettingsViews`.
@@ -30,6 +30,14 @@ Brief: Batch D BUILD — Mode Campur (per-fungsi, default) + Mode Pisah (per-asa
 - **cat handler:** SATU baris navigasi di-mode-kan: re-render `page:"zen-screening"` → `returnTokenForKey("screeningCategories")` (Pisah→`zen-screening` byte-identik krn 2-key tak terpaginasi; Campur→`fn-screening`). `executeTool`/clamp DI ATASnya tak disentuh. Tanpa ini toggle kategori di Campur loncat ke Pisah.
 - **Bukti logika** (harness replika builder+returnTokenForKey, mock MENU_CONTROLS sv()-transform meniru gap namespace): domain match (166 key _PAGE ⊆ _FNGROUP); Pisah zen-gmgn→zen-gmgn, dev-management~2→~2; Campur fn-gmgn~2→fn-gmgn~2 (grup sama pertahankan hal), fn-exit edit stopLoss→fn-exit, fn-landing edit gmgn→fn-gmgn (masuk grup), fn-exit edit gmgn→fn-gmgn (lintas-grup drop hal), unknown→fn-sizing (fallback).
 - `node --check` index.js OK.
+
+## FASE 4 ✅ (commit berikut)
+- **config-origin.js:** `MONEY_KEYS` (export, render-only) = **120 key** yang mengubah PERILAKU dagang (modal/gate/cooldown). Diturunkan per-fungsi: grup dagang penuh (sizing 12, screening 25 [−2 discord inert], gmgn 37, exit 19, strategy 5, indik 14) + subset eksperimen yang gerakkan keputusan (exp 8: exitLiquidity*, marketRegime*, conviction*, idleScreeningCooldown*). NON-money (0): jadwal/llm/darwin/reports/infra. solMode (infra) & discord excluded.
+- **views/settings.js:** import `MONEY_KEYS`; di `settingsControlRows`, prefix label = `🟠 ` (money, KEDUA mode) + `⚙️/🧩` (origin, Campur saja). Non-money + Pisah → prefix "" → label byte-identik.
+- **Bukti struktur Pisah UTUH:** diff callback_data semua 8 page Pisah (FASE-1 baseline vs sekarang) = **purely additive** — cuma `cfg:page:fn-landing` (toggle) per page; SEMUA callback_data kontrol/nav/pager byte-identik (nol `<`/ubah). 🟠 cuma nambah di TEKS label money key.
+- **Bukti 🟠 tepat sasaran:** dev-llm (non-money) = 0 tombol 🟠; dev-management = money keys (maxPositions/maxDeployAmount/positionSizePct/minSolToOpen/…) ber-🟠.
+- ⚠️ **Catatan:** 🟠 muncul di label tombol Pisah money key (sesuai FASE 4 "Campur & Pisah") — jadi Pisah byte-identik **struktur** (callback_data/urutan/paginasi) tapi TEKS label money key kini ber-🟠. 120/140 kontrol = money → di grup dagang hampir semua tombol 🟠 (signal level-GRUP: grup dagang all-orange vs jadwal/llm/darwin/reports/infra none). Commit terisolasi → revert 1 commit bila owner mau lebih bersih.
+- `node --check` config-origin.js + views/settings.js OK.
 
 ---
 

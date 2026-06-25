@@ -14,7 +14,7 @@
 
 import { config } from "../config.js";
 import { listPresets, getActiveSetupStatus } from "../preset-manager.js";
-import { ORIGIN_SECTIONS, KEY_SUBCLUSTER, SUB_CLUSTER_META, KEY_ORIGIN, FUNCTION_GROUPS } from "../config-origin.js";
+import { ORIGIN_SECTIONS, KEY_SUBCLUSTER, SUB_CLUSTER_META, KEY_ORIGIN, FUNCTION_GROUPS, MONEY_KEYS } from "../config-origin.js";
 
 // ── Injected deps (set once from index.js at startup) ────────────────────────
 // _deps.MENU_CONTROLS       — editable-control registry (index.js)
@@ -338,9 +338,12 @@ function settingsGroupRows(sec, activeGroupId) {
 // controls pair two-per-row. Returns rows (incl. cluster headers) for pagination.
 function settingsControlRows(sg, { withOriginMarker = false } = {}) {
   const controls = MENU_CONTROLS();
-  // Per-key prefix: empty unless Mode Campur asked for the ⚙️/🧩 origin marker.
-  // When empty, `${pfx}${label}` === label, so Pisah stays byte-identik.
-  const pfx = (k) => (withOriginMarker ? ORIGIN_MARK[KEY_ORIGIN[k]] || "" : "");
+  // Per-key label prefix. 🟠 = money key (both modes — capital/gate/cooldown);
+  // ⚙️/🧩 origin marker only in Mode Campur (Pisah groups BY origin already). For a
+  // non-money key in Pisah both parts are empty → `${pfx}${label}` === label, so the
+  // Pisah control STRUCTURE (callback_data/order/pagination) is unchanged.
+  const pfx = (k) =>
+    `${MONEY_KEYS.has(k) ? "🟠 " : ""}${withOriginMarker ? ORIGIN_MARK[KEY_ORIGIN[k]] || "" : ""}`;
   const order = [];
   const members = {};
   for (const k of sg.keys) {

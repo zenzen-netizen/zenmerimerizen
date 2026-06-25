@@ -552,3 +552,27 @@ export const KEY_ORIGIN = (() => {
   for (const sec of ORIGIN_SECTIONS) for (const sg of sec.subgroups) for (const k of sg.keys) m[k] = sec.id;
   return m;
 })();
+
+// ── MONEY keys (🟠 render-only marker) — Batch D recon §6 ─────────────────────
+// Keys whose value changes trading BEHAVIOR (capital sizing, entry/exit gates,
+// cooldowns). Surfaced as a 🟠 prefix on the /settings CONTROL buttons (both modes)
+// so a glance separates "this moves money" from display/infra/tuning toggles. PURE
+// DATA — no logic gates on this; it only decorates labels.
+// Derived by FUNCTION: the trading function groups are wholly money; the experiment
+// group is mixed (only the ones that actually move a decision); jadwal/llm/darwin/
+// reports/infra are not money. Discord keys are inert (OFF/not wired) → excluded.
+const MONEY_FN_GROUPS = new Set(["sizing", "screening", "gmgn", "exit", "strategy", "indik"]);
+const MONEY_EXP_KEYS = new Set([
+  "exitLiquidityCheck", "exitLiquidityMaxSlippagePct", "marketRegimeGate", "marketRegimeMaxDrop24hPct",
+  "convictionSizing", "convictionSizingMaxAdjustPct", "idleScreeningCooldown", "idleScreeningCooldownMin",
+]);
+const MONEY_EXCLUDE = new Set(["useDiscordSignals", "discordSignalMode"]);
+export const MONEY_KEYS = (() => {
+  const s = new Set();
+  for (const g of FUNCTION_GROUPS) {
+    if (MONEY_FN_GROUPS.has(g.id)) for (const k of g.keys) s.add(k);
+    else if (g.id === "exp") for (const k of g.keys) if (MONEY_EXP_KEYS.has(k)) s.add(k);
+  }
+  for (const k of MONEY_EXCLUDE) s.delete(k);
+  return s;
+})();

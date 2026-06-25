@@ -16,7 +16,7 @@ Peta `file:line` di `notes/batchF-recon.md`. Restart owner-only.
 - [x] 1  Management cycle: reportLines+Summary+no-pos → tree (views/cycle.js), report-LLM dibingkai
 - [x] 2  Screening cycle: skip/no-candidates/no-deploy/funnel → tree (views/cycle.js), vocab 🚀/⛔ utuh
 - [x] 3  Confirm-prompt: summarizeTradeAction + config-diff + edit confirmed/cancelled/expired → rapi
-- [ ] 4  Tool-line restyle DI telegram.js (toolLabel/summarizeToolResult/render), flow/depth utuh
+- [x] 4  Tool-line restyle DI telegram.js (toolLabel/summarizeToolResult/render), flow/depth utuh
 
 ---
 
@@ -36,3 +36,8 @@ Peta `file:line` di `notes/batchF-recon.md`. Restart owner-only.
 - `views/cycle.js`: `summarizeTradeAction(toolName,args)` PINDAH dari index.js (pure/defensive, sub-baris jadi tree, header vocab 🚀/🔻/💰/🔁 utuh), `buildConfigDiff(entries)` (tree "key: current → val"), const `CONFIRM_OK/CONFIRM_NO/CONFIRM_EXPIRED` (netral utk trade & config; 2 string expired digabung jadi 1).
 - index.js: hapus def lokal summarizeTradeAction (import dari cycle.js); call-site requestActionConfirmation tetap. Timeout trade (:2109) + config (:2194) → CONFIRM_EXPIRED; config prompt lines → buildConfigDiff; handler (:2928) confirmed/cancelled → CONFIRM_OK/CONFIRM_NO. Wrapper `⚠️ Konfirmasi aksi ini?` & `⚠️ Update config?` tetap.
 - Nol ubah gate (garis merah #2): slot `_pendingConfirmation`, signature `JSON.stringify(args)`, timeout 30s, tombol confirm:yes/no, handler resolve, agent.js:450-457, CHAT_CONFIRM_TOOLS. Cuma teks.
+
+## FASE 4 — Tool-line restyle (DI telegram.js) ✅
+- telegram.js: `import { ICON } from "./views/format.js"` (format.js MURNI/nol-import → aman, sejajar import notifs.js yg sudah ada). Glyph stream: toolStart `ℹ️ …`→`⏳ …` (ICON.pending), toolFinish `✅/❌`→ICON.ok/ICON.fail. summarizeToolResult +2 case (check_smart_wallets_on_pool→"N smart wallets" via `in_pool.length`; get_active_bin→"bin X" via `binId` — dua-duanya bentuk hasil DIVERIFIKASI di src).
+- toolLabel DIBIARKAN: sudah label manusiawi + fallback `name.replace(/_/g," ")` rapi; nambah entri = redundan.
+- Bukti garis merah #1 (mekanisme live UTUH): diff telegram.js HANYA import + 2 summary case + 2 glyph (git diff). `_liveMessageDepth` ↑↓ (:408/434/448), scheduleFlush/flushNow/flushFinal/finalize/fail, upsertToolLine match `entry.includes(\` ${label}\`)` TAK tersentuh. Uji: start→finish update baris SAMA (2 tool → 2 baris, bukan 4). Format `${icon} ${label}${suffix}` struktur tetap → match valid.

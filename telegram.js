@@ -3,6 +3,7 @@ import { log } from "./logger.js";
 import { repoPath } from "./repo-root.js";
 import { estimateGasSol } from "./reports.js";
 import { renderDeploy, renderOOR, renderSwap, renderClose } from "./views/notifs.js";
+import { ICON } from "./views/format.js";
 
 const USER_CONFIG_PATH = repoPath("user-config.json");
 
@@ -324,6 +325,10 @@ function summarizeToolResult(name, result) {
     case "study_top_lpers":
     case "get_top_lpers":
       return `${result.lpers?.length ?? 0} LPers`;
+    case "check_smart_wallets_on_pool":
+      return `${result.in_pool?.length ?? 0} smart wallets`;
+    case "get_active_bin":
+      return result.binId != null ? `bin ${result.binId}` : "done";
     default:
       return result.success === false ? "failed" : "done";
   }
@@ -409,10 +414,10 @@ export async function createLiveMessage(title, intro = "Starting...") {
 
   return {
     async toolStart(name) {
-      await upsertToolLine(name, "ℹ️", "...");
+      await upsertToolLine(name, ICON.pending, "…");
     },
     async toolFinish(name, result, success) {
-      const icon = success ? "✅" : "❌";
+      const icon = success ? ICON.ok : ICON.fail;
       const summary = summarizeToolResult(name, result);
       await upsertToolLine(name, icon, summary ? `— ${summary}` : "");
     },

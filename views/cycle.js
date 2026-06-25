@@ -138,3 +138,46 @@ export function buildLoneNoDeploy({ candidateName = "unknown", skipReason = "", 
   ].join("\n");
   return funnel ? `${block}\n\n─────────────\n${funnel}` : block;
 }
+
+// ── Confirm-gate (display ⟂ logika; lihat recon §D) ─────────────────────────────
+
+/**
+ * Ringkasan satu-aksi untuk prompt konfirmasi (deploy/close/claim/swap).
+ * PURE/DEFENSIVE: bentuk arg aneh tetap menghasilkan baris terbaca (tak pernah throw).
+ * Vocab header (🚀/🔻/💰/🔁) dipertahankan apa adanya; cuma sub-baris jadi tree.
+ */
+export function summarizeTradeAction(toolName, args = {}) {
+  const a = args || {};
+  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
+  const shortAddr = (x) => (typeof x === "string" && x.length > 12 ? `${x.slice(0, 4)}…${x.slice(-4)}` : (x ?? "?"));
+  if (toolName === "deploy_position") {
+    const amt = num(a.amount_y) ?? num(a.amount_sol) ?? num(a.amount_x);
+    return `🚀 BUKA POSISI (deploy)\n${tree([
+      `pool: ${shortAddr(a.pool_address)}`,
+      `◎ ${amt ?? "?"} SOL${a.strategy ? ` | ${a.strategy}` : ""}`,
+    ])}`;
+  }
+  if (toolName === "close_position") {
+    return `🔻 TUTUP POSISI (close)\n${tree([
+      `position: ${shortAddr(a.position_address)}`,
+      a.reason ? `reason: ${a.reason}` : null,
+    ])}`;
+  }
+  if (toolName === "claim_fees") {
+    return `💰 CLAIM FEES\n${tree([`position: ${shortAddr(a.position_address)}`])}`;
+  }
+  if (toolName === "swap_token") {
+    return `🔁 SWAP TOKEN\n${tree([`${num(a.amount) ?? "?"} ${shortAddr(a.input_mint)} → ${shortAddr(a.output_mint)}`])}`;
+  }
+  return `${toolName}\n${JSON.stringify(a).slice(0, 200)}`;
+}
+
+/** Diff update_config sebagai tree: "key: current → val" per baris. */
+export function buildConfigDiff(entries = []) {
+  return tree((entries || []).map((e) => `${e.key}: ${e.current ?? "unset"} → ${e.val}`));
+}
+
+// Edit pasca-aksi (display saja; netral utk trade & config). Single-source.
+export const CONFIRM_OK = "✅ Confirmed — executing…";
+export const CONFIRM_NO = "❌ Cancelled — no action taken.";
+export const CONFIRM_EXPIRED = "⏰ Expired — no action taken.";

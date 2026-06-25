@@ -61,6 +61,8 @@ import * as systemView from "./views/system.js";
 import {
   buildMgmtReport, frameMgmtResult,
   cycleSkip, cycleFail, buildNoCandidates, buildLoneNoDeploy,
+  summarizeTradeAction, buildConfigDiff,
+  CONFIRM_OK, CONFIRM_NO, CONFIRM_EXPIRED,
 } from "./views/cycle.js";
 import {
   initSettingsViews, renderSettingsMenu,
@@ -2063,27 +2065,7 @@ function getConfigValue(key) {
   return undefined;
 }
 
-// One-line human summary of a trade action for the confirmation prompt. Pure/defensive:
-// any odd arg shape still produces a readable line (never throws).
-function summarizeTradeAction(toolName, args = {}) {
-  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
-  const shortAddr = (a) => (typeof a === "string" && a.length > 12 ? `${a.slice(0, 4)}…${a.slice(-4)}` : (a ?? "?"));
-  if (toolName === "deploy_position") {
-    const amt = num(args.amount_y) ?? num(args.amount_sol) ?? num(args.amount_x);
-    const strat = args.strategy ? ` | ${args.strategy}` : "";
-    return `🚀 BUKA POSISI (deploy)\n  pool: ${shortAddr(args.pool_address)}\n  ◎ ${amt ?? "?"} SOL${strat}`;
-  }
-  if (toolName === "close_position") {
-    return `🔻 TUTUP POSISI (close)\n  position: ${shortAddr(args.position_address)}${args.reason ? `\n  reason: ${args.reason}` : ""}`;
-  }
-  if (toolName === "claim_fees") {
-    return `💰 CLAIM FEES\n  position: ${shortAddr(args.position_address)}`;
-  }
-  if (toolName === "swap_token") {
-    return `🔁 SWAP TOKEN\n  ${num(args.amount) ?? "?"} ${shortAddr(args.input_mint)} → ${shortAddr(args.output_mint)}`;
-  }
-  return `${toolName}\n  ${JSON.stringify(args).slice(0, 200)}`;
-}
+// summarizeTradeAction (prompt confirm) → views/cycle.js (pure/defensive). Lihat FASE 3.
 
 // Confirm a real-capital / live-position action (deploy/close/claim/swap) in the interactive
 // path. Unlike update_config there is no diff to compute and no "no-op" to skip — the action
@@ -2106,7 +2088,7 @@ async function requestActionConfirmation(toolName, args) {
 
   pending.timer = setTimeout(async () => {
     if (_pendingConfirmation === pending) _pendingConfirmation = null;
-    if (pending.messageId) await editMessage("⏰ Expired — no action taken.", pending.messageId).catch(() => {});
+    if (pending.messageId) await editMessage(CONFIRM_EXPIRED, pending.messageId).catch(() => {});
     resolveFn(false);
   }, 30_000);
 
@@ -2191,15 +2173,14 @@ async function requestConfirmation(toolName, args) {
 
   pending.timer = setTimeout(async () => {
     if (_pendingConfirmation === pending) _pendingConfirmation = null;
-    if (pending.messageId) await editMessage("⏰ Expired — no changes made.", pending.messageId).catch(() => {});
+    if (pending.messageId) await editMessage(CONFIRM_EXPIRED, pending.messageId).catch(() => {});
     resolveFn(false);
   }, 30_000);
 
-  const lines = Object.entries(effective).map(([key, val]) => {
-    const current = getConfigValue(key);
-    return `  ${key}: ${current ?? "unset"} → ${val}`;
-  });
-  const sent = await sendMessageWithButtons(`⚠️ Update config?\n${lines.join("\n")}`, [
+  const diff = buildConfigDiff(Object.entries(effective).map(([key, val]) => ({
+    key, current: getConfigValue(key), val,
+  })));
+  const sent = await sendMessageWithButtons(`⚠️ Update config?\n${diff}`, [
     [
       { text: "✅ Ya", callback_data: "confirm:yes" },
       { text: "❌ Batal", callback_data: "confirm:no" },
@@ -2925,7 +2906,7 @@ async function telegramHandler(msg) {
       const resolve = _pendingConfirmation.resolve;
       _pendingConfirmation = null;
       await answerCallbackQuery(msg.callbackQueryId, confirmed ? "Confirmed" : "Cancelled");
-      if (msgId) await editMessage(confirmed ? "✅ Confirmed — updating..." : "❌ Cancelled — no changes made.", msgId).catch(() => {});
+      if (msgId) await editMessage(confirmed ? CONFIRM_OK : CONFIRM_NO, msgId).catch(() => {});
       resolve(confirmed);
     } else {
       await answerCallbackQuery(msg.callbackQueryId, "Expired");

@@ -15,7 +15,7 @@ Peta `file:line` di `notes/batchF-recon.md`. Restart owner-only.
 ## Fase
 - [x] 1  Management cycle: reportLines+Summary+no-pos → tree (views/cycle.js), report-LLM dibingkai
 - [x] 2  Screening cycle: skip/no-candidates/no-deploy/funnel → tree (views/cycle.js), vocab 🚀/⛔ utuh
-- [ ] 3  Confirm-prompt: summarizeTradeAction + config-diff + edit confirmed/cancelled/expired → rapi
+- [x] 3  Confirm-prompt: summarizeTradeAction + config-diff + edit confirmed/cancelled/expired → rapi
 - [ ] 4  Tool-line restyle DI telegram.js (toolLabel/summarizeToolResult/render), flow/depth utuh
 
 ---
@@ -31,3 +31,8 @@ Peta `file:line` di `notes/batchF-recon.md`. Restart owner-only.
 - index.js: #1/#2 → cycleSkip, #4/#5/#10 → cycleFail, #6 → buildNoCandidates (thresholds jadi array; `combinedExamples` DIPERTAHANKAN utk appendDecision:854), #7 → buildLoneNoDeploy. #3 (🧪 market regime) sengaja DIBIARKAN (sudah punya marker eksperimen, hindari double-emoji). #11 "(cycle ended without report)" tetap.
 - Bukti guard anti-halu: regex `/🚀\s*DEPLOYED/i` (:1106) + `/⛔\s*NO DEPLOY/i` (:1113,:1119) + prompt vocab (:1037,:1071) + override (:1108,:1115) SEMUA utuh (grep). buildLoneNoDeploy output literal `⛔ NO DEPLOY`.
 - Nol ubah: agentLoop, anti-halu override (#8b), funnelAppend (#9), report-LLM content.
+
+## FASE 3 — Confirm-prompt ✅
+- `views/cycle.js`: `summarizeTradeAction(toolName,args)` PINDAH dari index.js (pure/defensive, sub-baris jadi tree, header vocab 🚀/🔻/💰/🔁 utuh), `buildConfigDiff(entries)` (tree "key: current → val"), const `CONFIRM_OK/CONFIRM_NO/CONFIRM_EXPIRED` (netral utk trade & config; 2 string expired digabung jadi 1).
+- index.js: hapus def lokal summarizeTradeAction (import dari cycle.js); call-site requestActionConfirmation tetap. Timeout trade (:2109) + config (:2194) → CONFIRM_EXPIRED; config prompt lines → buildConfigDiff; handler (:2928) confirmed/cancelled → CONFIRM_OK/CONFIRM_NO. Wrapper `⚠️ Konfirmasi aksi ini?` & `⚠️ Update config?` tetap.
+- Nol ubah gate (garis merah #2): slot `_pendingConfirmation`, signature `JSON.stringify(args)`, timeout 30s, tombol confirm:yes/no, handler resolve, agent.js:450-457, CHAT_CONFIRM_TOOLS. Cuma teks.

@@ -430,8 +430,11 @@ export const CORE_GROUPS = [
 // safety bucket). Identity (Profil/Racikan) is rendered by the view header, not
 // a group here. `gmgnDynamic` flags the GMGN block so the view can append the
 // live source-active hint.
+// `id` (added Batch D): stable slug used by the /settings "Mode Campur" page token
+// (cfg:page:fn-<id>) + return-after-edit map. RENDER-ONLY; /config ignores it.
 export const FUNCTION_GROUPS = [
   {
+    id: "sizing",
     emoji: "📊", title: "Sizing & Posisi",
     keys: [
       "dryRun", "maxPositions", "maxDeployAmount", "deployAmountSol", "positionSizePct", "minSolToOpen",
@@ -440,6 +443,7 @@ export const FUNCTION_GROUPS = [
     ],
   },
   {
+    id: "screening",
     emoji: "🔍", title: "Screening",
     keys: [
       "screeningSource", "screeningCategories", "timeframe", "category",
@@ -452,6 +456,7 @@ export const FUNCTION_GROUPS = [
     ],
   },
   {
+    id: "gmgn",
     emoji: "🔎", title: "Screening-GMGN", gmgnDynamic: true,
     keys: [
       "gmgn.interval", "gmgn.orderBy", "gmgn.direction", "gmgn.platforms", "gmgn.filters",
@@ -467,6 +472,7 @@ export const FUNCTION_GROUPS = [
     ],
   },
   {
+    id: "exit",
     emoji: "🚪", title: "Exit & Management",
     keys: [
       "stopLossPct", "takeProfitPct", "trailingTakeProfit", "trailingTriggerPct", "trailingDropPct",
@@ -477,10 +483,12 @@ export const FUNCTION_GROUPS = [
     ],
   },
   {
+    id: "strategy",
     emoji: "📐", title: "Strategy & Range",
     keys: ["strategy", "minBinsBelow", "maxBinsBelow", "defaultBinsBelow", "strategyLock"],
   },
   {
+    id: "indik",
     emoji: "📊", title: "Indikator",
     keys: [
       "enabled", "entryPreset", "exitPreset", "rsiLength", "intervals", "candles",
@@ -489,6 +497,7 @@ export const FUNCTION_GROUPS = [
     ],
   },
   {
+    id: "jadwal",
     emoji: "⏱", title: "Jadwal",
     keys: [
       "managementIntervalMin", "screeningIntervalMin", "healthCheckIntervalMin",
@@ -496,10 +505,12 @@ export const FUNCTION_GROUPS = [
     ],
   },
   {
+    id: "llm",
     emoji: "🧠", title: "LLM",
     keys: ["managementModel", "screeningModel", "generalModel", "temperature", "maxTokens", "maxSteps", "generalMaxTokens"],
   },
   {
+    id: "darwin",
     emoji: "🧬", title: "Darwin",
     keys: [
       "darwinEnabled", "darwinWindowDays", "darwinRecalcEvery", "darwinBoost",
@@ -507,10 +518,12 @@ export const FUNCTION_GROUPS = [
     ],
   },
   {
+    id: "reports",
     emoji: "📑", title: "Reports & Learning",
     keys: ["learningReportEvery", "learningReportTrendN", "evolveEnabled"],
   },
   {
+    id: "exp",
     emoji: "🧪", title: "Eksperimen (GRUP 16)",
     keys: [
       "exitLiquidityCheck", "exitLiquidityMaxSlippagePct", "marketRegimeGate", "marketRegimeMaxDrop24hPct",
@@ -521,6 +534,7 @@ export const FUNCTION_GROUPS = [
     ],
   },
   {
+    id: "infra",
     emoji: "🌐", title: "Sistem/Infra",
     keys: [
       "lpAgentRelayEnabled", "agentId", "publicApiKey", "pnlSource", "pnlRpcUrl",

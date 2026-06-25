@@ -2529,7 +2529,7 @@ function returnTokenForKey(key) {
 // menu body reuses. Must run after MENU_CONTROLS is defined (above).
 initSettingsViews({ MENU_CONTROLS, buildConfigRowMap, renderSubclusterRows, subgroupDesc });
 
-async function showSettingsMenu({ messageId = null, page = "main" } = {}) {
+async function showSettingsMenu({ messageId = null, page = "fn-landing" } = {}) {
   _settingsView = page; // remember the live view so post-edit re-renders stay put
   const menu = renderSettingsMenu(page);
   if (messageId) {

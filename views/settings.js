@@ -230,6 +230,18 @@ export function inputButton(key, label, { digits = 0 } = {}) {
 // settings) fit on screen at once. RENDER-ONLY metadata; the canonical grouping
 // stays in config-origin.js. Falls back to the full title when a short is missing.
 const MENU_SECTION_LABEL = { dev: "⚙️ Origin Dev", zen: "🧩 Add by Zen" };
+// Per-key ASAL marker (⚙️ dev / 🧩 zen) prepended to CONTROL buttons in Mode Campur
+// (function groups mix origins, so the origin shows on the control, not the group).
+// Origin view doesn't need it (origin is its grouping axis). Trailing space so the
+// marker reads as a prefix; empty (no marker) keeps Pisah byte-identik.
+const ORIGIN_MARK = { dev: "⚙️ ", zen: "🧩 " };
+// Short labels for the 12 function-group landing buttons (Mode Campur), analog to
+// MENU_GROUP_SHORT. Keyed by FUNCTION_GROUPS id. Falls back to the full title.
+const MENU_FNGROUP_SHORT = {
+  sizing: "Sizing", screening: "Screen", gmgn: "GMGN", exit: "Exit",
+  strategy: "Strat", indik: "Indik", jadwal: "Jadwal", llm: "LLM",
+  darwin: "Darwin", reports: "Report", exp: "🧪Exp", infra: "Infra",
+};
 const MENU_GROUP_SHORT = {
   "dev-screening": "Screen", "dev-management": "Risk", "dev-strategy": "Strat",
   "dev-schedule": "Jadwal", "dev-llm": "LLM", "dev-darwin": "Darwin",
@@ -295,6 +307,9 @@ function settingsHeaderRows(activeSection, token) {
   });
   const racikanActive = String(token).split("~")[0] === "presets";
   return [
+    // Mode toggle (Batch D): jump to Mode Campur (per-fungsi). The two ASAL rows +
+    // Racikan/Config/Refresh/Close below are unchanged from the origin-split menu.
+    [settingButton("🔀 Mode: Campur", "cfg:page:fn-landing")],
     secRow,
     [
       settingButton(`${racikanActive ? "▸ " : ""}🗂️ Racikan`, "cfg:page:presets"),
@@ -321,8 +336,11 @@ function settingsGroupRows(sec, activeGroupId) {
 // TINGKAT 3 — flat list of editable control rows for one group, bucketed by
 // sub-cluster (a noop header per cluster when the group spans >1). Single-button
 // controls pair two-per-row. Returns rows (incl. cluster headers) for pagination.
-function settingsControlRows(sg) {
+function settingsControlRows(sg, { withOriginMarker = false } = {}) {
   const controls = MENU_CONTROLS();
+  // Per-key prefix: empty unless Mode Campur asked for the ⚙️/🧩 origin marker.
+  // When empty, `${pfx}${label}` === label, so Pisah stays byte-identik.
+  const pfx = (k) => (withOriginMarker ? ORIGIN_MARK[KEY_ORIGIN[k]] || "" : "");
   const order = [];
   const members = {};
   for (const k of sg.keys) {
@@ -340,10 +358,18 @@ function settingsControlRows(sg) {
     const flush = () => { if (buffered) { rows.push(buffered); buffered = null; } };
     for (const k of members[cl]) {
       const ctrl = controls[k];
-      if (ctrl.build) { flush(); rows.push(...ctrl.build()); continue; }
+      const p = pfx(k);
+      if (ctrl.build) {
+        flush();
+        const built = ctrl.build();
+        // cycleControl's first row is the "Label: value" noop header — mark it.
+        if (p && built[0]?.[0]) built[0][0].text = `${p}${built[0][0].text}`;
+        rows.push(...built);
+        continue;
+      }
       const row = ctrl.toggle
-        ? [toggleButton(ctrl.toggle[0], ctrl.toggle[1])]
-        : inputButton(ctrl.input[0], ctrl.input[1], ctrl.input[2] || {});
+        ? [toggleButton(ctrl.toggle[0], `${p}${ctrl.toggle[1]}`)]
+        : inputButton(ctrl.input[0], `${p}${ctrl.input[1]}`, ctrl.input[2] || {});
       if (row.length === 1) {
         if (buffered) { rows.push([buffered[0], row[0]]); buffered = null; }
         else buffered = row;
@@ -495,9 +521,115 @@ function renderSettingsPresets() {
   return { text: bodyText, keyboard };
 }
 
+// ── Mode Campur (per-fungsi) — Batch D ───────────────────────────────────────
+// A second navigation axis over the SAME MENU_CONTROLS: instead of ASAL→grup, the
+// landing shows the 12 FUNCTION_GROUPS directly (function ≈ "what does it do"), and
+// each opens its controls (the SAME editable buttons, paginated). Because controls
+// mix dev+zen, each control button carries an inline ⚙️/🧩 origin marker. The Pisah
+// (origin) mode is untouched; only the page TOKEN encodes the mode (fn-* = Campur).
+
+function findFnGroup(id) {
+  return FUNCTION_GROUPS.find((g) => g.id === id) || null;
+}
+
+// TINGKAT 1 (Campur) — mode toggle (→ Pisah) + Racikan/Config/Refresh/Close.
+// Mirrors settingsHeaderRows but without the two ASAL buttons (Campur has no ASAL
+// axis); the function groups are the TINGKAT 2 below.
+function campurHeaderRows(token) {
+  return [
+    [settingButton("🔀 Mode: Pisah", "cfg:page:main")],
+    [settingButton("🗂️ Racikan", "cfg:page:presets"), settingButton("📋 Config penuh", "cfg:show")],
+    [settingButton("🔄 Refresh", `cfg:page:${token}`), settingButton("❌ Close", "cfg:close")],
+  ];
+}
+
+// TINGKAT 2 (Campur) — the 12 function-group buttons, 2/row, each tagged ✏N / 👁
+// like the origin groups. The active group is marked ▸. Stays visible when a group
+// is open so the user can jump between functions without a back button.
+function campurGroupRows(activeId) {
+  const btns = FUNCTION_GROUPS.map((fg) => {
+    const short = MENU_FNGROUP_SHORT[fg.id] || fg.title;
+    const mark = fg.id === activeId ? "▸ " : "";
+    const n = editableCountFor(fg); // axis-agnostic: only reads fg.keys
+    return settingButton(`${mark}${fg.emoji} ${short} ${n > 0 ? `✏${n}` : "👁"}`, `cfg:page:fn-${fg.id}`);
+  });
+  return chunkRows(btns, 2);
+}
+
+// LANDING (Campur, default) — same config-inti summary as Pisah + TINGKAT 1 + the
+// 12 function-group buttons (none active).
+function renderCampurLanding() {
+  const bodyText = [
+    formatSettingsLandingSummary(),
+    "",
+    "🔀 Mode Campur — pilih grup fungsi ⤵️  ( ⚙️ dev · 🧩 zen di tiap setelan )",
+  ].join("\n");
+  const keyboard = [
+    ...campurHeaderRows("fn-landing"),
+    ...campurGroupRows(null),
+  ];
+  return { text: bodyText, keyboard };
+}
+
+// GROUP (Campur) — one function group open: TINGKAT 1 + TINGKAT 2 (active ▸) +
+// editable controls (paginated, ⚙️/🧩-marked). Body = the SAME read-only /config
+// rows as the origin group page. `token` may carry a T3 page suffix ("fn-gmgn~2").
+function renderCampurGroup(token) {
+  const [base, pageStr] = String(token).split("~");
+  const id = base.slice(3); // strip "fn-"
+  const fg = findFnGroup(id);
+  if (!fg) return renderCampurLanding();
+
+  const rowMap = _deps.buildConfigRowMap();
+  const { text: body } = _deps.renderSubclusterRows(fg.keys, rowMap);
+
+  let controlRows = settingsControlRows(fg, { withOriginMarker: true });
+  if (controlRows.length === 0) controlRows = [[settingButton("👁 Lihat-saja — ubah via /setcfg atau file", "cfg:noop")]];
+
+  // T3 pagination (same mechanic as the origin group page); T1 + T2 stay visible.
+  const totalPages = Math.max(1, Math.ceil(controlRows.length / MAX_T3_ROWS));
+  const page = Math.min(Math.max(1, parseInt(pageStr, 10) || 1), totalPages);
+  const controlsThisPage = totalPages > 1
+    ? controlRows.slice((page - 1) * MAX_T3_ROWS, page * MAX_T3_ROWS)
+    : controlRows;
+  const pagerRows = totalPages > 1
+    ? [[
+        settingButton("‹", `cfg:page:fn-${id}~${page > 1 ? page - 1 : totalPages}`),
+        settingButton(`Hal ${page}/${totalPages}`, "cfg:noop"),
+        settingButton("›", `cfg:page:fn-${id}~${page < totalPages ? page + 1 : 1}`),
+      ]]
+    : [];
+  const currentToken = totalPages > 1 ? `fn-${id}~${page}` : `fn-${id}`;
+
+  let head = `🔀 Campur › ${fg.emoji} ${fg.title}`;
+  if (fg.gmgnDynamic) {
+    const src = config.screening.source;
+    head += String(src).toLowerCase() === "gmgn" ? " · 🟢 aktif (source=gmgn)" : ` · ⚪ nonaktif (source=${src})`;
+  }
+  const bodyText = [
+    head,
+    "",
+    body || "  (tak ada setelan)",
+    "",
+    totalPages > 1
+      ? `Tombol edit (hal ${page}/${totalPages}) — ⚙️ dev · 🧩 zen. Sisanya lihat-saja.`
+      : "Tombol = bisa diubah ( ⚙️ dev · 🧩 zen ). Sisanya lihat-saja (via /setcfg / file).",
+  ].join("\n");
+
+  const keyboard = [
+    ...campurHeaderRows(currentToken),
+    ...campurGroupRows(id),
+    ...pagerRows,
+    ...controlsThisPage,
+  ];
+  return { text: bodyText, keyboard };
+}
+
 export function renderSettingsMenu(page = "main") {
   const base = String(page).split("~")[0];
   if (base === "main") return renderSettingsMain();
+  if (base === "fn-landing") return renderCampurLanding();
+  if (base.startsWith("fn-")) return renderCampurGroup(page); // Campur group token (e.g. "fn-gmgn~2")
   if (base === "dev" || base === "zen") return renderSettingsSection(base);
   if (base === "presets") return renderSettingsPresets();
   return renderSettingsGroup(page); // group token (e.g. "dev-management" / "zen-gmgn~2"); unknown → main

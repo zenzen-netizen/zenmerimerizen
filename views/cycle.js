@@ -87,3 +87,54 @@ export function frameMgmtResult(content) {
   if (!content || !String(content).trim()) return "";
   return `\n\n${SEP}\n${ICON.tools} Hasil aksi\n${content}`;
 }
+
+// ── Screening cycle ────────────────────────────────────────────────────────────
+
+/** Footer satu-baris siklus DILEWATI (skip). Plain text. */
+export function cycleSkip(detail) {
+  return `${ICON.skip} ${detail}`;
+}
+
+/** Footer satu-baris siklus GAGAL/error. Plain text. */
+export function cycleFail(detail) {
+  return `${ICON.warn} ${detail}`;
+}
+
+/**
+ * "No candidates available" + varian (funnel / contoh terfilter / thresholds).
+ * Prioritas mirror logika lama: funnel > examples > thresholds.
+ * @param {object} o
+ * @param {string|null} o.funnel       buildGmgnFunnelReport (string) atau null
+ * @param {Array<{name,reason}>} o.examples  contoh kandidat terfilter (≤5)
+ * @param {Array<string>} o.thresholds baris threshold (mode "all filtered")
+ */
+export function buildNoCandidates({ funnel = null, examples = [], thresholds = [] } = {}) {
+  const head = `${ICON.skip} No candidates available`;
+  if (funnel) return `${head}\n${SEP}\n${funnel}`;
+  if (examples.length) {
+    return `${head}\n${SEP}\nFiltered examples:\n${tree(examples.map((e) => `${e.name}: ${e.reason}`))}`;
+  }
+  if (thresholds.length) {
+    return `${head} (all filtered)\n${SEP}\nThresholds:\n${tree(thresholds)}`;
+  }
+  return `${head} (all filtered)`;
+}
+
+/**
+ * Blok ⛔ NO DEPLOY single-candidate (semua tersaring, sisa 1 tak layak deploy).
+ * VOCAB `⛔ NO DEPLOY` LITERAL (anti-halu) — JANGAN diubah.
+ * funnel di-append dgn pemisah lama ───────────── (kompat tampilan).
+ */
+export function buildLoneNoDeploy({ candidateName = "unknown", skipReason = "", funnel = null } = {}) {
+  const block = [
+    "⛔ NO DEPLOY",
+    SEP,
+    "Cycle finished with no valid entry.",
+    tree([
+      `${ICON.best} Best: ${candidateName}`,
+      `${ICON.warn} Why skipped: only one candidate survived filtering, but it was not worth deploying: ${skipReason}.`,
+      `Rejected: ${candidateName} — ${skipReason}`,
+    ]),
+  ].join("\n");
+  return funnel ? `${block}\n\n─────────────\n${funnel}` : block;
+}

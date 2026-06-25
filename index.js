@@ -60,6 +60,7 @@ import * as configView from "./views/config.js";
 import * as systemView from "./views/system.js";
 import {
   buildMgmtReport, frameMgmtResult,
+  cycleSkip, cycleFail, buildNoCandidates, buildLoneNoDeploy,
 } from "./views/cycle.js";
 import {
   initSettingsViews, renderSettingsMenu,
@@ -663,7 +664,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
     [prePositions, preBalance] = await Promise.all([getMyPositions({ force: true }), getWalletBalances()]);
     if (prePositions.total_positions >= config.risk.maxPositions) {
       log("cron", `Screening skipped — max positions reached (${prePositions.total_positions}/${config.risk.maxPositions})`);
-      screenReport = `Screening skipped — max positions reached (${prePositions.total_positions}/${config.risk.maxPositions}).`;
+      screenReport = cycleSkip(`Screening skipped — max positions reached (${prePositions.total_positions}/${config.risk.maxPositions}).`);
       appendDecision({
         type: "skip",
         actor: "SCREENER",
@@ -690,7 +691,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
     if (!isDryRun && (plannedDeploy < minDeployAmount() || preBalance.sol < needForOne)) {
       const needNote = (minDeployAmount() + config.management.gasReserve + rentReserve).toFixed(3);
       log("cron", `Screening skipped — modal kurang (wallet ${preBalance.sol.toFixed(3)} SOL, sizing/slot ${plannedDeploy} < min ${minDeployAmount()}; butuh ~${needNote} SOL utk 1 posisi). No LLM call.`);
-      screenReport = `Screening skipped — modal kurang (wallet ${preBalance.sol.toFixed(3)} SOL < ~${needNote} untuk 1 posisi ≥ ${minDeployAmount()} SOL + gas + rent).`;
+      screenReport = cycleSkip(`Screening skipped — modal kurang (wallet ${preBalance.sol.toFixed(3)} SOL < ~${needNote} untuk 1 posisi ≥ ${minDeployAmount()} SOL + gas + rent).`);
       appendDecision({
         type: "skip",
         actor: "SCREENER",
@@ -733,7 +734,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
     }
   } catch (e) {
     log("cron_error", `Screening pre-check failed: ${e.message}`);
-    screenReport = `Screening pre-check failed: ${e.message}`;
+    screenReport = cycleFail(`Screening pre-check failed: ${e.message}`);
     _screeningBusy = false;
     return screenReport;
   }
@@ -763,7 +764,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
     // Fetch top candidates, then recon each sequentially with a small delay to avoid 429s
     const topCandidates = await getTopCandidates({ limit: 10 }).catch((e) => ({ _error: e.message }));
     if (topCandidates?._error) {
-      screenReport = `Screening failed: ${topCandidates._error}`;
+      screenReport = cycleFail(`Screening failed: ${topCandidates._error}`);
       return screenReport;
     }
     const candidates = (topCandidates?.candidates || topCandidates?.pools || []).slice(0, 10);
@@ -834,12 +835,18 @@ export async function runScreeningCycle({ silent = false } = {}) {
         .map((entry) => `- ${entry.name}: ${entry.reason}`)
         .join("\n");
       const funnelBlock = buildGmgnFunnelReport(gmgnStageCounts, gmgnAllFiltered, { fromStage: 2 });
-      const thresholds = `Thresholds: tvl>$${config.screening.minTvl} | vol>$${config.screening.minVolume} | organic>${config.screening.minOrganic}% | holders>${config.screening.minHolders} | fee/tvl>${config.screening.minFeeActiveTvlRatio}%`;
-      screenReport = funnelBlock
-        ? `No candidates available.\n\n${funnelBlock}`
-        : combinedExamples
-          ? `No candidates available.\nFiltered examples:\n${combinedExamples}`
-          : `No candidates available (all filtered).\n${thresholds}`;
+      const thresholds = [
+        `tvl > $${config.screening.minTvl}`,
+        `vol > $${config.screening.minVolume}`,
+        `organic > ${config.screening.minOrganic}%`,
+        `holders > ${config.screening.minHolders}`,
+        `fee/tvl > ${config.screening.minFeeActiveTvlRatio}%`,
+      ];
+      screenReport = buildNoCandidates({
+        funnel: funnelBlock,
+        examples: combined.slice(0, 5).map((e) => ({ name: e.name, reason: e.reason })),
+        thresholds,
+      });
       appendDecision({
         type: "no_deploy",
         actor: "SCREENER",
@@ -860,21 +867,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
       if (skipReason) {
         const candidateName = passing[0].pool?.name || "unknown";
         const funnelBlock = buildGmgnFunnelReport(gmgnStageCounts, gmgnAllFiltered, { fromStage: 2 });
-        screenReport = [
-          "⛔ NO DEPLOY",
-          "",
-          "Cycle finished with no valid entry.",
-          "",
-          "BEST LOOKING CANDIDATE",
-          candidateName,
-          "",
-          "WHY SKIPPED",
-          `Only one candidate survived filtering, but it was not worth deploying: ${skipReason}.`,
-          "",
-          "REJECTED",
-          `- ${candidateName}: ${skipReason}`,
-          funnelBlock ? `\n─────────────\n${funnelBlock}` : null,
-        ].filter(Boolean).join("\n");
+        screenReport = buildLoneNoDeploy({ candidateName, skipReason, funnel: funnelBlock });
         appendDecision({
           type: "no_deploy",
           actor: "SCREENER",
@@ -1140,7 +1133,7 @@ IMPORTANT:
     }
   } catch (error) {
     log("cron_error", `Screening cycle failed: ${error.message}`);
-    screenReport = `Screening cycle failed: ${error.message}`;
+    screenReport = cycleFail(`Screening cycle failed: ${error.message}`);
   } finally {
     _screeningBusy = false;
     if (!silent && telegramEnabled()) {

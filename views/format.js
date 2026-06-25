@@ -127,7 +127,8 @@ export const SEP = "━━━━━━━━━━━━━━━━";
 export const ICON = {
   pnl: "💰", value: "💵", yield: "📊", time: "⏱", range: "📐", rule: "🎯", held: "🔒",
   inRange: "🟢", oor: "🔴", best: "🏆", worst: "💀", warn: "⚠️", deploy: "🚀",
-  manage: "🔄", closed: "✅", stay: "✋", entry: "🪙", fee: "💧",
+  manage: "🔄", closed: "✅", stay: "✋", entry: "🪙", fee: "💧", skip: "⏭",
+  pending: "⏳", ok: "✅", fail: "❌",
   swap: "🔄", briefing: "📊", config: "⚙️", tools: "🛠", bolt: "⚡", perf: "📈", brain: "🧠",
   arrow: "→", dev: "⚙️", zen: "🧩",
   // 1 konsep = 1 ikon (anti-tabrakan): dompet/saldo · daftar-posisi · ringkasan-status.

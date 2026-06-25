@@ -4,7 +4,7 @@ Brief: Batch D BUILD — Mode Campur (per-fungsi, default) + Mode Pisah (per-asa
 
 - [x] 1  EKSTRAK builder keyboard → views/settings.js (Pisah BYTE-IDENTIK) ✅
 - [x] 2  ADD Mode Campur (fn-landing + kontrol + marker + toggle + default=Campur) ✅
-- [ ] 3  return-after-edit sadar-mode (MENU_KEY_TO_FNGROUP)
+- [x] 3  return-after-edit sadar-mode (MENU_KEY_TO_FNGROUP) ✅
 - [ ] 4  (opsional) marker 🟠 money (MONEY_KEYS)
 
 ## FASE 1 ✅ (commit berikut)
@@ -24,6 +24,12 @@ Brief: Batch D BUILD — Mode Campur (per-fungsi, default) + Mode Pisah (per-asa
 - **Parity key:** FUNCTION_GROUPS union == ORIGIN_SECTIONS union == **166** (set EQUAL, 0 beda); **0** key MENU_CONTROLS (140 entri) hilang dari Campur → semua kontrol editable kebawa di kedua mode.
 - ⚠️ **Deviasi terhadap "Pisah byte-identik" FASE 2:** toggle 1 baris DITAMBAH ke `settingsHeaderRows` (semua page Pisah) supaya toggle **dua-arah** (DESAIN: "Mode Pisah … + tombol toggle"). Tanpa ini toggle satu-arah (Campur→Pisah, balik via /settings saja). Semua struktur Pisah lain byte-identik. Bila owner mau Pisah beku-total + toggle satu-arah, pindah toggle ke Campur-only.
 - `node --check` config-origin.js + views/settings.js + index.js OK.
+
+## FASE 3 ✅ (commit berikut)
+- **index.js:** import `FUNCTION_GROUPS`; `MENU_KEY_TO_FNGROUP` (twin `MENU_KEY_TO_PAGE` — resep IDENTIK: tiap config-origin key → resolve via `MENU_CONTROLS[k].pageKeys/toggle/input` → settingValue key → fnGroup id, jadi beda-namespace dev/zen-vs-settingValue ke-handle sama); `returnTokenForKey` jadi **sadar-mode**: baca mode dari `_settingsView` — kalau `fn-*`/`fn-landing` → balik `fn-<group>` (pertahankan `~hal` bila grup sama), else perilaku Pisah lama. **Handler edit NOL ubah** — toggle/step/set sudah `page=returnTokenForKey(key)`, input pakai `returnTokenForKey(inputKey)` → dua-duanya otomatis sadar-mode.
+- **cat handler:** SATU baris navigasi di-mode-kan: re-render `page:"zen-screening"` → `returnTokenForKey("screeningCategories")` (Pisah→`zen-screening` byte-identik krn 2-key tak terpaginasi; Campur→`fn-screening`). `executeTool`/clamp DI ATASnya tak disentuh. Tanpa ini toggle kategori di Campur loncat ke Pisah.
+- **Bukti logika** (harness replika builder+returnTokenForKey, mock MENU_CONTROLS sv()-transform meniru gap namespace): domain match (166 key _PAGE ⊆ _FNGROUP); Pisah zen-gmgn→zen-gmgn, dev-management~2→~2; Campur fn-gmgn~2→fn-gmgn~2 (grup sama pertahankan hal), fn-exit edit stopLoss→fn-exit, fn-landing edit gmgn→fn-gmgn (masuk grup), fn-exit edit gmgn→fn-gmgn (lintas-grup drop hal), unknown→fn-sizing (fallback).
+- `node --check` index.js OK.
 
 ---
 

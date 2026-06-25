@@ -38,7 +38,7 @@ import { renderGuide } from "./guide.js";
 import { getLastBriefingDate, setLastBriefingDate, getLastBriefingPinId, setLastBriefingPinId, getLastReportedMilestone, setLastReportedMilestone, getLastPeriodicBriefing, setLastPeriodicBriefing, getTrackedPosition, getTrackedPositions, setPositionInstruction, updatePnlAndCheckExits, queuePeakConfirmation, resolvePendingPeak, queueTrailingDropConfirmation, resolvePendingTrailingDrop } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
 import { listPresets, savePreset, applyPreset, getPresetDiff, deletePreset, validName, presetExists, getActiveSetupStatus, formatIdentity } from "./preset-manager.js";
-import { ORIGIN_SECTIONS, ORIGIN_NOTES, SUB_CLUSTER_META, KEY_SUBCLUSTER, L4_CHILDREN, CORE_GROUPS } from "./config-origin.js";
+import { ORIGIN_SECTIONS, ORIGIN_NOTES, SUB_CLUSTER_META, KEY_SUBCLUSTER, L4_CHILDREN, CORE_GROUPS, FUNCTION_GROUPS } from "./config-origin.js";
 import { recordPositionSnapshot, recallForPool, addPoolNote } from "./pool-memory.js";
 import { isPaperMode } from "./paper-trading.js";
 import { recordCandidateSnapshots, getCandidateMomentum, formatCandidateMomentum, recordSmartWalletCounts, getSmartWalletMomentum, formatSmartWalletMomentum } from "./candidate-memory.js";
@@ -2507,6 +2507,23 @@ const MENU_KEY_TO_PAGE = (() => {
   return m;
 })();
 
+// Mode Campur twin of MENU_KEY_TO_PAGE: settingValue key → FUNCTION_GROUPS id (the
+// per-fungsi axis). Same build recipe — resolve each config-origin key through its
+// MENU_CONTROLS entry to the settingValue key(s) it edits — so it handles the
+// dev/zen vs settingValue naming difference identically.
+const MENU_KEY_TO_FNGROUP = (() => {
+  const m = {};
+  for (const fg of FUNCTION_GROUPS) {
+    for (const k of fg.keys) {
+      const ctrl = MENU_CONTROLS[k];
+      if (!ctrl) continue;
+      const keys = ctrl.pageKeys || (ctrl.toggle ? [ctrl.toggle[0]] : ctrl.input ? [ctrl.input[0]] : []);
+      for (const sk of keys) m[sk] = fg.id;
+    }
+  }
+  return m;
+})();
+
 // Which group page a given settingValue key belongs to (return-to-page after an
 // edit, and the page stored for a pending text input). Falls back to the
 // management group for any unmapped key.
@@ -2516,10 +2533,18 @@ function pageForKey(key) {
 
 // Page token to re-render after editing `key`: the key's group, preserving the
 // current T3 page suffix when we're already viewing that group (so an edit on
-// GMGN page 2 re-renders page 2, not page 1).
+// GMGN page 2 re-renders page 2, not page 1). Mode-aware: when the live view is
+// Mode Campur (fn-* token), return the key's FUNCTION group (fn-<id>) so an edit
+// stays in Campur; otherwise the origin group (dev-/zen-) as before. The mode is
+// read from _settingsView (the same module state the menu already relies on); the
+// edit callback itself never carries the mode.
 function returnTokenForKey(key) {
-  const gid = pageForKey(key);
   const [curBase, curPage] = String(_settingsView).split("~");
+  if (curBase === "fn-landing" || curBase.startsWith("fn-")) {
+    const fid = `fn-${MENU_KEY_TO_FNGROUP[key] || "sizing"}`;
+    return curBase === fid && curPage ? `${fid}~${curPage}` : fid;
+  }
+  const gid = pageForKey(key);
   return curBase === gid && curPage ? `${gid}~${curPage}` : gid;
 }
 
@@ -2676,7 +2701,9 @@ async function applySettingsMenuCallback(msg) {
       return;
     }
     await answerCallbackQuery(msg.callbackQueryId, `categories: ${value ? value.join(",") : "off (factory)"}`);
-    await showSettingsMenu({ messageId: msg.messageId, page: "zen-screening" });
+    // Re-render in the live mode (Campur → fn-screening, Pisah → zen-screening). Only
+    // the navigation target is mode-aware here; the executeTool/clamp above is untouched.
+    await showSettingsMenu({ messageId: msg.messageId, page: returnTokenForKey("screeningCategories") });
     return;
   }
 

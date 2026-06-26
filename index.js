@@ -2906,13 +2906,13 @@ async function telegramHandler(msg) {
     if (pending.action === "presetSave") {
       const name = text.trim();
       if (!validName(name)) {
-        await sendMessage(`Nama tidak valid "${name}". Pakai huruf/angka/_/- (maks 40).`);
+        await sendMessage(`${ICON.warn} Nama tidak valid "${name}". Pakai huruf/angka/_/- (maks 40).`);
       } else {
         try {
           const r = savePreset(name);
           await sendMessage(`💾 Disimpan → preset "${name}"${r.overwritten ? " (nimpa yang lama)" : " (baru)"}.`);
         } catch (e) {
-          await sendMessage(`Gagal simpan: ${e.message}`);
+          await sendMessage(`${ICON.fail} Gagal simpan: ${e.message}`);
         }
       }
       await showSettingsMenu({ messageId: pending.menuMsgId, page: "presets" });
@@ -2925,13 +2925,13 @@ async function telegramHandler(msg) {
     } else {
       value = Number(text);
       if (!Number.isFinite(value)) {
-        await sendMessage(`Invalid value "${text}" — must be a number or "off".`);
+        await sendMessage(systemView.renderError(`Invalid value "${text}" — must be a number or "off".`));
         return;
       }
     }
     const result = await executeTool("update_config", { changes: { [key]: value }, reason: "Telegram input field" });
     if (!result?.success) {
-      await sendMessage(`Failed to update ${key}.`);
+      await sendMessage(`${ICON.fail} Failed to update ${key}.`);
       return;
     }
     await showSettingsMenu({ messageId: menuMsgId, page });
@@ -2997,19 +2997,26 @@ async function telegramHandler(msg) {
     if (!arg) {
       const cur = getTrackStart();
       await sendMessage(cur
-        ? `📊 SOL tracker anchor: ${cur}\nGanti: /wallet trackstart YYYY-MM-DD · Hapus: /wallet trackstart off`
-        : `📊 SOL tracker anchor: belum diset.\nSet: /wallet trackstart YYYY-MM-DD (mis. ${new Date().toISOString().slice(0, 10)})`).catch(() => {});
+        ? [header(ICON.yield, "SOL tracker anchor", cur), tree([
+            "Ganti: /wallet trackstart YYYY-MM-DD",
+            "Hapus: /wallet trackstart off",
+          ])].join("\n")
+        : [header(ICON.yield, "SOL tracker anchor", "belum diset"), tree([
+            `Set: /wallet trackstart YYYY-MM-DD (mis. ${new Date().toISOString().slice(0, 10)})`,
+          ])].join("\n")).catch(() => {});
       return;
     }
     if (["off", "clear", "hapus", "reset"].includes(arg)) {
       setTrackStart(null);
-      await sendMessage("📊 SOL tracker anchor dihapus. /wallet pakai window 1D/7D/30D saja.").catch(() => {});
+      await sendMessage(`${ICON.yield} SOL tracker anchor dihapus — /wallet pakai window 1D/7D/30D saja.`).catch(() => {});
       return;
     }
     const res = setTrackStart(arg);
     await sendMessage(res.ok
-      ? `✅ SOL tracker anchor diset ke ${res.dateKey}. /wallet sekarang nampilin baris "SINCE ${res.dateKey}".`
-      : `❌ ${res.error}`).catch(() => {});
+      ? [header(ICON.ok, "SOL tracker anchor", `diset ke ${res.dateKey}`), tree([
+          `/wallet sekarang nampilin baris "SINCE ${res.dateKey}"`,
+        ])].join("\n")
+      : systemView.renderError(res.error)).catch(() => {});
     return;
   }
 
@@ -3115,7 +3122,7 @@ async function telegramHandler(msg) {
   if (text === "/positions") {
     try {
       const { positions, total_positions } = await getMyPositions({ force: true });
-      if (total_positions === 0) { await sendMessage("No open positions."); return; }
+      if (total_positions === 0) { await sendMessage(`${ICON.position} No open positions.`); return; }
       // Data fetch unchanged; render delegated to views/ layer (Phase 2 🅴 pilot).
       const rentMap = await getPositionsRentSol(positions.map((p) => p.position)).catch(() => ({}));
       const vm = positionsView.buildView(positions, config, rentMap);
@@ -3129,7 +3136,7 @@ async function telegramHandler(msg) {
     try {
       const idx = parseInt(poolMatch[1]) - 1;
       const { positions } = await getMyPositions({ force: true });
-      if (idx < 0 || idx >= positions.length) { await sendMessage("Invalid number. Use /positions first."); return; }
+      if (idx < 0 || idx >= positions.length) { await sendMessage(systemView.renderError("Invalid number. Use /positions first.")); return; }
       const pos = positions[idx];
       const tracked = (() => { try { return getTrackedPosition(pos.position); } catch { return null; } })();
       const rent = (await getPositionsRentSol([pos.position]).catch(() => ({})))[pos.position];
@@ -3157,7 +3164,7 @@ async function telegramHandler(msg) {
     try {
       const idx = parseInt(closeMatch[1]) - 1;
       const { positions } = await getMyPositions({ force: true });
-      if (idx < 0 || idx >= positions.length) { await sendMessage("Invalid number. Use /positions first."); return; }
+      if (idx < 0 || idx >= positions.length) { await sendMessage(systemView.renderError("Invalid number. Use /positions first.")); return; }
       const pos = positions[idx];
       await sendMessage(`Closing ${pos.pair}...`);
       const result = await closePosition({ position_address: pos.position });
@@ -3185,7 +3192,7 @@ async function telegramHandler(msg) {
   if (text === "/closeall") {
     try {
       const { positions } = await getMyPositions({ force: true });
-      if (!positions.length) { await sendMessage("No open positions."); return; }
+      if (!positions.length) { await sendMessage(`${ICON.position} No open positions.`); return; }
       await sendMessage(`Closing ${positions.length} position(s)...`);
       // N2 notifyClose TIDAK kebit per-posisi (direct close) → ringkasan WAJIB bawa
       // hasil + PnL per posisi (governing #2). PnL ikut solMode.
@@ -3214,7 +3221,7 @@ async function telegramHandler(msg) {
       const idx = parseInt(setMatch[1]) - 1;
       const note = setMatch[2].trim();
       const { positions } = await getMyPositions({ force: true });
-      if (idx < 0 || idx >= positions.length) { await sendMessage("Invalid number. Use /positions first."); return; }
+      if (idx < 0 || idx >= positions.length) { await sendMessage(systemView.renderError("Invalid number. Use /positions first.")); return; }
       const pos = positions[idx];
       setPositionInstruction(pos.position, note);
       await sendMessage([header(ICON.ok, "Note set", pos.pair), tree([`"${note}"`])].join("\n"));
@@ -3233,7 +3240,7 @@ async function telegramHandler(msg) {
         reason: "Telegram slash command /setcfg",
       });
       if (!result?.success) {
-        await sendMessage(`Config update failed.\nUnknown: ${(result?.unknown || []).join(", ") || "none"}`).catch(() => {});
+        await sendMessage(`${ICON.fail} Config update failed.\nUnknown: ${(result?.unknown || []).join(", ") || "none"}`).catch(() => {});
         return;
       }
       // Ack styled (reuse buildConfigDiff — gaya sama gate konfirmasi): "key: old → new".

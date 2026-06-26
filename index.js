@@ -3181,16 +3181,21 @@ async function telegramHandler(msg) {
       const { positions } = await getMyPositions({ force: true });
       if (!positions.length) { await sendMessage("No open positions."); return; }
       await sendMessage(`Closing ${positions.length} position(s)...`);
+      // N2 notifyClose TIDAK kebit per-posisi (direct close) → ringkasan WAJIB bawa
+      // hasil + PnL per posisi (governing #2). PnL ikut solMode.
+      const solMode = config.management.solMode;
       const results = [];
       for (const pos of positions) {
         try {
           const result = await closePosition({ position_address: pos.position });
-          results.push(`${pos.pair}: ${result.success ? "closed" : `failed (${result.error || "unknown"})`}`);
+          results.push(result.success
+            ? `${pos.pair}: ${ICON.ok} closed${result.pnl_usd != null ? ` · ${fmtMoneySigned(result.pnl_usd, solMode)}` : ""}`
+            : `${pos.pair}: ${ICON.fail} failed (${result.error || "unknown"})`);
         } catch (error) {
-          results.push(`${pos.pair}: failed (${error.message})`);
+          results.push(`${pos.pair}: ${ICON.fail} failed (${error.message})`);
         }
       }
-      await sendMessage(`Close-all finished.\n\n${results.join("\n")}`).catch(() => {});
+      await sendMessage([header(ICON.closed, "Close-all", `${positions.length} posisi`), SEP, tree(results)].join("\n")).catch(() => {});
     } catch (e) {
       await sendMessage(systemView.renderError(e.message)).catch(() => {});
     }
@@ -3206,7 +3211,7 @@ async function telegramHandler(msg) {
       if (idx < 0 || idx >= positions.length) { await sendMessage("Invalid number. Use /positions first."); return; }
       const pos = positions[idx];
       setPositionInstruction(pos.position, note);
-      await sendMessage(`✅ Note set for ${pos.pair}:\n"${note}"`);
+      await sendMessage([header(ICON.ok, "Note set", pos.pair), tree([`"${note}"`])].join("\n"));
     } catch (e) { await sendMessage(systemView.renderError(e.message)).catch(() => {}); }
     return;
   }
@@ -3216,6 +3221,7 @@ async function telegramHandler(msg) {
     try {
       const key = setCfgMatch[1];
       const value = parseConfigValue(setCfgMatch[2]);
+      const oldVal = getConfigValue(key); // baca SEBELUM mutasi (utk diff old→new)
       const result = await executeTool("update_config", {
         changes: { [key]: value },
         reason: "Telegram slash command /setcfg",
@@ -3224,7 +3230,8 @@ async function telegramHandler(msg) {
         await sendMessage(`Config update failed.\nUnknown: ${(result?.unknown || []).join(", ") || "none"}`).catch(() => {});
         return;
       }
-      await sendMessage(`✅ Updated ${key} = ${JSON.stringify(value)}`).catch(() => {});
+      // Ack styled (reuse buildConfigDiff — gaya sama gate konfirmasi): "key: old → new".
+      await sendMessage([header(ICON.ok, "Config updated"), buildConfigDiff([{ key, current: oldVal, val: value }])].join("\n")).catch(() => {});
     } catch (e) {
       await sendMessage(systemView.renderError(e.message)).catch(() => {});
     }

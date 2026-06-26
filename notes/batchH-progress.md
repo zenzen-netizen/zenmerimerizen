@@ -5,7 +5,28 @@
 
 - [x] 1  /deploy: JG-3 lone-no-deploy → buildLoneNoDeploy · JG-5 double-msg (N1 KEBIT → ramping ack) ✅ commit 1
 - [x] 2  /close: JG-4 (N2 TIDAK kebit manual → reply WAJIB detail tree-style) ✅ commit 2
-- [ ] 3  /closeall /set /setcfg → ack/tree via format.js (konten utuh)
+- [x] 3  /closeall /set /setcfg → ack/tree via format.js (konten utuh) ✅ commit 3
+
+---
+
+## VERIFIKASI AKHIR
+- `node --check` lulus tiap fase. Render smoke-test 7 varian OK (lihat di bawah).
+- **/closeall**: N2 sama-tak-kebit (direct close loop) → ringkasan bawa PnL per-posisi (tree) — detail dipertahankan.
+- **/set**: ack header+tree (pair+note utuh).
+- **/setcfg**: reuse `buildConfigDiff` → "key: old → new" (oldVal dibaca SEBELUM mutasi). Bukan gate konfirmasi (L3 tak disentuh).
+- Eksekusi deploy/close + post-hook notif + Lever-A NOL ubah (cuma teks reply inline + 1 field metadata render-only di throw).
+- Import baru: `views/format.js` (ICON/SEP/tree/header/fmtMoneySigned + fmtPct→alias fmtPctSigned krn ada fmtPct lokal index.js:3333).
+
+## Render smoke-test (sample)
+```
+/deploy sukses : ✅ Deploy WIF/SOL terkirim — 0.5 SOL.        (N1 bawa detail penuh)
+/deploy gagal  : ❌ Deploy gagal — WIF/SOL: <error>            (N1 tak kebit → error utuh)
+/deploy lone   : ⛔ NO DEPLOY / Best / Why skipped / Rejected  (buildLoneNoDeploy, gaya cycle)
+/close         : ✅ Closed — WIF/SOL / PnL -$1.10 (-2.2%) / close txs / claim txs
+/closeall      : ✅ Close-all — N posisi / pair: ✅ closed · +$2.30 / ...
+/set           : ✅ Note set — pair / "note"
+/setcfg        : ✅ Config updated / stopLossPct: -10 → -12
+```
 
 ---
 

@@ -17,8 +17,13 @@
 
 import {
   ICON, SEP, tree, numEmoji,
-  fmtMoney, fmtPct, fmtAge,
+  fmtMoney, fmtPct, fmtAge, fmtWib,
 } from "./format.js";
+
+// Judul envelope siklus (single-source — live-message title + fallback non-live).
+// Dipakai 4 titik di index.js (2 createLiveMessage + 2 sendMessage fallback) supaya
+// teks judul tak tersebar literal. NOL ubah alur live/finalize (cuma nilai literal → konstanta).
+export const CYCLE_TITLE = { mgmt: "🔄 Management Cycle", screen: "🔍 Screening Cycle" };
 
 // ── Management cycle ───────────────────────────────────────────────────────────
 
@@ -137,6 +142,57 @@ export function buildLoneNoDeploy({ candidateName = "unknown", skipReason = "", 
     ]),
   ].join("\n");
   return funnel ? `${block}\n\n─────────────\n${funnel}` : block;
+}
+
+// ── Daftar kandidat (permukaan MANUAL: /screen, /candidates TG cache, REPL fetch) ──
+
+/**
+ * Cache kandidat KOSONG (belum pernah /screen). SENGAJA beda dari buildNoCandidates
+ * (yang = "sudah screen, 0 yang lolos") — distingsi semantik dijaga (recon governing #4).
+ */
+export function buildNoCache() {
+  return `${ICON.skip} No cached candidates yet — run /screen first.`;
+}
+
+/** Baris-metrik satu kandidat (field OPSIONAL → cuma yang ada). Metrik pool eksternal
+ *  ($ vol / % fee-aTVL / organic / in-range), BUKAN modal kita → tak ikut solMode. */
+function candidateLines(p) {
+  const feeTvl = p.fee_active_tvl_ratio ?? p.fee_tvl_ratio;
+  const volRaw = p.volume_window ?? p.volume_24h;
+  const vol = Number.isFinite(Number(volRaw)) ? `$${(Number(volRaw) / 1000).toFixed(1)}k` : null;
+  const metrics = [
+    feeTvl != null ? `fee/aTVL ${feeTvl}%` : null,
+    vol ? `vol ${vol}` : null,
+  ].filter(Boolean).join(" · ");
+  // Sumber kepercayaan: GMGN (smart/KOL/fee) bila pool gmgn, else organic + in-range.
+  const src = p.gmgn
+    ? `GMGN smart ${p.gmgn_smart_wallets ?? "?"}, KOL ${p.gmgn_kol_wallets ?? "?"}, fee ${p.gmgn_total_fee_sol ?? "?"} SOL`
+    : [
+        p.active_pct != null ? `in-range ${p.active_pct}%` : null,
+        p.organic_score != null ? `organic ${p.organic_score}` : null,
+      ].filter(Boolean).join(" · ");
+  return [
+    p.pool ? `pool: ${p.pool}` : null,
+    metrics || null,
+    src || null,
+  ].filter(Boolean);
+}
+
+/**
+ * Daftar kandidat utk permukaan MANUAL. Pure, plain-text, gaya 🅴 (numEmoji header +
+ * tree per kandidat). Field OPSIONAL → cuma yang ada dirender (NOL detail hilang per
+ * permukaan; permukaan yg dulu tak punya addr/in-range tetap valid). Satu builder utk
+ * /screen, /candidates cache, REPL fetch → gap render-ganda (JG-1/JG-2) hilang.
+ * @param {Array} candidates
+ * @param {{updatedAt?:number|string|null}} opts  updatedAt (ms ATAU ISO string) → "· updated <WIB>".
+ */
+export function buildCandidateList(candidates, { updatedAt = null } = {}) {
+  const cs = candidates || [];
+  const ms = updatedAt == null ? null : (typeof updatedAt === "string" ? Date.parse(updatedAt) : Number(updatedAt));
+  const upd = Number.isFinite(ms) ? ` · updated ${fmtWib(ms)}` : "";
+  const head = `${ICON.briefing} Top candidates (${cs.length})${upd}`;
+  const blocks = cs.map((p, i) => `${numEmoji(i + 1)} ${p.name || "unknown"}\n${tree(candidateLines(p))}`);
+  return [head, SEP, ...blocks].join("\n");
 }
 
 // ── Confirm-gate (display ⟂ logika; lihat recon §D) ─────────────────────────────

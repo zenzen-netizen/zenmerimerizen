@@ -61,6 +61,7 @@ import * as systemView from "./views/system.js";
 import {
   buildMgmtReport, frameMgmtResult,
   cycleSkip, cycleFail, buildNoCandidates, buildLoneNoDeploy,
+  buildCandidateList, buildNoCache, CYCLE_TITLE,
   summarizeTradeAction, buildConfigDiff,
   CONFIRM_OK, CONFIRM_NO, CONFIRM_EXPIRED,
 } from "./views/cycle.js";
@@ -2792,21 +2793,12 @@ async function runDeterministicScreen(limit = 5) {
   const top = await getTopCandidates({ limit });
   const candidates = (top?.candidates || top?.pools || []).slice(0, limit);
   setLatestCandidates(candidates);
-  if (candidates.length > 0) {
-    const lines = candidates.map((pool, i) => {
-      const feeTvl = pool.fee_active_tvl_ratio ?? pool.fee_tvl_ratio ?? "?";
-      const vol = pool.volume_window ?? pool.volume_24h ?? "?";
-      const source = pool.gmgn ? ` | GMGN smart ${pool.gmgn_smart_wallets ?? "?"}, KOL ${pool.gmgn_kol_wallets ?? "?"}, total fee ${pool.gmgn_total_fee_sol ?? "?"} SOL` : ` | organic ${pool.organic_score ?? "?"}`;
-      return `${i + 1}. ${pool.name} | ${pool.pool}\n   fee/aTVL ${feeTvl}% | vol $${vol}${source}`;
-    });
-    return `Top candidates (${candidates.length})\n\n${lines.join("\n")}`;
-  }
-  const examples = (top?.filtered_examples || []).slice(0, 3)
-    .map((entry) => `- ${entry.name}: ${entry.reason}`)
-    .join("\n");
-  return examples
-    ? `No candidates available.\nFiltered examples:\n${examples}`
-    : "No candidates available right now.";
+  // Render → views/cycle.js (JG-1/JG-2): list & no-result kini SATU gaya tree, sama
+  // dgn cycle otomatis. Logika screen/fetch tak diubah — cuma string output.
+  if (candidates.length > 0) return buildCandidateList(candidates);
+  return buildNoCandidates({
+    examples: (top?.filtered_examples || []).slice(0, 5).map((e) => ({ name: e.name, reason: e.reason })),
+  });
 }
 
 async function deployLatestCandidate(index) {

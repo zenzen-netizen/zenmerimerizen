@@ -4,7 +4,7 @@
 > Display-only. Builder di `views/cycle.js` (merge-safe); index.js cuma swap inline→1-baris.
 > Branch `experimental`. Restart owner-only.
 
-- [ ] 1  buildCandidateList (views/cycle.js): tree, field-opsional, plain, scannable
+- [x] 1  buildCandidateList (views/cycle.js): tree, field-opsional, plain, scannable ✅ commit 1
 - [ ] 2  T19 /screen → buildCandidateList + buildNoCandidates (no-result)
 - [ ] 3  T20 /candidates cache → buildCandidateList (list) + jaga semantik cache-kosong
 - [ ] 4  R9 REPL /candidates fetch → buildCandidateList + buildNoCandidates

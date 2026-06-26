@@ -3156,11 +3156,21 @@ async function telegramHandler(msg) {
       await sendMessage(`Closing ${pos.pair}...`);
       const result = await closePosition({ position_address: pos.position });
       if (result.success) {
+        // N2 notifyClose TIDAK kebit utk /close manual (closePosition dipanggil langsung
+        // dari dlmm.js, bukan executeTool post-hook) → reply WAJIB bawa PnL/detail
+        // (governing #2). Tree-style; PnL ikut solMode (fmtMoneySigned).
+        const solMode = config.management.solMode;
         const closeTxs = result.close_txs?.length ? result.close_txs : result.txs;
-        const claimNote = result.claim_txs?.length ? `\nClaim txs: ${result.claim_txs.join(", ")}` : "";
-        await sendMessage(`✅ Closed ${pos.pair}\nPnL: ${config.management.solMode ? "◎" : "$"}${result.pnl_usd ?? "?"} | close txs: ${closeTxs?.join(", ") || "n/a"}${claimNote}`);
+        const lines = [
+          result.pnl_usd != null
+            ? `PnL: ${fmtMoneySigned(result.pnl_usd, solMode)}${result.pnl_pct != null ? ` (${fmtPctSigned(result.pnl_pct)})` : ""}`
+            : null,
+          `close txs: ${closeTxs?.join(", ") || "n/a"}`,
+          result.claim_txs?.length ? `claim txs: ${result.claim_txs.join(", ")}` : null,
+        ];
+        await sendMessage([header(ICON.closed, "Closed", pos.pair), SEP, tree(lines)].join("\n"));
       } else {
-        await sendMessage(`❌ Close failed: ${JSON.stringify(result)}`);
+        await sendMessage(`${ICON.fail} Close gagal — ${pos.pair}: ${result.error || JSON.stringify(result)}`);
       }
     } catch (e) { await sendMessage(systemView.renderError(e.message)).catch(() => {}); }
     return;

@@ -4,7 +4,7 @@
 > Display-only (eksekusi deploy/close + notif post-hook + Lever-A NOL ubah). Branch `experimental`. Restart owner-only.
 
 - [x] 1  /deploy: JG-3 lone-no-deploy → buildLoneNoDeploy · JG-5 double-msg (N1 KEBIT → ramping ack) ✅ commit 1
-- [ ] 2  /close: JG-4 (N2 TIDAK kebit manual → reply WAJIB detail tree-style)
+- [x] 2  /close: JG-4 (N2 TIDAK kebit manual → reply WAJIB detail tree-style) ✅ commit 2
 - [ ] 3  /closeall /set /setcfg → ack/tree via format.js (konten utuh)
 
 ---

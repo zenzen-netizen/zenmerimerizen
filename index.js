@@ -413,7 +413,13 @@ async function maybeAutoTuneGasReserve() {
     if (Math.abs(target - current) / Math.max(current, 0.001) < 0.2 || Math.abs(target - current) < 0.005) return;
     persistConfigChange("management", "gasReserve", "gasReserve", target);
     log("cron", `gasReserve auto-tuned ${current} → ${target} SOL (burn ${dailyBurn.toFixed(5)}/d × ${buffer}d, floor ${floor})`);
-    if (telegramEnabled()) sendMessage(`🪫 gasReserve auto-tuned: ${current} → ${target} SOL (≈${buffer}d runway @ ${dailyBurn.toFixed(5)} SOL/hari, dari gas nyata)`).catch(() => {});
+    if (telegramEnabled()) sendMessage([
+      header("🪫", "gasReserve auto-tuned"),
+      tree([
+        `${current} → ${target} SOL`,
+        `≈${buffer}d runway @ ${dailyBurn.toFixed(5)} SOL/hari (dari gas nyata)`,
+      ]),
+    ].join("\n")).catch(() => {});
   } catch (error) {
     log("cron_error", `gasReserve auto-tune failed (fail-open): ${error.message}`);
   }

@@ -2696,12 +2696,14 @@ async function applySettingsMenuCallback(msg) {
 // ─── Config presets (/preset) ───────────────────────────────────
 function presetUsageText() {
   return [
-    "🗂️ /preset — config presets (snapshot user-config.json)",
-    "/preset list — daftar preset",
-    "/preset save <nama> — simpan config saat ini jadi preset",
-    "/preset use <nama> — load preset (auto-backup + restart)",
-    "/preset show <nama> — lihat apa yg berubah vs config sekarang",
-    "/preset rm <nama> — hapus preset",
+    header("🗂️", "/preset", "config presets (snapshot user-config.json)"),
+    tree([
+      "/preset list — daftar preset",
+      "/preset save <nama> — simpan config saat ini jadi preset",
+      "/preset use <nama> — load preset (auto-backup + restart)",
+      "/preset show <nama> — lihat apa yg berubah vs config sekarang",
+      "/preset rm <nama> — hapus preset",
+    ]),
   ].join("\n");
 }
 
@@ -2713,7 +2715,7 @@ function runPresetCommand(argStr) {
   try {
     if (sub === "list" || sub === "ls") {
       const presets = listPresets();
-      if (!presets.length) return { text: "Belum ada racikan. Simpan dengan: /preset save <nama>" };
+      if (!presets.length) return { text: `🗂️ Belum ada racikan. Simpan dengan: /preset save <nama>` };
       const lines = presets.map((p) => {
         if (p.error) return `! ${p.name} — tidak terbaca`;
         const mark = p.isCurrent ? "●" : "○";
@@ -2722,44 +2724,52 @@ function runPresetCommand(argStr) {
       });
       const st = getActiveSetupStatus();
       const active = st.name ? `${st.name}${st.edited ? " ✎ (ada edit manual)" : ""}` : "— (belum load)";
-      return { text: `🗂️ Racikan (setup tersimpan)\nAktif: ${active}\n\n${lines.join("\n")}\n\n${presetUsageText()}` };
+      return { text: [
+        header("🗂️", "Racikan", `aktif: ${active}`),
+        SEP, tree(lines), SEP, presetUsageText(),
+      ].join("\n") };
     }
     if (sub === "save") {
-      if (!name) return { text: "Format: /preset save <nama>" };
-      if (!validName(name)) return { text: `Nama tidak valid "${name}". Pakai huruf/angka/_/- (maks 40).` };
+      if (!name) return { text: `${ICON.warn} Format: /preset save <nama>` };
+      if (!validName(name)) return { text: `${ICON.warn} Nama tidak valid "${name}". Pakai huruf/angka/_/- (maks 40).` };
       const r = savePreset(name);
-      return { text: `✅ Config saat ini disimpan → preset "${name}"${r.overwritten ? " (menimpa yang lama)" : ""}.` };
+      return { text: `${ICON.ok} Config saat ini disimpan → preset "${name}"${r.overwritten ? " (menimpa yang lama)" : ""}.` };
     }
     if (sub === "show" || sub === "diff") {
-      if (!name) return { text: "Format: /preset show <nama>" };
-      if (!presetExists(name)) return { text: `Preset "${name}" tidak ada. Coba /preset list.` };
+      if (!name) return { text: `${ICON.warn} Format: /preset show <nama>` };
+      if (!presetExists(name)) return { text: `${ICON.warn} Preset "${name}" tidak ada. Coba /preset list.` };
       const diffs = getPresetDiff(name);
-      if (!diffs.length) return { text: `Preset "${name}" identik dengan config saat ini — tidak ada yang berubah.` };
-      const shown = diffs.slice(0, 30).map((d) => `  ${d.key}: ${d.from} → ${d.to}`);
-      const more = diffs.length > 30 ? `\n  …+${diffs.length - 30} lagi` : "";
-      return { text: `🔍 Kalau load "${name}", ${diffs.length} setting berubah:\n${shown.join("\n")}${more}` };
+      if (!diffs.length) return { text: `${ICON.ok} Preset "${name}" identik dengan config saat ini — tidak ada yang berubah.` };
+      const shown = diffs.slice(0, 30).map((d) => `${d.key}: ${d.from} → ${d.to}`);
+      if (diffs.length > 30) shown.push(`…+${diffs.length - 30} lagi`);
+      return { text: [
+        header("🔍", `Diff "${name}"`, `${diffs.length} setting berubah`),
+        SEP, tree(shown),
+      ].join("\n") };
     }
     if (sub === "use" || sub === "load") {
-      if (!name) return { text: "Format: /preset use <nama>" };
-      if (!presetExists(name)) return { text: `Preset "${name}" tidak ada. Coba /preset list.` };
+      if (!name) return { text: `${ICON.warn} Format: /preset use <nama>` };
+      if (!presetExists(name)) return { text: `${ICON.warn} Preset "${name}" tidak ada. Coba /preset list.` };
       const diffs = getPresetDiff(name);
       const r = applyPreset(name);
       const sample = diffs.slice(0, 4).map((d) => `${d.key} ${d.from}→${d.to}`).join(", ");
       const cnt = diffs.length
-        ? `   ${diffs.length} setting berubah (a.l. ${sample}${diffs.length > 4 ? ", …" : ""})`
-        : "   (config sudah sama — tidak ada yang berubah)";
-      const back = r.backup ? `\n   Rollback: /preset use ${r.backup}` : "";
-      return { text: `✅ Preset "${name}" di-load → user-config.json\n${cnt}${back}`, applied: true, name };
+        ? `${diffs.length} setting berubah (a.l. ${sample}${diffs.length > 4 ? ", …" : ""})`
+        : "config sudah sama — tidak ada yang berubah";
+      return { text: [
+        header(ICON.ok, `Preset "${name}" di-load`, "user-config.json"),
+        tree([cnt, r.backup ? `Rollback: /preset use ${r.backup}` : null]),
+      ].join("\n"), applied: true, name };
     }
     if (sub === "rm" || sub === "delete" || sub === "del") {
-      if (!name) return { text: "Format: /preset rm <nama>" };
-      if (!presetExists(name)) return { text: `Preset "${name}" tidak ada.` };
+      if (!name) return { text: `${ICON.warn} Format: /preset rm <nama>` };
+      if (!presetExists(name)) return { text: `${ICON.warn} Preset "${name}" tidak ada.` };
       deletePreset(name);
       return { text: `🗑️ Preset "${name}" dihapus.` };
     }
     return { text: presetUsageText() };
   } catch (e) {
-    return { text: `Preset error: ${e.message}` };
+    return { text: `${ICON.fail} Preset error: ${e.message}` };
   }
 }
 

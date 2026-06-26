@@ -7,7 +7,7 @@
 - [x] 1  buildCandidateList (views/cycle.js): tree, field-opsional, plain, scannable ✅ commit 1
 - [x] 2  T19 /screen → buildCandidateList + buildNoCandidates (no-result) ✅ commit 2
 - [x] 3  T20 /candidates cache → buildCandidateList (list) + jaga semantik cache-kosong ✅ commit 3
-- [ ] 4  R9 REPL /candidates fetch → buildCandidateList + buildNoCandidates
+- [x] 4  R9 REPL /candidates fetch → buildCandidateList + buildNoCandidates ✅ commit 4
 - [ ] 5  Cycle trivial: JG-8 mgmt catch→cycleFail · C8 judul envelope→konstanta
 
 ---

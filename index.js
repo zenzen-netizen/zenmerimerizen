@@ -1438,22 +1438,11 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 //  FORMAT CANDIDATES TABLE
 // ═══════════════════════════════════════════
 function formatCandidates(candidates) {
-  if (!candidates.length) return "  No eligible pools found right now.";
-
-  const lines = candidates.map((p, i) => {
-    const name = (p.name || "unknown").padEnd(20);
-    const ftvl = `${p.fee_active_tvl_ratio ?? p.fee_tvl_ratio}%`.padStart(8);
-    const vol = `$${((p.volume_window || 0) / 1000).toFixed(1)}k`.padStart(8);
-    const active = `${p.active_pct}%`.padStart(6);
-    const org = String(p.organic_score).padStart(4);
-    return `  [${i + 1}]  ${name}  fee/aTVL:${ftvl}  vol:${vol}  in-range:${active}  organic:${org}`;
-  });
-
-  return [
-    "  #   pool                  fee/aTVL     vol    in-range  organic",
-    "  " + "─".repeat(68),
-    ...lines,
-  ].join("\n");
+  // REPL fetch (plain console). Render → views/cycle.js (JG-2): no-result = hasil-kosong
+  // (sudah screen → 0 lolos), beda dari cache-kosong. Field tabel lama (fee/aTVL, vol,
+  // in-range, organic) semua kebawa via candidateLines. Logika fetch tak diubah.
+  if (!candidates.length) return buildNoCandidates({});
+  return buildCandidateList(candidates);
 }
 
 function getDeterministicCloseRule(position, managementConfig) {

@@ -65,6 +65,7 @@ import {
   summarizeTradeAction, buildConfigDiff,
   CONFIRM_OK, CONFIRM_NO, CONFIRM_EXPIRED,
 } from "./views/cycle.js";
+import { ICON, SEP, tree, header, fmtMoneySigned, fmtPct as fmtPctSigned } from "./views/format.js";
 import {
   initSettingsViews, renderSettingsMenu,
   settingValue, settingButton, fmtSettingValue, categoryButton, cycleControl,
@@ -2812,7 +2813,11 @@ async function deployLatestCandidate(index) {
         pool: candidate.pool,
         pool_name: candidate.name,
       });
-      throw new Error(`NO DEPLOY: only cached candidate ${candidate.name} is not worth deploying — ${skipReason}`);
+      // Render-only: bawa field terstruktur supaya handler bisa render via
+      // buildLoneNoDeploy (gaya cycle) tanpa parse string. Logika tetap throw.
+      const err = new Error(`NO DEPLOY: only cached candidate ${candidate.name} is not worth deploying — ${skipReason}`);
+      err.loneNoDeploy = { candidateName: candidate.name, skipReason };
+      throw err;
     }
   }
   const [balForDeploy, posForDeploy] = await Promise.all([getWalletBalances(), getMyPositions({ force: true }).catch(() => ({ total_positions: 0 }))]);
@@ -3234,20 +3239,21 @@ async function telegramHandler(msg) {
   if (deployMatch) {
     try {
       const idx = parseInt(deployMatch[1]) - 1;
-      const { candidate, result, deployAmount, binsBelow } = await deployLatestCandidate(idx);
-      const coverage = result.range_coverage
-        ? `Range: ${fmtPct(result.range_coverage.downside_pct)} downside | ${fmtPct(result.range_coverage.upside_pct)} upside`
-        : `Strategy: ${config.strategy.strategy} | binsBelow: ${binsBelow}`;
-      await sendMessage([
-        `✅ Deployed ${candidate.name}`,
-        `Pool: ${candidate.pool}`,
-        `Amount: ${deployAmount} SOL`,
-        coverage,
-        `Position: ${result.position || "n/a"}`,
-        result.txs?.length ? `Tx: ${result.txs[0]}` : null,
-      ].filter(Boolean).join("\n")).catch(() => {});
+      const { candidate, result, deployAmount } = await deployLatestCandidate(idx);
+      // Mirror executor.js:783 — N1 notifyDeploy kebit hanya saat success (incl dry-run).
+      const ok = result?.success !== false && !result?.error;
+      if (ok) {
+        // Sukses → N1 (executor.js:797) sudah kirim detail penuh (amount/range/cover/
+        // bin/tx) → reply cukup ack pendek, hindari pesan dobel (JG-5).
+        await sendMessage(`${ICON.ok} Deploy ${candidate.name} terkirim — ${deployAmount} SOL.`).catch(() => {});
+      } else {
+        // Gagal → N1 TIDAK kebit → reply WAJIB bawa error (governing #2, anti detail-hilang).
+        await sendMessage(`${ICON.fail} Deploy gagal — ${candidate.name}: ${result?.error || JSON.stringify(result)}`).catch(() => {});
+      }
     } catch (e) {
-      await sendMessage(systemView.renderError(e.message)).catch(() => {});
+      // JG-3 lone-no-deploy: render gaya cycle (buildLoneNoDeploy), bukan error mentah.
+      if (e?.loneNoDeploy) await sendMessage(buildLoneNoDeploy(e.loneNoDeploy)).catch(() => {});
+      else await sendMessage(systemView.renderError(e.message)).catch(() => {});
     }
     return;
   }

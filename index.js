@@ -3537,18 +3537,40 @@ Commands:
 
     if (input === "/status") {
       await runBusy(async () => {
-        const [wallet, positions] = await Promise.all([getWalletBalances(), getMyPositions({ force: true })]);
-        console.log(`\nWallet: ${wallet.sol} SOL  ($${wallet.sol_usd})`);
-        console.log(`Positions: ${positions.total_positions}`);
-        for (const p of positions.positions) {
-          const status = p.in_range ? "in-range ✓" : "OUT OF RANGE ⚠";
-          console.log(`  ${p.pair.padEnd(16)} ${status}  fees: ${config.management.solMode ? "◎" : "$"}${p.unclaimed_fees_usd}`);
+        // JG-6: REPL == TG /status. Feed data SAMA persis dgn telegramHandler /status
+        // (wallet/slot/rent/OpenRouter/all-time/learning/pnl), render target "plain".
+        const [wallet, positions, orBalance, orCredits] = await Promise.all([
+          getWalletBalances(),
+          getMyPositions({ force: true }),
+          getOpenRouterBalance(),
+          getOpenRouterCredits(),
+        ]);
+        let rentInfo = null;
+        if (positions.total_positions > 0) {
+          const rentMap = await getPositionsRentSol(positions.positions.map((p) => p.position)).catch(() => ({}));
+          const vals = Object.values(rentMap);
+          rentInfo = { totalRentSol: vals.reduce((s, r) => s + (r?.sol ?? 0), 0), estimated: vals.some((r) => r?.estimated) };
         }
-        console.log();
-        const pnlBlock = formatPnlTracker(getModePerformance(), { solPriceUsd: wallet?.sol_price ?? null });
-        if (pnlBlock) console.log(`${pnlBlock}\n`);
-        const disc = racikanScopeDisclosure();
-        if (disc) console.log(`${disc.trim()}\n`);
+        const slotsRemaining = Math.max(1, config.risk.maxPositions - (positions?.total_positions ?? 0));
+        const { lessons } = listLessons({ limit: 10, full: true });
+        const lastBad = lessons.filter((l) => l.outcome === "bad" || l.outcome === "poor").slice(-1)[0];
+        const lastGood = lessons.filter((l) => l.outcome === "good").slice(-1)[0];
+        const vm = statusView.buildView({
+          cfg: config,
+          sol: wallet.sol, solUsd: wallet.sol_usd, solPrice: wallet.sol_price,
+          totalPositions: positions.total_positions, maxPositions: config.risk.maxPositions,
+          deployAmount: computeDeployAmount(wallet.sol, { slotsRemaining }),
+          gasReserve: config.management?.gasReserve ?? 0,
+          heldSol: rentInfo?.totalRentSol ?? 0, heldEst: rentInfo?.estimated ?? false,
+          dryRun: process.env.DRY_RUN === "true", hive: isHiveMindEnabled(),
+          orLines: buildOpenRouterLines(orBalance, orCredits),
+          perf: getPerformanceSummary(),
+          lastGoodRule: lastGood ? condenseRule(lastGood.rule) : null,
+          lastBadRule: lastBad ? condenseRule(lastBad.rule) : null,
+          pnlBlock: formatPnlTracker(getModePerformance(), { solPriceUsd: wallet?.sol_price ?? null }),
+          disclosure: racikanScopeDisclosure(),
+        });
+        console.log(`\n${render(vm, "plain")}\n`);
       });
       return;
     }

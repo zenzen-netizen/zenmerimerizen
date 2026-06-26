@@ -1602,16 +1602,10 @@ function getLatestCandidatesMeta() {
 }
 
 function describeLatestCandidates(limit = 5) {
-  if (!_latestCandidates.length) return "No cached candidates yet. Run /screen first.";
-  const lines = _latestCandidates.slice(0, limit).map((pool, i) => {
-    const feeTvl = pool.fee_active_tvl_ratio ?? pool.fee_tvl_ratio ?? "?";
-    const vol = pool.volume_window ?? pool.volume_24h ?? "?";
-    const active = pool.active_pct ?? "?";
-    const organic = pool.organic_score ?? "?";
-    return `${i + 1}. ${pool.name} | fee/aTVL ${feeTvl}% | vol $${vol} | in-range ${active}% | organic ${organic}`;
-  });
-  const age = _latestCandidatesAt ? new Date(_latestCandidatesAt).toLocaleString("en-US", { hour12: false }) : "unknown";
-  return `Latest candidates (${_latestCandidates.length}) — updated ${age}\n\n${lines.join("\n")}`;
+  // Cache-kosong (belum pernah /screen) ≠ no-result (sudah screen, 0 lolos) — beda
+  // builder, makna dijaga (governing #4). Render → views/cycle.js (JG-1/JG-2).
+  if (!_latestCandidates.length) return buildNoCache();
+  return buildCandidateList(_latestCandidates.slice(0, limit), { updatedAt: _latestCandidatesAt });
 }
 
 // Compact age label from minutes: <60 → "Xm", else "Y.yh".

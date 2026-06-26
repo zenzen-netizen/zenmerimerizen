@@ -469,7 +469,7 @@ export async function runManagementCycle({ silent = false } = {}) {
 
   try {
     if (!silent && telegramEnabled()) {
-      liveMessage = await createLiveMessage("🔄 Management Cycle", "Evaluating positions...");
+      liveMessage = await createLiveMessage(CYCLE_TITLE.mgmt, "Evaluating positions...");
     }
     const livePositions = await getMyPositions({ force: true }).catch(() => null);
     positions = livePositions?.positions || [];
@@ -624,13 +624,13 @@ After executing, write a brief one-line result per position.
     }
   } catch (error) {
     log("cron_error", `Management cycle failed: ${error.message}`);
-    mgmtReport = `Management cycle failed: ${error.message}`;
+    mgmtReport = cycleFail(`Management cycle failed: ${error.message}`);
   } finally {
     _managementBusy = false;
     if (!silent && telegramEnabled()) {
       if (mgmtReport) {
         if (liveMessage) await liveMessage.finalize(stripThink(mgmtReport)).catch(() => {});
-        else sendMessage(`🔄 Management Cycle\n\n${stripThink(mgmtReport)}`).catch(() => { });
+        else sendMessage(`${CYCLE_TITLE.mgmt}\n\n${stripThink(mgmtReport)}`).catch(() => { });
       } else if (liveMessage) {
         // Any return path that skipped setting a report must still close the live
         // message, or its typing-indicator timer leaks forever (4s sendChatAction
@@ -742,7 +742,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
     return screenReport;
   }
   if (!silent && telegramEnabled()) {
-    liveMessage = await createLiveMessage("🔍 Screening Cycle", "Scanning candidates...");
+    liveMessage = await createLiveMessage(CYCLE_TITLE.screen, "Scanning candidates...");
   }
   timers.screeningLastRun = Date.now();
   log("cron", `Starting screening cycle [model: ${config.llm.screeningModel}]`);
@@ -1142,7 +1142,7 @@ IMPORTANT:
     if (!silent && telegramEnabled()) {
       if (screenReport) {
         if (liveMessage) await liveMessage.finalize(stripThink(screenReport)).catch(() => {});
-        else sendMessage(`🔍 Screening Cycle\n\n${stripThink(screenReport)}`).catch(() => { });
+        else sendMessage(`${CYCLE_TITLE.screen}\n\n${stripThink(screenReport)}`).catch(() => { });
       } else if (liveMessage) {
         // Same typing-indicator leak guard as the management cycle.
         await liveMessage.finalize("(cycle ended without report)").catch(() => {});

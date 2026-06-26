@@ -8,7 +8,16 @@
 - [x] 2  T19 /screen → buildCandidateList + buildNoCandidates (no-result) ✅ commit 2
 - [x] 3  T20 /candidates cache → buildCandidateList (list) + jaga semantik cache-kosong ✅ commit 3
 - [x] 4  R9 REPL /candidates fetch → buildCandidateList + buildNoCandidates ✅ commit 4
-- [ ] 5  Cycle trivial: JG-8 mgmt catch→cycleFail · C8 judul envelope→konstanta
+- [x] 5  Cycle trivial: JG-8 mgmt catch→cycleFail · C8 judul envelope→konstanta ✅ commit 5
+
+---
+
+## VERIFIKASI AKHIR (FASE selesai)
+- `node --check` lulus tiap fase (views/cycle.js + index.js).
+- JG-8: index.js:627 mgmt catch → `cycleFail(...)` (sama gaya screening catch 739/769/1138).
+- C8: 4 titik (createLiveMessage 472/745 + sendMessage fallback 633/1145) pakai `CYCLE_TITLE.{mgmt,screen}`. Nol stray literal.
+- Cycle otomatis (C3-C6 skip/fail/no-cand/lone) di runScreeningCycle TAK disentuh — masih builder cycle.js apa adanya.
+- Render-ganda hilang: /screen (T19) + /candidates cache (T20) + REPL fetch (R9) semua via buildCandidateList; no-result via buildNoCandidates (sama gaya cycle). Cache-kosong tetap buildNoCache (distinct).
 
 ---
 

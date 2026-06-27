@@ -17,5 +17,5 @@
 - ✅ Fase 1 snapshot experimental-zen (SHA lokal=remote: 20e9ff00b4a826cab0ae89c0c9587d0f84b690fa)
 - ✅ Fase 2 fetch upstream (5 branch: main 5ab14b4, experimental 1f3fc82, autoresearch b60346e, simulator 872ecc3, fix/pnl e559081)
 - ✅ Fase 3 mirror dev → dev/* (5 branch: dev/main 5ab14b4, dev/experimental 1f3fc82, dev/autoresearch b60346e, dev/simulator 872ecc3, dev/fix-pnl-poller-mgmt-determinism e559081)
-- ⏸ Fase 4 v3 STOP-konfirmasi — menunggu owner
-- ⬜ Fase 5 (OPSIONAL) update experimental GitHub dari local
+- ✅ Fase 4 v3 dihapus dari GitHub (arsip SHA: d68f89b5b1c705235f282a1b4e49a78719a72932)
+- ✅ Fase 5 push experimental ke GitHub (fast-forward 14e0707..da67f84, SHA remote=local: da67f849f716498cb0aa9766370774586a656915)

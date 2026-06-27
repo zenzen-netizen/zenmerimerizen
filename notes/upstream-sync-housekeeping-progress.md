@@ -14,8 +14,8 @@
 
 ## Status fase
 - ✅ Fase 0 recon
-- ⬜ Fase 1 snapshot experimental-zen
-- ⬜ Fase 2 tambah remote upstream + fetch
-- ⬜ Fase 3 mirror branch dev → dev/*
-- ⬜ Fase 4 v3 (STOP-konfirmasi)
+- ✅ Fase 1 snapshot experimental-zen (SHA lokal=remote: 20e9ff00b4a826cab0ae89c0c9587d0f84b690fa)
+- ✅ Fase 2 fetch upstream (5 branch: main 5ab14b4, experimental 1f3fc82, autoresearch b60346e, simulator 872ecc3, fix/pnl e559081)
+- ✅ Fase 3 mirror dev → dev/* (5 branch: dev/main 5ab14b4, dev/experimental 1f3fc82, dev/autoresearch b60346e, dev/simulator 872ecc3, dev/fix-pnl-poller-mgmt-determinism e559081)
+- ⏸ Fase 4 v3 STOP-konfirmasi — menunggu owner
 - ⬜ Fase 5 (OPSIONAL) update experimental GitHub dari local

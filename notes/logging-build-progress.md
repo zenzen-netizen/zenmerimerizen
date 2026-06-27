@@ -52,3 +52,29 @@ Catatan alur: jalur UTAMA = staged object di-spread langsung ke snapshot di
   nanti parseFloat. Bukan blocker.
 
 ## STATUS: FASE 1-2 selesai (kode + verifikasi + commit). Tinggal restart pm2 (owner) + cek deploy berikut.
+
+---
+
+## ✅ RE-VERIFIKASI sesi 2026-06-20 (bukti file:line)
+Kode SUDAH landed di commit `9facff5` (index.js +9 / lessons.js +7 / tools/dlmm.js +8 / notes +54;
+`recordPerformance` TAK tersentuh — diff cuma array di lessons.js).
+- `node --check` index.js / dlmm.js / lessons.js → semua PASS.
+- Konsistensi nama: tiap dari 6 field muncul **tepat 3×** (1 per file). ✅
+- Trace utuh dikonfirmasi: `stageSignals(...)` (index.js, dalam `if config.darwin?.enabled`, darwin ON)
+  → `getAndClearStagedSignals(pool_address, baseMint)` **saat DEPLOY** (`tools/dlmm.js:973-974`)
+  → diteruskan sbg `signal_snapshot` ke `trackPosition()` → tersimpan di tracked record (state.json)
+  → saat CLOSE: `resolvePerformanceSignalSnapshot` (`tools/dlmm.js:1352`) `{...staged, ...tracked.signal_snapshot}`
+  → `recordPerformance` spread apa-adanya ke lessons.json. Field baru kebawa. ✅
+
+### ⚠️ TEMUAN PENTING: proses pm2 yang JALAN masih kode LAMA (restart blm dilakukan)
+- pm2 id0 `meridian` ONLINE, cwd `/home/ubuntu/meridianzen` ✅, tapi **start 2026-06-19 16:48:03 +0800**
+  (08:48:03 UTC), sedangkan **commit 2026-06-19 17:21:37 +0800** → proses start **33 menit SEBELUM**
+  kode landed. pm2 = run kode yg ke-load saat start (bukan hot-reload) → **proses jalan kode lama tanpa stamp.**
+- Bukti empiris: 3 record terakhir lessons.json (n=113) — termasuk yg deployed `2026-06-19T17:10:26Z`
+  (= 01:10 +0800, SUDAH lewat commit) — snapshot-nya **NOL** dari 6 field baru (cuma 12 key lama).
+  Persis gejala stale-code. → kode benar, tapi INERT sampai restart.
+
+⏳ **MASIH PENDING (owner): `pm2 restart 0 --update-env`** — wajib biar stamp aktif.
+⭐ Setelah restart: deploy autonomous BERIKUTNYA → cek record baru di lessons.json punya
+   `entry_top10_pct`/`entry_bot_pct`/`entry_age_hours` ber-NILAI (bukan null). Belum bisa dites
+   sebelum restart (proses lama gak akan pernah nge-stamp).

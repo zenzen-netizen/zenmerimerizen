@@ -1339,11 +1339,24 @@ Summarize the current portfolio health, total fees earned, and performance of al
             }
             continue; // skipped (management busy) — let that cycle handle it
           }
+          // Non-emergency exit: direct close (LLM-free) bila TIDAK lagi menunggu konfirmasi.
+          // Confirmation-pending tetap lewat jalur management lama (jaga trailing-confirm gate).
+          if (!exit.needs_confirmation) {
+            const em = await emergencyCloseDirect(p, exit.reason);
+            if (em.success) break;
+            if (em.needFallback) {
+              _pollTriggeredAt = Date.now();
+              log("state", `[PnL poll] Direct close failed: ${p.pair} — ${exit.reason} — falling back to management ASAP`);
+              runManagementCycle({ silent: true }).catch((e) => log("cron_error", `Poll-triggered (fallback) management failed: ${e.message}`));
+              break;
+            }
+            continue; // skipped (management busy) — biarkan cycle itu yang tangani
+          }
           const cooldownMs = config.schedule.managementIntervalMin * 60 * 1000;
           const sinceLastTrigger = Date.now() - _pollTriggeredAt;
           if (sinceLastTrigger >= cooldownMs) {
             _pollTriggeredAt = Date.now();
-            log("state", `[PnL poll] Exit alert: ${p.pair} — ${exit.reason} — triggering management`);
+            log("state", `[PnL poll] Exit alert (awaiting confirm): ${p.pair} — ${exit.reason} — triggering management`);
             runManagementCycle({ silent: true }).catch((e) => log("cron_error", `Poll-triggered management failed: ${e.message}`));
           } else {
             log("state", `[PnL poll] Exit alert: ${p.pair} — ${exit.reason} — cooldown (${Math.round((cooldownMs - sinceLastTrigger) / 1000)}s left)`);
@@ -1364,16 +1377,18 @@ Summarize the current portfolio health, total fees earned, and performance of al
             }
             continue; // skipped (management busy) — let that cycle handle it
           }
-          const cooldownMs = config.schedule.managementIntervalMin * 60 * 1000;
-          const sinceLastTrigger = Date.now() - _pollTriggeredAt;
-          if (sinceLastTrigger >= cooldownMs) {
-            _pollTriggeredAt = Date.now();
-            log("state", `[PnL poll] Deterministic close rule: ${p.pair} — Rule ${closeRule.rule}: ${closeRule.reason} — triggering management`);
-            runManagementCycle({ silent: true }).catch((e) => log("cron_error", `Poll-triggered management failed: ${e.message}`));
-          } else {
-            log("state", `[PnL poll] Deterministic close rule: ${p.pair} — Rule ${closeRule.rule}: ${closeRule.reason} — cooldown (${Math.round((cooldownMs - sinceLastTrigger) / 1000)}s left)`);
+          // Non-emergency deterministic close → direct close (LLM-free).
+          {
+            const em = await emergencyCloseDirect(p, closeRule.reason || "close rule");
+            if (em.success) break;
+            if (em.needFallback) {
+              _pollTriggeredAt = Date.now();
+              log("state", `[PnL poll] Direct close failed: ${p.pair} — Rule ${closeRule.rule}: ${closeRule.reason} — falling back to management ASAP`);
+              runManagementCycle({ silent: true }).catch((e) => log("cron_error", `Poll-triggered (fallback) management failed: ${e.message}`));
+              break;
+            }
+            continue; // skipped (management busy)
           }
-          break;
         }
       }
     } finally {

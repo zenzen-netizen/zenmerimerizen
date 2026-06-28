@@ -16,7 +16,7 @@
  * pindah seksi; semua data tetap ada.
  */
 
-import { ICON, SEP, tree, fmtWib, fmtMoneySigned, fmtPct } from "./format.js";
+import { ICON, SEP, tree, fmtWib, fmtMoneySigned, fmtBothSigned, fmtPct } from "./format.js";
 import { walletBlockLines, systemLines } from "./wallet.js";
 
 /**
@@ -50,8 +50,12 @@ export function telegram(vm) {
   if (vm.perf) {
     out.push(SEP, `${ICON.perf} Performa · ${vm.perf.total_positions_closed} closed`);
     const roi = fmtPct(vm.perf.roi_pct);
+    const pnlUsd = vm.perf.total_pnl_usd;
+    const pnlStr = (vm.solPrice && vm.solPrice > 0)
+      ? fmtBothSigned(pnlUsd, pnlUsd / vm.solPrice, solMode)   // dua unit, benar di kedua mode
+      : fmtMoneySigned(pnlUsd, false);                          // solPrice unknown → paksa label $ (JANGAN ◎)
     out.push(tree([
-      `${ICON.pnl} All-time: ${fmtMoneySigned(vm.perf.total_pnl_usd, solMode)}${roi ? ` (${roi})` : ""}`,
+      `${ICON.pnl} All-time: ${pnlStr}${roi ? ` (${roi})` : ""}`,
       `${ICON.rule} Win ${vm.perf.win_rate_pct}% · avg ${fmtPct(vm.perf.avg_pnl_pct)}`,
     ]));
   }

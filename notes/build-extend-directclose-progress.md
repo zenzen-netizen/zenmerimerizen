@@ -5,5 +5,6 @@
   - BLOK A (Exit alert): terapkan NEW persis brief — `if (!exit.needs_confirmation)` → emergencyCloseDirect (LLM-free); needs_confirmation tetap ke jalur management lama (label "awaiting confirm"). Gate trailing-confirm (1322) utuh.
   - BLOK B (Deterministic close rule): NEW direct-close; `old_string` dicocokkan ke LIVE (`closeRule.reason`, bukan typo `closeReason` yg tak ada); baris komentar "fix latent ReferenceError" DIBUANG (tak ada bug); commit-msg tanpa klaim bug-fix.
   - Blok terlarang (trailing-confirm gate, STOP_LOSS, rule-1) TIDAK disentuh; struktur brace balance; node --check index.js lolos.
-  - Commit: <pending>
-- ⚠️ Owner pm2 restart id0 PENDING → amati 1 close NON-DARURAT: muncul `EMERGENCY direct close` + swap-back, TANPA `triggering management`/`cooldown ... left`, Telegram notify tetap muncul.
+  - Commit: 63441d0
+- ✅ Owner pm2 restart id0 DONE 2026-06-28T06:48Z (restart #49, boot clean, Mode LIVE, unstable:0, cron+TG up, nol error, exit-path baru ke-load). Build #2 LIVE.
+- ⏳ Verifikasi FUNGSIONAL nunggu 1 close NON-DARURAT: muncul `EMERGENCY direct close` + swap-back, TANPA `triggering management`/`cooldown ... left`, Telegram notify tetap muncul.

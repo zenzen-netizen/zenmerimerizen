@@ -36,6 +36,7 @@ function getJupiterApiKey() {
 }
 
 function getJupiterReferralParams() {
+  if (config.jupiter.referralEnabled === false) return null;
   const referralAccount = String(config.jupiter.referralAccount || "").trim();
   const referralFee = Number(config.jupiter.referralFeeBps || 0);
   if (!referralAccount || !Number.isFinite(referralFee) || referralFee <= 0) {

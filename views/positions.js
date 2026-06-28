@@ -16,7 +16,7 @@
 
 import {
   ICON, SEP, tree, numEmoji, esc,
-  fmtMoney, fmtMoneySigned, fmtSol, fmtPct, fmtAge,
+  fmtMoney, fmtMoneySigned, fmtSol, fmtPct, fmtAge, fmtBothFromMode, pnlMark,
 } from "./format.js";
 
 /**
@@ -24,8 +24,9 @@ import {
  * @param {Array} positions  array dari getMyPositions().positions
  * @param {object} cfg        config (untuk solMode)
  * @param {object} rentMap    { [position]: { sol, estimated } } (rent on-chain)
+ * @param {number|null} solPrice  harga SOL (USD) untuk dual-unit display; null → fail-open 1-unit
  */
-export function buildView(positions, cfg, rentMap = {}) {
+export function buildView(positions, cfg, rentMap = {}, solPrice = null) {
   const solMode = !!cfg?.management?.solMode;
   let totalHeldSol = 0, anyHeldEst = false;
 
@@ -67,7 +68,7 @@ export function buildView(positions, cfg, rentMap = {}) {
     };
   });
 
-  return { type: "positions", solMode, count: items.length, items, totalHeldSol, anyHeldEst };
+  return { type: "positions", solMode, solPrice, count: items.length, items, totalHeldSol, anyHeldEst };
 }
 
 /** Render view-model → string HTML (tree desain). */
@@ -86,8 +87,8 @@ export function telegram(vm) {
 
     const pctStr = fmtPct(it.pnlPct);
     out.push(tree([
-      `${ICON.pnl} PnL: ${pctStr ? pctStr + " " : ""}(${fmtMoneySigned(it.pnlVal, solMode)})`,
-      `${ICON.value} Value: ${fmtMoney(it.value, solMode)} · fees ${fmtMoney(it.fees, solMode)}`,
+      `${pnlMark(it.pnlVal)} PnL: ${pctStr ? pctStr + " · " : ""}${fmtBothFromMode(it.pnlVal, solMode, vm.solPrice, true)}`,
+      `${ICON.value} Value: ${fmtBothFromMode(it.value, solMode, vm.solPrice, false)} · fees ${fmtMoney(it.fees, solMode)}`,
       `${ICON.time} Age: ${fmtAge(it.ageMin)} · ${it.bins ?? "?"} bins`,
       it.feeDensityPct != null ? `${ICON.fee} fee ${it.feeDensityPct.toFixed(2)}%` : null,
       it.heldSol != null ? `${ICON.held} ${fmtSol(it.heldSol)} held${it.heldEst ? " (est)" : ""}` : null,

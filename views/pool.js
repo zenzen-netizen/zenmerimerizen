@@ -17,14 +17,14 @@
 
 import {
   ICON, SEP, tree, esc,
-  fmtMoney, fmtMoneySigned, fmtSol, fmtPct, fmtAge,
+  fmtMoney, fmtMoneySigned, fmtSol, fmtPct, fmtAge, fmtBothFromMode, pnlMark,
 } from "./format.js";
 
 /**
  * @param input {
  *   cfg, idx, pair, inRange, poolAddr, positionAddr,
  *   pnlPct, pnlVal, value, fees, collectedFees, unclaimedFees, ageMin,
- *   heldSol, heldEst, note, rangeEffLines  // array dari buildRangeEfficiencyLines
+ *   heldSol, heldEst, note, rangeEffLines, solPrice  // array dari buildRangeEfficiencyLines
  * }
  */
 export function buildView(input) {
@@ -50,8 +50,8 @@ export function telegram(vm) {
   ];
 
   out.push(tree([
-    `${ICON.pnl} PnL: ${pctStr} (${fmtMoneySigned(vm.pnlVal, solMode)})`,
-    `${ICON.value} Value: ${fmtMoney(vm.value, solMode)} · fees ${fmtMoney(vm.fees, solMode)}`,
+    `${pnlMark(vm.pnlVal)} PnL: ${pctStr} · ${fmtBothFromMode(vm.pnlVal, solMode, vm.solPrice, true)}`,
+    `${ICON.value} Value: ${fmtBothFromMode(vm.value, solMode, vm.solPrice, false)} · fees ${fmtMoney(vm.fees, solMode)}`,
     vm.feeDensityPct != null ? `${ICON.fee} fee-density: ${vm.feeDensityPct.toFixed(2)}%` : null,
     `${ICON.time} Age: ${fmtAge(vm.ageMin)}`,
     vm.heldSol != null ? `${ICON.held} ${fmtSol(vm.heldSol, 4)} held${vm.heldEst ? " (estimasi)" : ""} · refund saat close` : null,

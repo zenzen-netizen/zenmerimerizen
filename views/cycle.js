@@ -17,7 +17,7 @@
 
 import {
   ICON, SEP, tree, numEmoji,
-  fmtMoney, fmtPct, fmtAge, fmtWib,
+  fmtMoney, fmtPct, fmtAge, fmtWib, pnlMark,
 } from "./format.js";
 
 // Judul envelope siklus (single-source — live-message title + fallback non-live).
@@ -65,7 +65,7 @@ export function buildMgmtReport(positions, actionMap, cfg) {
     body.push(tree([
       `${ICON.time} Age: ${fmtAge(p.age_minutes)}`,
       `${ICON.value} Val: ${fmtMoney(p.total_value_usd, solMode)} · unclaimed ${fmtMoney(p.unclaimed_fees_usd, solMode)}`,
-      `${ICON.pnl} PnL: ${fmtPct(p.pnl_pct) || "?"}`,
+      `${pnlMark(p.pnl_pct)} PnL: ${fmtPct(p.pnl_pct) || "?"}`,
       `${ICON.yield} Yield: ${p.fee_per_tvl_24h ?? "?"}%`,
       p.instruction ? `Note: "${p.instruction}"` : null,
       statusLine(act),

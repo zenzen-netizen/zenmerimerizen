@@ -89,6 +89,25 @@ export function fmtBothSigned(usd, sol, solMode) {
   return solMode ? `${sign}${s} (≈${u})` : `${sign}${u} (≈${s})`;
 }
 
+/**
+ * Dari nilai MODE-CORRECT (USD saat solMode off, SOL saat solMode on) + harga SOL,
+ * hasilkan string DUA unit. Fail-open: solPrice tak valid → 1-unit mode-correct (JANGAN mislabel).
+ * signed=true → PnL/delta; false → value/saldo.
+ */
+export function fmtBothFromMode(v, solMode, solPrice, signed = false) {
+  if (v == null || !(solPrice > 0)) {
+    return signed ? fmtMoneySigned(v ?? 0, solMode) : fmtMoney(v, solMode);
+  }
+  const usd = solMode ? v * solPrice : v;
+  const sol = solMode ? v : v / solPrice;
+  return signed ? fmtBothSigned(usd, sol, solMode) : fmtBoth(usd, sol, solMode);
+}
+
+/** Marker floating P&L (kotak — beda dari 🟢/🔴 range bulat): ≥0 hijau, <0 merah. */
+export function pnlMark(v) {
+  return (Number(v) || 0) >= 0 ? "🟩" : "🟥";
+}
+
 /** SOL eksplisit (rent/held & sejenisnya), selalu ◎, default 3dp padded (toFixed,
  *  cocokin display lama `rent.sol.toFixed(3)` + mockup "◎0.070"). */
 export function fmtSol(value, dp = 3) {

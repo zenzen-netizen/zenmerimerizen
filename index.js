@@ -3142,7 +3142,8 @@ async function telegramHandler(msg) {
       if (total_positions === 0) { await sendMessage(`${ICON.position} No open positions.`); return; }
       // Data fetch unchanged; render delegated to views/ layer (Phase 2 🅴 pilot).
       const rentMap = await getPositionsRentSol(positions.map((p) => p.position)).catch(() => ({}));
-      const vm = positionsView.buildView(positions, config, rentMap);
+      const solPrice = (await getSolMarketRegime())?.usdPrice || null;
+      const vm = positionsView.buildView(positions, config, rentMap, solPrice);
       await sendHTML(render(vm, "telegram"));
     } catch (e) { await sendMessage(systemView.renderError(e.message)).catch(() => {}); }
     return;
@@ -3158,6 +3159,7 @@ async function telegramHandler(msg) {
       const tracked = (() => { try { return getTrackedPosition(pos.position); } catch { return null; } })();
       const rent = (await getPositionsRentSol([pos.position]).catch(() => ({})))[pos.position];
       // Render delegated to views/pool.js (Phase 3 🅴). Data fetch + range-eff calc unchanged.
+      const solPrice = (await getSolMarketRegime())?.usdPrice || null;
       const vm = poolView.buildView({
         cfg: config, idx, pair: pos.pair, inRange: !!pos.in_range,
         poolAddr: pos.pool, positionAddr: pos.position,
@@ -3168,6 +3170,7 @@ async function telegramHandler(msg) {
         heldSol: rent ? rent.sol : null, heldEst: rent ? rent.estimated : false,
         note: pos.instruction || null,
         rangeEffLines: buildRangeEfficiencyLines(pos, tracked),
+        solPrice,
       });
       await sendHTML(render(vm, "telegram"));
     } catch (e) {

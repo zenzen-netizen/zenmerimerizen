@@ -9,7 +9,7 @@ import {
   closePosition,
   searchPools,
 } from "./dlmm.js";
-import { getWalletBalances, swapToken, quoteSellPriceImpact } from "./wallet.js";
+import { getWalletBalances, swapToken, quoteSellPriceImpact, swapBaseToSolWithRetry } from "./wallet.js";
 import { studyTopLPers } from "./study.js";
 import { addLesson, clearAllLessons, clearPerformance, removeLessonsByKeyword, getPerformanceHistory, getHourlyProfile, getNarrativeProfile, pinLesson, unpinLesson, listLessons } from "../lessons.js";
 import { setPositionInstruction } from "../state.js";
@@ -807,19 +807,14 @@ export async function executeTool(name, args) {
         }
         // Auto-swap base token back to SOL unless user said to hold
         if (!args.skip_swap && result.base_mint) {
-          try {
-            const balances = await getWalletBalances({});
-            const token = balances.tokens?.find(t => t.mint === result.base_mint);
-            if (token && token.usd >= 0.10) {
-              log("executor", `Auto-swapping ${token.symbol || result.base_mint.slice(0, 8)} ($${token.usd.toFixed(2)}) back to SOL`);
-              const swapResult = await swapToken({ input_mint: result.base_mint, output_mint: "SOL", amount: token.balance });
-              // Tell the model the swap already happened so it doesn't call swap_token again
-              result.auto_swapped = true;
-              result.auto_swap_note = `Base token already auto-swapped back to SOL (${token.symbol || result.base_mint.slice(0, 8)} → SOL). Do NOT call swap_token again.`;
-              if (swapResult?.amount_out) result.sol_received = swapResult.amount_out;
-            }
-          } catch (e) {
+          const swapResult = await swapBaseToSolWithRetry({ base_mint: result.base_mint }).catch((e) => {
             log("executor_warn", `Auto-swap after close failed: ${e.message}`);
+            return { success: false };
+          });
+          if (swapResult?.success && swapResult.amount_out) {
+            result.auto_swapped = true;
+            result.auto_swap_note = `Base token already auto-swapped back to SOL. Do NOT call swap_token again.`;
+            result.sol_received = swapResult.amount_out;
           }
         }
       } else if (name === "claim_fees" && config.management.autoSwapAfterClaim && result.base_mint) {

@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 import { agentLoop } from "./agent.js";
 import { log } from "./logger.js";
 import { getMyPositions, closePosition, getActiveBin, getPositionsRentSol } from "./tools/dlmm.js";
-import { getWalletBalances, getSolMarketRegime, swapToken } from "./tools/wallet.js";
+import { getWalletBalances, getSolMarketRegime, swapToken, swapBaseToSolWithRetry } from "./tools/wallet.js";
 import { getTopCandidates, formatYieldToMe } from "./tools/screening.js";
 import { confirmIndicatorPreset } from "./tools/chart-indicators.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
@@ -1214,16 +1214,8 @@ async function emergencyCloseDirect(p, reason) {
     if (success) {
       // D1: auto-swap base→SOL (replicates executor post-hook) — FAIL-OPEN.
       if (res.base_mint) {
-        try {
-          const balances = await getWalletBalances({});
-          const token = balances.tokens?.find((t) => t.mint === res.base_mint);
-          if (token && token.usd >= 0.10) {
-            log("executor", `Auto-swapping ${token.symbol || res.base_mint.slice(0, 8)} ($${token.usd.toFixed(2)}) back to SOL`);
-            await swapToken({ input_mint: res.base_mint, output_mint: "SOL", amount: token.balance });
-          }
-        } catch (e) {
-          log("executor_warn", `Auto-swap after emergency close failed: ${e.message}`);
-        }
+        await swapBaseToSolWithRetry({ base_mint: res.base_mint }).catch((e) =>
+          log("executor_warn", `Auto-swap after close failed: ${e.message}`));
       }
       // D2: Telegram notify — FAIL-OPEN.
       if (telegramEnabled()) {

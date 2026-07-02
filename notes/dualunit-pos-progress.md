@@ -50,7 +50,6 @@ Instruksi untuk Zen:
 6. Kalau Jupiter lagi down (solPrice null) → tampil 1-unit aja (tanpa ≈◎), marker tetap muncul
 7. Kalau salah/error → lapor, kita revert/perbaiki
 
-## FASE 8 — COMMIT (setelah owner OK)
-- [ ] git add views/format.js views/positions.js views/pool.js views/cycle.js index.js notes/dualunit-pos-progress.md
-- [ ] git commit -m "🅵 dual-unit /positions+/pool (Opsi 2) + marker floating P&L 🟩/🟥 (display-only)"
-- [ ] JANGAN push kecuali Zen minta.
+## FASE 8 — COMMIT ✅
+- [x] git commit 868d20e — 6 files, +94/-15
+- [x] JANGAN push kecuali Zen minta.

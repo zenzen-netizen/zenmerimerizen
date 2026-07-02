@@ -29,7 +29,6 @@ Agent JANGAN restart. Instruksi untuk Zen:
 3. ROI di kurung `(…)` tetap muncul, baris Win/avg nggak berubah.
 4. Kalau salah/error → lapor, kita revert atau perbaiki.
 
-## FASE 4 — COMMIT (setelah owner OK)
-- [ ] git add views/status.js notes/dualunit-status-progress.md
-- [ ] git commit -m "🅵 dual-unit /status All-time PnL + fix solMode mislabel (display-only)"
-- [ ] Lapor diff final + hasil smoke-test + status solMode. JANGAN push kecuali Zen minta.
+## FASE 4 — COMMIT ✅
+- [x] git commit 9ac40cc — 2 files, +41/-2
+- [x] JANGAN push kecuali Zen minta.

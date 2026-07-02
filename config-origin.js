@@ -415,3 +415,164 @@ export const CORE_GROUPS = [
     keys: [["enabled", "chartIndicatorsEnabled"], ["entryPreset", "indicatorEntryPreset"]],
   },
 ];
+
+// ── FUNCTION grouping (default /config, Batch E) ──────────────────────────────
+// Second layout over the SAME 166 rowMap keys, grouped by daily-practical FUNCTION
+// instead of by origin. RENDER-ONLY: owns WHICH function-group each row lands in;
+// values stay in buildConfigRowMap (index.js). The view does NOT render these key
+// lists flat — it pipes each group's keys through renderSubclusterRows so the L3
+// sub-clusters + L4 ↳ children survive (the SAME taxonomy as /config origin), and
+// dev+zen twins MIX inside each sub-cluster (KEY_SUBCLUSTER is already cross-origin).
+// Each key's ASAL (dev/zen) shows as an inline marker (⚙️/🧩) via KEY_ORIGIN. So
+// only the top-level L1 ⚙️DEV/🧩ZEN split is dropped vs the origin view.
+// Parity invariant: the union of every group's keys == the 166 rowMap keys (a
+// node check guards this; any unplaced key still falls into the view's "❓"
+// safety bucket). Identity (Profil/Racikan) is rendered by the view header, not
+// a group here. `gmgnDynamic` flags the GMGN block so the view can append the
+// live source-active hint.
+// `id` (added Batch D): stable slug used by the /settings "Mode Campur" page token
+// (cfg:page:fn-<id>) + return-after-edit map. RENDER-ONLY; /config ignores it.
+export const FUNCTION_GROUPS = [
+  {
+    id: "sizing",
+    emoji: "📊", title: "Sizing & Posisi",
+    keys: [
+      "dryRun", "maxPositions", "maxDeployAmount", "deployAmountSol", "positionSizePct", "minSolToOpen",
+      "gasReserve", "sizingMode", "rentPerPositionSol",
+      "gasReserveAutoTune", "gasReserveBufferDays", "gasReserveFloorSol",
+    ],
+  },
+  {
+    id: "screening",
+    emoji: "🔍", title: "Screening",
+    keys: [
+      "screeningSource", "screeningCategories", "timeframe", "category",
+      "minTvl", "maxTvl", "minVolume", "minMcap", "maxMcap", "minHolders",
+      "minFeeActiveTvlRatio", "minTokenFeesSol", "minOrganic", "minQuoteOrganic",
+      "minBinStep", "maxBinStep", "minTokenAgeHours", "maxTokenAgeHours",
+      "excludeHighSupplyConcentration", "maxBotHoldersPct", "maxTop10Pct",
+      "avoidPvpSymbols", "blockPvpSymbols", "allowedLaunchpads", "blockedLaunchpads",
+      "useDiscordSignals", "discordSignalMode",
+    ],
+  },
+  {
+    id: "gmgn",
+    emoji: "🔎", title: "Screening-GMGN", gmgnDynamic: true,
+    keys: [
+      "gmgn.interval", "gmgn.orderBy", "gmgn.direction", "gmgn.platforms", "gmgn.filters",
+      "gmgn.minMcap", "gmgn.maxMcap", "gmgn.minTvl", "gmgn.minVolume", "gmgn.minHolders",
+      "gmgn.minTokenAgeHours", "gmgn.maxTokenAgeHours", "gmgn.athFilterPct", "gmgn.minTotalFeeSol",
+      "gmgn.requireKol", "gmgn.minKolCount", "gmgn.minSmartDegenCount", "gmgn.maxRugRatio",
+      "gmgn.maxBundlerRate", "gmgn.maxRatTraderRate", "gmgn.maxFreshWalletRate", "gmgn.maxDevTeamHoldRate",
+      "gmgn.maxBotDegenRate", "gmgn.maxSniperCount", "gmgn.maxSniperHoldRate",
+      "gmgn.preferredKolNames", "gmgn.preferredKolMinHoldPct", "gmgn.dumpKolNames", "gmgn.dumpKolMinHoldPct",
+      "gmgn.indicatorFilter", "gmgn.indicatorInterval",
+      "gmgn.rules.requireBullishSupertrend", "gmgn.rules.rejectAlreadyAtBottom",
+      "gmgn.rules.requireAboveSupertrend", "gmgn.rules.minRsi", "gmgn.rules.maxRsi", "gmgn.rules.requireBbPosition",
+    ],
+  },
+  {
+    id: "exit",
+    emoji: "🚪", title: "Exit & Management",
+    keys: [
+      "stopLossPct", "takeProfitPct", "trailingTakeProfit", "trailingTriggerPct", "trailingDropPct",
+      "outOfRangeBinsToClose", "outOfRangeWaitMinutes", "oorCooldownTriggerCount", "oorCooldownHours",
+      "minFeePerTvl24h", "minAgeBeforeYieldCheck", "minVolumeToRebalance", "minClaimAmount", "autoSwapAfterClaim",
+      "repeatDeployCooldownEnabled", "repeatDeployCooldownTriggerCount", "repeatDeployCooldownHours",
+      "repeatDeployCooldownScope", "repeatDeployCooldownMinFeeEarnedPct",
+    ],
+  },
+  {
+    id: "strategy",
+    emoji: "📐", title: "Strategy & Range",
+    keys: ["strategy", "minBinsBelow", "maxBinsBelow", "defaultBinsBelow", "strategyLock"],
+  },
+  {
+    id: "indik",
+    emoji: "📊", title: "Indikator",
+    keys: [
+      "enabled", "entryPreset", "exitPreset", "rsiLength", "intervals", "candles",
+      "rsiOversold", "rsiOverbought", "requireAllIntervals",
+      "exitEnabled", "rejectAlreadyAtBottom", "smiPdLookback", "smiPaLookback", "smiCrossWindow",
+    ],
+  },
+  {
+    id: "jadwal",
+    emoji: "⏱", title: "Jadwal",
+    keys: [
+      "managementIntervalMin", "screeningIntervalMin", "healthCheckIntervalMin",
+      "adaptiveScreening", "maxScreeningIntervalMin",
+    ],
+  },
+  {
+    id: "llm",
+    emoji: "🧠", title: "LLM",
+    keys: ["managementModel", "screeningModel", "generalModel", "temperature", "maxTokens", "maxSteps", "generalMaxTokens"],
+  },
+  {
+    id: "darwin",
+    emoji: "🧬", title: "Darwin",
+    keys: [
+      "darwinEnabled", "darwinWindowDays", "darwinRecalcEvery", "darwinBoost",
+      "darwinDecay", "darwinFloor", "darwinCeiling", "darwinMinSamples",
+    ],
+  },
+  {
+    id: "reports",
+    emoji: "📑", title: "Reports & Learning",
+    keys: ["learningReportEvery", "learningReportTrendN", "evolveEnabled"],
+  },
+  {
+    id: "exp",
+    emoji: "🧪", title: "Eksperimen (GRUP 16)",
+    keys: [
+      "exitLiquidityCheck", "exitLiquidityMaxSlippagePct", "marketRegimeGate", "marketRegimeMaxDrop24hPct",
+      "candidateMomentum", "narrativeProfileSignal", "expectedYieldSignal",
+      "convictionSizing", "convictionSizingMaxAdjustPct", "counterfactualReview", "counterfactualMinMcapGainPct",
+      "smartWalletMomentum", "idleScreeningCooldown", "idleScreeningCooldownMin",
+      "paperTrading", "usePaperHistoryWhenLive",
+    ],
+  },
+  {
+    id: "infra",
+    emoji: "🌐", title: "Sistem/Infra",
+    keys: [
+      "lpAgentRelayEnabled", "agentId", "publicApiKey", "pnlSource", "pnlRpcUrl",
+      "pnlPollIntervalSec", "pnlDepositCacheTtlSec", "pnlSanityMaxDiffPct", "gmgnFeeSource",
+      "hiveMindStatus", "hiveMindPullMode", "hiveMindUrl", "solMode",
+    ],
+  },
+];
+
+// key → "dev" | "zen", derived ONCE from ORIGIN_SECTIONS (rule #3: reuse existing
+// origin data, no new origin logic). The function view reads this for the inline
+// ⚙️/🧩 marker; the origin view doesn't need it (origin is its grouping axis).
+export const KEY_ORIGIN = (() => {
+  const m = {};
+  for (const sec of ORIGIN_SECTIONS) for (const sg of sec.subgroups) for (const k of sg.keys) m[k] = sec.id;
+  return m;
+})();
+
+// ── MONEY keys (🟠 render-only marker) — Batch D recon §6 ─────────────────────
+// Keys whose value changes trading BEHAVIOR (capital sizing, entry/exit gates,
+// cooldowns). Surfaced as a 🟠 prefix on the /settings CONTROL buttons (both modes)
+// so a glance separates "this moves money" from display/infra/tuning toggles. PURE
+// DATA — no logic gates on this; it only decorates labels.
+// Derived by FUNCTION: the trading function groups are wholly money; the experiment
+// group is mixed (only the ones that actually move a decision); jadwal/llm/darwin/
+// reports/infra are not money. Discord keys are inert (OFF/not wired) → excluded.
+const MONEY_FN_GROUPS = new Set(["sizing", "screening", "gmgn", "exit", "strategy", "indik"]);
+const MONEY_EXP_KEYS = new Set([
+  "exitLiquidityCheck", "exitLiquidityMaxSlippagePct", "marketRegimeGate", "marketRegimeMaxDrop24hPct",
+  "convictionSizing", "convictionSizingMaxAdjustPct", "idleScreeningCooldown", "idleScreeningCooldownMin",
+]);
+const MONEY_EXCLUDE = new Set(["useDiscordSignals", "discordSignalMode"]);
+export const MONEY_KEYS = (() => {
+  const s = new Set();
+  for (const g of FUNCTION_GROUPS) {
+    if (MONEY_FN_GROUPS.has(g.id)) for (const k of g.keys) s.add(k);
+    else if (g.id === "exp") for (const k of g.keys) if (MONEY_EXP_KEYS.has(k)) s.add(k);
+  }
+  for (const k of MONEY_EXCLUDE) s.delete(k);
+  return s;
+})();

@@ -2,6 +2,8 @@ import fs from "fs";
 import { log } from "./logger.js";
 import { repoPath } from "./repo-root.js";
 import { estimateGasSol } from "./reports.js";
+import { renderDeploy, renderOOR, renderSwap, renderClose } from "./views/notifs.js";
+import { ICON } from "./views/format.js";
 
 const USER_CONFIG_PATH = repoPath("user-config.json");
 
@@ -323,6 +325,10 @@ function summarizeToolResult(name, result) {
     case "study_top_lpers":
     case "get_top_lpers":
       return `${result.lpers?.length ?? 0} LPers`;
+    case "check_smart_wallets_on_pool":
+      return `${result.in_pool?.length ?? 0} smart wallets`;
+    case "get_active_bin":
+      return result.binId != null ? `bin ${result.binId}` : "done";
     default:
       return result.success === false ? "failed" : "done";
   }
@@ -408,10 +414,10 @@ export async function createLiveMessage(title, intro = "Starting...") {
 
   return {
     async toolStart(name) {
-      await upsertToolLine(name, "ℹ️", "...");
+      await upsertToolLine(name, ICON.pending, "…");
     },
     async toolFinish(name, result, success) {
-      const icon = success ? "✅" : "❌";
+      const icon = success ? ICON.ok : ICON.fail;
       const summary = summarizeToolResult(name, result);
       await upsertToolLine(name, icon, summary ? `— ${summary}` : "");
     },
@@ -512,7 +518,7 @@ const BOT_COMMANDS = [
   { command: "wallet",     description: "Wallet + SOL growth tracker (1d/7d/30d)" },
   { command: "positions",  description: "List open positions" },
   { command: "pool",       description: "Detailed info for one open position" },
-  { command: "briefing",   description: "Morning briefing" },
+  { command: "briefing",   description: "Morning briefing (·alltime = all-time juga deep)" },
   { command: "report",     description: "Trade learning report (week|month|day)" },
   { command: "close",      description: "Close one position by index" },
   { command: "closeall",   description: "Close all open positions" },
@@ -520,7 +526,7 @@ const BOT_COMMANDS = [
   { command: "screen",     description: "Refresh deterministic candidate list" },
   { command: "candidates", description: "Show latest cached candidates" },
   { command: "deploy",     description: "Deploy candidate by cached index" },
-  { command: "config",     description: "Show important runtime config" },
+  { command: "config",     description: "Config per-fungsi (·origin per-asal ·core ringkas)" },
   { command: "settings",   description: "Button menu for common config" },
   { command: "setcfg",     description: "Update persisted config key" },
   { command: "preset",     description: "Save/load full config presets" },
@@ -569,112 +575,46 @@ function activeRacikan() {
   catch { return null; }
 }
 
-// Shared notification divider — keeps all four notifs visually consistent.
-const NOTIF_DIV = "────────────────";
-
-export async function notifyDeploy({ pair, amountSol, position, tx, priceRange, rangeCoverage, binStep, baseFee }) {
-  if (hasActiveLiveMessage()) return;
-  const safePair = escapeHtml(pair || "?");
-  const racikan = activeRacikan();
-  const lines = [
-    `✅ <b>Deployed</b> ${safePair}`,
-    NOTIF_DIV,
-    `💵 Amount: ${amountSol} SOL${racikan ? `  ·  🗂️ ${escapeHtml(racikan)}` : ""}`,
-  ];
-  if (priceRange) {
-    const fmtP = (v) => (v < 0.0001 ? v.toExponential(3) : v.toFixed(6));
-    lines.push(`📐 Price range: ${fmtP(priceRange.min)} – ${fmtP(priceRange.max)}`);
-  }
-  if (rangeCoverage) {
-    lines.push(`↕️ Cover: ${fmtPct(rangeCoverage.downside_pct)} ↓ | ${fmtPct(rangeCoverage.upside_pct)} ↑ | ${fmtPct(rangeCoverage.width_pct)} total`);
-  }
-  if (binStep || baseFee) {
-    lines.push(`🧱 Bin step ${binStep ?? "?"}  ·  base fee ${baseFee != null ? baseFee + "%" : "?"}`);
-  }
-  lines.push(`🆔 Position: <code>${position?.slice(0, 8)}...</code>`);
-  lines.push(`🔗 Tx: <code>${tx?.slice(0, 16)}...</code>`);
-  await sendHTML(lines.join("\n"));
+// Display unit toggle (◎ vs $) read straight from user-config — mirip activeRacikan,
+// dipakai notifyClose buat render mode-correct (fix HARD-$). Fail-open → false ($).
+function solModeOn() {
+  try { return !!JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")).management?.solMode; }
+  catch { return false; }
 }
 
-export async function notifyClose({ pair, pnlUsd, pnlPct, peakPnlPct, reason, lesson, feesUsd }) {
+export async function notifyDeploy(data) {
   if (hasActiveLiveMessage()) return;
-  const safePair = escapeHtml(pair || "?");
-  const net = pnlUsd ?? 0;
-  const win = net >= 0;
-  // One signed-$ formatter so every figure shares the same sign/precision style.
-  const usd = (v) => `${v >= 0 ? "+" : "-"}$${Math.abs(v).toFixed(2)}`;
-  const lines = [
-    `${win ? "🟢" : "🔴"} <b>Closed</b> ${safePair}`,
-    NOTIF_DIV,
-    // Headline $ and % are the SAME basis: total net, fees INCLUDED (pnl_usd =
-    // leg + fee, verified empirically). No more "$ = price-leg, % = total" split.
-    `📊 Net PnL: ${usd(net)} (${pnlPct >= 0 ? "+" : ""}${(pnlPct ?? 0).toFixed(2)}%)`,
-  ];
-  // Decompose the position PnL so a number's SOURCE is legible: how much came
-  // from harvested FEES vs the price leg (IL+drift). Live can't separate IL from
-  // drift (paper can) — fee vs price-effect vs gas is the right granularity.
-  // FEE + EFEK-HARGA = Net PnL exactly (price = net − fee = final − initial).
-  if (feesUsd != null) {
-    const fee = feesUsd;
-    const priceEffect = net - fee;
-    // Gas is a separate wallet-side network cost (NOT part of the position PnL the
-    // DLMM API reports). Rough per-action estimate; real fees aren't captured per tx.
-    const gasSol = estimateGasSol({ close_position: 1, claim_fees: 1, swap_token: 1 });
-    lines.push(
-      `   💎 Fee panen ${usd(fee)}  ·  📈 Efek-harga ${usd(priceEffect)}`,
-      `   ⛽ Gas ~${gasSol.toFixed(5)} SOL (est, di luar PnL — dari wallet)`,
-    );
-  }
-  // Give-back: how much of a real PROFIT run-up wasn't captured at exit. Gated on
-  // a meaningful peak (≥3%) so a stop-loss dump from a near-flat peak isn't framed
-  // as "leaving profit on the table" — that's the leak the report flags too.
-  if (Number.isFinite(peakPnlPct) && Number.isFinite(pnlPct)) {
-    const giveback = peakPnlPct - pnlPct;
-    if (peakPnlPct >= 3 && giveback >= 1) {
-      lines.push(`📈 Give-back: peak +${peakPnlPct.toFixed(2)}% → exit ${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(2)}% (tinggal ${giveback.toFixed(2)}pp di meja)`);
-    }
-  }
-  // Stop-loss/trailing reasons embed the PnL reading that TRIGGERED the close
-  // (e.g. "Stop loss: PnL -12.16% <= -12%"). The realized PnL can land far away
-  // when price keeps moving during the ~1 min close execution — flag the gap so
-  // it reads as execution slippage, not a math error.
-  const trig = reason ? String(reason).match(/PnL (-?\d+(?:\.\d+)?)%/) : null;
-  if (trig && pnlPct != null) {
-    const triggerPct = parseFloat(trig[1]);
-    const gap = Math.abs((pnlPct ?? 0) - triggerPct);
-    if (Number.isFinite(gap) && gap >= 5) {
-      lines.push(`⚠️ Trigger di ${triggerPct.toFixed(2)}%, realisasi ${(pnlPct ?? 0).toFixed(2)}% — harga terus bergerak selama eksekusi close (gap ${gap.toFixed(1)}pp).`);
-    }
-  }
-  if (reason) lines.push(`📋 <b>Reason:</b> ${escapeHtml(String(reason).slice(0, 200))}`);
-  if (lesson) lines.push(`📚 <b>Lesson:</b> <i>${escapeHtml(String(lesson).slice(0, 300))}</i>`);
-  await sendHTML(lines.join("\n"));
+  // Render dipindah ke views/notifs.js (renderDeploy). racikan di-resolve di sini
+  // (config-read tetap di telegram.js); guard/trigger TIDAK diubah.
+  await sendHTML(renderDeploy({ ...data, racikan: activeRacikan() }));
 }
 
-export async function notifySwap({ inputSymbol, outputSymbol, amountIn, amountOut, tx }) {
+export async function notifyClose(data) {
   if (hasActiveLiveMessage()) return;
-  await sendHTML(
-    `🔄 <b>Swapped</b> ${escapeHtml(inputSymbol || "?")} → ${escapeHtml(outputSymbol || "?")}\n` +
-    NOTIF_DIV + "\n" +
-    `💱 In: ${amountIn ?? "?"}  ·  Out: ${amountOut ?? "?"}\n` +
-    `🔗 Tx: <code>${tx?.slice(0, 16)}...</code>`
-  );
+  // Render → views/notifs.js (renderClose). gasSol (estimasi) + solMode di-resolve di
+  // sini; guard/trigger/logic TIDAK diubah.
+  // FASE 5 both-units: harga SOL diambil read-only via getSolMarketRegime (Jupiter,
+  // nol side-effect; dynamic import biar static-graph telegram.js tetap ringan). Fail-open
+  // → solPrice null → renderClose fall back ke 1-unit mode-correct (governing #3).
+  const gasSol = estimateGasSol({ close_position: 1, claim_fees: 1, swap_token: 1 });
+  let solPrice = null;
+  try {
+    const { getSolMarketRegime } = await import("./tools/wallet.js");
+    solPrice = (await getSolMarketRegime())?.usdPrice || null;
+  } catch { /* fail-open: 1-unit */ }
+  await sendHTML(renderClose({ ...data, gasSol, solMode: solModeOn(), solPrice }));
 }
 
-export async function notifyOutOfRange({ pair, minutesOOR }) {
+export async function notifySwap(data) {
   if (hasActiveLiveMessage()) return;
-  await sendHTML(
-    `⚠️ <b>Out of Range</b> ${escapeHtml(pair || "?")}\n` +
-    NOTIF_DIV + "\n" +
-    `⏱️ Been OOR for ${minutesOOR} minutes`
-  );
+  await sendHTML(renderSwap(data)); // render → views/notifs.js; guard/trigger tak diubah
+}
+
+export async function notifyOutOfRange(data) {
+  if (hasActiveLiveMessage()) return;
+  await sendHTML(renderOOR(data)); // render → views/notifs.js; guard/trigger tak diubah
 }
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
-}
-
-function fmtPct(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? `${n.toFixed(2)}%` : "?";
 }

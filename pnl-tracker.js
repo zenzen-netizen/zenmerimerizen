@@ -18,6 +18,7 @@
 import { getGasStats } from "./gas-tracker.js";
 import { getLlmCostStats } from "./llm-cost-tracker.js";
 import { GAS_EST_SOL } from "./reports.js";
+import { renderPnlTracker } from "./views/trackers.js";
 
 const PERIODS = [
   { label: "1D", days: 1 },
@@ -64,30 +65,14 @@ export function getPnlTracker(perf, { solPriceUsd = null, now = Date.now() } = {
   });
 }
 
-function dot(n) { return n > 0 ? "🟢" : n < 0 ? "🔴" : "⚪"; }
-function sd(n) { return `${n >= 0 ? "+" : "-"}$${Math.abs(n).toFixed(2)}`; }
-
 /**
- * Compact Telegram block (plain text). Net leads (the bottom line); realized PnL
- * + cost shown in parens so both numbers are visible — like the SOL tracker but
- * for trading result instead of wallet balance.
+ * Compact Telegram block (tree-style; render di views/trackers.js). Net leads;
+ * realized PnL + cost shown in parens so both numbers are visible. Compute di
+ * sini (getPnlTracker), rakitan string tree-style di renderPnlTracker. Fail-open:
+ * error compute → "" (sama dgn lama).
  */
 export function formatPnlTracker(perf, opts = {}) {
   let rows;
   try { rows = getPnlTracker(perf, opts); } catch { return ""; }
-  const lines = ["📊 Realized PnL & Net", "━━━━━━━━━━━━━━━━━"];
-  let anyEst = false;
-  const gasIncluded = rows.some((r) => r.gasUsd != null);
-  for (const r of rows) {
-    if (r.hasCost) {
-      const tilde = r.gasIsEst && r.gasUsd != null ? "~" : "";
-      if (r.gasIsEst && r.gasUsd != null) anyEst = true;
-      lines.push(`${r.label.padEnd(3)} ${dot(r.net)} ${sd(r.net)} net  (PnL ${sd(r.realized)} − biaya ${tilde}$${r.costUsd.toFixed(2)} · ${r.trades} tr)`);
-    } else {
-      // No cost data at all → show realized only.
-      lines.push(`${r.label.padEnd(3)} ${dot(r.realized)} ${sd(r.realized)} PnL  (${r.trades} tr)`);
-    }
-  }
-  lines.push(`ℹ️ Net = PnL − ${gasIncluded ? "gas − " : ""}LLM${gasIncluded ? (anyEst ? " (~ = gas estimasi)" : "") : " (gas blm dihitung — tanpa harga SOL)"}`);
-  return lines.join("\n");
+  return renderPnlTracker(rows);
 }

@@ -12,6 +12,7 @@ import { getSharedLessonsForPrompt, pushHiveLesson, pushHivePerformanceEvent } f
 import { repoPath } from "./repo-root.js";
 import { isPaperMode } from "./paper-trading.js";
 import { config } from "./config.js";
+import { ICON, SEP, tree, header } from "./views/format.js"; // primitif string-only (no dep) — Batch I FINAL S2
 
 const USER_CONFIG_PATH = repoPath("user-config.json");
 
@@ -202,12 +203,16 @@ export async function recordPerformance(perf) {
       try {
         const { sendMessage, isEnabled } = await import("./telegram.js");
         if (!isEnabled()) return;
-        await sendMessage(
-          `⚠️ Close ${pnl_pct.toFixed(1)}% (non-stopLoss) direkam SUSPECT — cek rug asli vs bad-data.\n` +
-          `Pool: ${perf.pool_name || perf.pool || "?"}\n` +
-          `Alasan close: ${perf.close_reason || "?"}\n` +
-          `Dikarantina dari auto-learning + stats sampai diverifikasi.`
-        );
+        await sendMessage([
+          header(ICON.warn, "SUSPECT close", `${pnl_pct.toFixed(1)}% (non-stopLoss)`),
+          SEP,
+          tree([
+            `Pool: ${perf.pool_name || perf.pool || "?"}`,
+            `Alasan close: ${perf.close_reason || "?"}`,
+            `Cek: rug asli vs bad-data`,
+            `Dikarantina dari auto-learning + stats sampai diverifikasi`,
+          ]),
+        ].join("\n"));
       } catch (e) {
         log("lessons_warn", `Suspect-PnL alert failed (fail-open): ${e.message}`);
       }

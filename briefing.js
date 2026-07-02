@@ -17,6 +17,10 @@ import {
 } from "./reports.js";
 import { formatIdentity } from "./preset-manager.js";
 import { formatPnlTracker } from "./pnl-tracker.js";
+import { SEP, tree } from "./views/format.js"; // bahasa-desain tree-style (Batch C)
+
+// Section tree-style: header + tree(body) (├/└). body falsy di-skip oleh tree().
+const section = (header, body) => [header, tree(body)].join("\n");
 
 const money = (n) => `${n >= 0 ? "+" : "-"}$${Math.abs(n).toFixed(2)}`;
 
@@ -30,6 +34,29 @@ function racikanScopeDisclosure() {
     if (!count) return "";
     return `⚠️ ${count} trade live di luar racikan ini dikecualikan (PnL ${money(net_usd)}) — /report all buat semua.`;
   } catch { return ""; }
+}
+
+/**
+ * Komposisi SATU blok scope untuk briefing harian (Opsi B / Opsi A). DISPLAY-ONLY:
+ * scoping (perf mana yang masuk) ditentukan PEMANGGIL — helper cuma menyusun tampilan.
+ *   - selalu: formatStatsBlock (PnL/ROI/win/PF/EV/payoff/DD/hold/in-range/best/worst).
+ *   - deep:true → + buildVerdict + formatQuantBlock + formatMovement + formatBreakdown
+ *     (+ buildRecommendations bila recOpts diberikan).
+ * Spasi antar sub-blok meniru layout lama: verdict rapat di bawah stats; quant/
+ * movement/breakdown/recs dipisah satu baris kosong. Tiap komponen fail-open (skip
+ * bila falsy). recs butuh perf+opts → recOpts (null = lewati recs).
+ */
+function buildScopeBlock(perf, label, { deep = false, quantOpts = {}, recOpts = null } = {}) {
+  const stats = computeTradeStats(perf);
+  const parts = [formatStatsBlock(stats, label)];
+  if (deep) {
+    const v = buildVerdict(stats); if (v) parts.push(v);
+    const q = formatQuantBlock(stats, quantOpts); if (q) parts.push("\n" + q);
+    const m = formatMovement(stats); if (m) parts.push("\n" + m);
+    const b = formatBreakdown(stats, { sessions: false }); if (b) parts.push("\n" + b);
+    if (recOpts) { const r = buildRecommendations(perf, stats, recOpts); if (r) parts.push("\n" + r); }
+  }
+  return parts.join("\n");
 }
 
 // On-chain tools whose successful calls cost network/gas fees.
@@ -103,23 +130,15 @@ function buildLearningSection(lessonsData, since) {
 
   if (warnings.length === 0 && winners.length === 0 && !evolved && avgEff == null) return null;
 
-  const lines = ["<b>🧠 Learning Insights:</b>"];
-  if (warnings.length > 0) {
-    lines.push("⚠️ <b>Older warnings:</b>");
-    for (const l of warnings) lines.push(`  • ${esc(String(l.rule).slice(0, 180))}`);
-  }
-  if (winners.length > 0) {
-    lines.push("✅ <b>Proven patterns:</b>");
-    for (const l of winners) lines.push(`  • ${esc(String(l.rule).slice(0, 180))}`);
-  }
-  if (evolved) {
-    lines.push(`🔧 <b>Last threshold adjustment:</b> ${esc(String(evolved.rule).slice(0, 200))}`);
-  }
-  if (avgEff != null) {
-    lines.push(`📊 <b>Avg in-range (all-time):</b> ${avgEff.toFixed(0)}%`);
-  }
+  const out = ["<b>🧠 Learning Insights:</b>"];
+  if (warnings.length > 0) out.push(section("⚠️ <b>Older warnings:</b>", warnings.map((l) => esc(String(l.rule).slice(0, 180)))));
+  if (winners.length > 0) out.push(section("✅ <b>Proven patterns:</b>", winners.map((l) => esc(String(l.rule).slice(0, 180)))));
+  const tail = [];
+  if (evolved) tail.push(`🔧 <b>Last threshold adjustment:</b> ${esc(String(evolved.rule).slice(0, 200))}`);
+  if (avgEff != null) tail.push(`📊 <b>Avg in-range (all-time):</b> ${avgEff.toFixed(0)}%`);
+  if (tail.length) out.push(tree(tail));
 
-  return lines.join("\n");
+  return out.join("\n");
 }
 
 // Recommendations now come from reports.js (buildRecommendations) — a single,
@@ -155,10 +174,11 @@ function buildCostSection({ costData, balance, credits, llmStats, gasSol, gasIsE
   // cost and the LLM number must come ONLY from local per-call tracking (the OpenRouter
   // account feed is shared with the live bot → contaminated on this box).
   const paper = isPaperMode();
-  const lines = [`<b>💵 Costs (${esc(windowLabel)})${paper ? " — 🧪 simulasi" : ""}:</b>`];
+  const header = `<b>💵 Costs (${esc(windowLabel)})${paper ? " — 🧪 simulasi" : ""}:</b>`;
+  const body = [];
   // Dry-run/paper only: spell out which number is real vs simulated so the line is
   // never misread as live spend. Disappears automatically once live.
-  if (paper) lines.push(`<i>💡 LLM = biaya nyata (tracking lokal) · gas = estimasi bila live</i>`);
+  if (paper) body.push(`<i>💡 LLM = biaya nyata (tracking lokal) · gas = estimasi bila live</i>`);
 
   // ── LLM, per role — prefer LOCAL per-call tracking (true per-role, no external
   //    feed); fall back to OpenRouter activity (model→role), then the daily total.
@@ -166,21 +186,21 @@ function buildCostSection({ costData, balance, credits, llmStats, gasSol, gasIsE
   let llmUsd = 0;
   if (llmStats?.hasData) {
     llmUsd = llmStats.totalCost;
-    lines.push(`🤖 LLM: $${llmUsd.toFixed(4)} (${llmStats.calls} calls, ${llmStats.totalTokens.toLocaleString()} tokens)`);
+    body.push(`🤖 LLM: $${llmUsd.toFixed(4)} (${llmStats.calls} calls, ${llmStats.totalTokens.toLocaleString()} tokens)`);
     for (const [role, s] of Object.entries(llmStats.byRole).sort((a, b) => b[1].cost - a[1].cost)) {
-      lines.push(`  • ${esc(role)}: $${s.cost.toFixed(4)} (${s.calls} calls)`);
+      body.push(`${esc(role)}: $${s.cost.toFixed(4)} (${s.calls} calls)`);
     }
   } else if (paper) {
-    lines.push(`🤖 LLM: $0.0000 (belum ada call tercatat lokal)`);
+    body.push(`🤖 LLM: $0.0000 (belum ada call tercatat lokal)`);
   } else {
     const llmCost = costData && costData.calls > 0 ? costData.totalCost : (balance?.usageDaily ?? null);
     llmUsd = llmCost ?? 0;
     const roleLines = buildRoleCostLines(costData);
     if (roleLines) {
-      lines.push(`🤖 LLM: $${llmUsd.toFixed(4)} (${costData.calls} calls, ${costData.totalTokens.toLocaleString()} tokens)`);
-      lines.push(...roleLines);
+      body.push(`🤖 LLM: $${llmUsd.toFixed(4)} (${costData.calls} calls, ${costData.totalTokens.toLocaleString()} tokens)`);
+      body.push(...roleLines.map((l) => l.replace(/^\s*•?\s*/, ""))); // strip "  • " — tree adds branch
     } else if (llmCost != null) {
-      lines.push(`🤖 LLM: $${llmCost.toFixed(4)}`);
+      body.push(`🤖 LLM: $${llmCost.toFixed(4)}`);
     }
   }
 
@@ -190,7 +210,7 @@ function buildCostSection({ costData, balance, credits, llmStats, gasSol, gasIsE
   if (gasSol > 0) {
     const gasTag = paper ? " (simulasi)" : gasIsEst ? " (est)" : "";
     const approx = paper || gasIsEst ? "~" : "";
-    lines.push(`⛽ Gas${gasTag}: ${approx}${gasSol.toFixed(4)} SOL${gasUsd != null ? ` (${approx}$${gasUsd.toFixed(2)})` : ""}${paper ? " — estimasi biaya bila live" : ""}`);
+    body.push(`⛽ Gas${gasTag}: ${approx}${gasSol.toFixed(4)} SOL${gasUsd != null ? ` (${approx}$${gasUsd.toFixed(2)})` : ""}${paper ? " — estimasi biaya bila live" : ""}`);
     // gasReserve runway — how long the configured reserve lasts at this burn rate.
     const reserve = config.management?.gasReserve;
     if (reserve > 0 && windowDays > 0) {
@@ -199,7 +219,7 @@ function buildCostSection({ costData, balance, credits, llmStats, gasSol, gasIsE
         const runwayDays = reserve / dailyBurn;
         const flag = runwayDays < 7 ? " ⚠️ tipis" : "";
         const mode = config.management?.gasReserveAutoTune ? " (auto-tune)" : " (manual)";
-        lines.push(`🪫 gasReserve ${reserve} SOL${mode} ≈ ${runwayDays.toFixed(0)}d runway @ ${dailyBurn.toFixed(4)} SOL/hari${flag}`);
+        body.push(`🪫 gasReserve ${reserve} SOL${mode} ≈ ${runwayDays.toFixed(0)}d runway @ ${dailyBurn.toFixed(4)} SOL/hari${flag}`);
       }
     }
   }
@@ -209,16 +229,16 @@ function buildCostSection({ costData, balance, credits, llmStats, gasSol, gasIsE
   if (Number.isFinite(netPnlUsd) && totalCost > 0) {
     const real = netPnlUsd - totalCost;
     const verdict = real >= 0 ? "✅ profit bersih" : "🔴 rugi setelah biaya";
-    lines.push(`📊 Net − semua biaya${paper ? " (simulasi)" : ""}: PnL ${money(netPnlUsd)} − biaya $${totalCost.toFixed(4)} (LLM $${llmUsd.toFixed(4)}${gasUsd != null ? ` + gas $${gasUsd.toFixed(2)}` : ""}) = ${money(real)} ${verdict}`);
+    body.push(`📊 Net − semua biaya${paper ? " (simulasi)" : ""}: PnL ${money(netPnlUsd)} − biaya $${totalCost.toFixed(4)} (LLM $${llmUsd.toFixed(4)}${gasUsd != null ? ` + gas $${gasUsd.toFixed(2)}` : ""}) = ${money(real)} ${verdict}`);
   }
 
   if (credits?.balance != null) {
-    lines.push(`💳 Saldo OpenRouter: $${credits.balance.toFixed(2)}`);
-    if (credits.balance < 5) lines.push(`⚠️ Saldo menipis — pertimbangkan top up`);
+    body.push(`💳 Saldo OpenRouter: $${credits.balance.toFixed(2)}`);
+    if (credits.balance < 5) body.push(`⚠️ Saldo menipis — pertimbangkan top up`);
   } else if (balance?.remaining != null) {
-    lines.push(`💳 Balance remaining: $${balance.remaining.toFixed(2)}`);
+    body.push(`💳 Balance remaining: $${balance.remaining.toFixed(2)}`);
   }
-  return lines.length > 1 ? lines.join("\n") : null;
+  return body.length ? section(header, body) : null;
 }
 
 function buildTimeProfileSection() {
@@ -228,7 +248,6 @@ function buildTimeProfileSection() {
   const fmtHold = (m) => (m == null ? null : m >= 60 ? `${(m / 60).toFixed(1)}h` : `${m}m`);
   const overallHold = fmtHold(prof.overall_avg_hold_min);
   const header = `🕒 <b>Best Open Hours (WIB)</b> — overall win ${prof.overall_win_rate_pct}%${overallHold ? `, avg hold ${overallHold}` : ""}`;
-  const lines = [header];
   const rated = prof.sessions.filter((s) => s.count > 0);
   if (rated.length === 0) return null;
   // Fair rank (same idea as reports.js groupStats): shrink each session's avg
@@ -241,13 +260,13 @@ function buildTimeProfileSection() {
   const ranked = rated
     .map((s) => ({ ...s, _score: (s.avg_pnl_pct * s.count + K * globalAvg) / (s.count + K) }))
     .sort((a, b) => b._score - a._score);
-  ranked.forEach((s, i) => {
-    const enough = s.count >= prof.min_samples;
-    const tag = !enough ? " <i>(few samples)</i>" : "";
+  // tree branch conveys rank-order; ordinal "N." dropped (data unchanged).
+  const rows = ranked.map((s) => {
+    const tag = s.count >= prof.min_samples ? "" : " <i>(few samples)</i>";
     const hold = fmtHold(s.avg_hold_min);
-    lines.push(`  ${i + 1}. ${esc(s.label)}: ${s.win_rate_pct}% win, avg ${s.avg_pnl_pct >= 0 ? "+" : ""}${s.avg_pnl_pct}% (${s.count})${hold ? `, hold ${hold}` : ""}${tag}`);
+    return `${esc(s.label)}: ${s.win_rate_pct}% win, avg ${s.avg_pnl_pct >= 0 ? "+" : ""}${s.avg_pnl_pct}% (${s.count})${hold ? `, hold ${hold}` : ""}${tag}`;
   });
-  return lines.join("\n");
+  return section(header, rows);
 }
 
 // 🧪 Experiment #8: counterfactual skip review. Gated by the flag (default off).
@@ -261,27 +280,24 @@ function buildSkipReviewSection() {
       minMcapGainPct: config.experiments.counterfactualMinMcapGainPct ?? 25,
     });
     if (!review || review.skipped === 0) return null;
-    const lines = [
-      `<b>🧪 Skip Review (recent):</b>`,
-      `👀 Passed on ${review.skipped} pools — ${review.dropped} later fell (good skips)`,
-    ];
+    const body = [`👀 Passed on ${review.skipped} pools — ${review.dropped} later fell (good skips)`];
     if (review.gainers.length > 0) {
-      lines.push(
+      body.push(
         ...review.gainers.map(
           (g) => `📈 ${esc(g.name)}: mcap ${g.mcap_delta_pct >= 0 ? "+" : ""}${g.mcap_delta_pct}% since first seen (~${g.span_min}m)`,
         ),
       );
     } else {
-      lines.push("✅ None of the skipped pools popped meaningfully.");
+      body.push("✅ None of the skipped pools popped meaningfully.");
     }
-    return lines.join("\n");
+    return section(`<b>🧪 Skip Review (recent):</b>`, body);
   } catch (e) {
     log("briefing_error", `skip review failed: ${e.message}`);
     return null;
   }
 }
 
-export async function generateBriefing() {
+export async function generateBriefing({ allTimeDeep = false } = {}) {
   const state = loadJson(STATE_FILE) || { positions: {}, recentEvents: [] };
   const lessonsData = loadJson(LESSONS_FILE) || { lessons: [], performance: [] };
 
@@ -311,15 +327,14 @@ export async function generateBriefing() {
   const tradingLessons = lessonsLast24h.filter(l => l.sourceType !== "config_change" && !(l.tags || []).includes("config_change"));
   const configChangeCount = lessonsLast24h.length - tradingLessons.length;
 
-  // 4. Current State + all-time stats (risk metrics, not just win-rate)
+  // 4. Current State + scope perf sets (risk metrics, not just win-rate).
+  //    Opsi B: dua scope sama-sama tampil, analisis-dalam difokus ke racikan aktif.
+  //    All-time = mode-scoped semua racikan; Racikan = mode + active-racikan + !suspect
+  //    (sama persis scope /report default → briefing rekonsiliasi). DISPLAY-ONLY.
   const openPositions = allPositions.filter(p => !p.closed);
   const modePerf = (lessonsData.performance || []).filter(keepMode);
-  const statsAll = computeTradeStats(modePerf);
-  // Racikan-scoped stats shown ALONGSIDE All-time so the briefing reconciles with
-  // /report default (same scope: getModePerformance = mode + active-racikan + !suspect).
-  // Display-only; does NOT change the existing all-live `modePerf`/`statsAll`.
-  const statsRacikan = computeTradeStats(getModePerformance());
-  const racikanLabel = config.activeSetup ? `Racikan: ${config.activeSetup}` : "Racikan aktif";
+  const racikanPerf = getModePerformance();
+  const racikanLabel = config.activeSetup ? `Racikan aktif: ${config.activeSetup}` : "Racikan aktif";
 
   // 5. Cost data (LLM + SOL price for gas USD) + gas estimate over the 24h window
   const [costData, balance, credits, wallet] = await Promise.all([
@@ -343,41 +358,47 @@ export async function generateBriefing() {
     ? computeCostDragPct({ costUsd: gasUsd24h + llmUsd24h, windowDays: 1, modalUsd })
     : null;
   const quantOpts = Number.isFinite(costDragPct) ? { costDragPct } : {};
+  // Recs opts (per-trade gas dari window 24h) — dipakai blok deep mana pun.
+  const recOpts = {
+    gasPerTradeUsd: solPrice && perfLast24h.length ? (gasSol * solPrice) / perfLast24h.length : 0,
+  };
 
   // 6. Format Message
   const lines = [
     "☀️ <b>Morning Briefing</b> (Last 24h)",
     (() => { try { return formatIdentity({ compact: true }); } catch { return null; } })(),
-    "────────────────",
-    `<b>Activity:</b>`,
-    `📥 Positions Opened: ${openedLast24h.length}`,
-    `📤 Positions Closed: ${closedLast24h.length}`,
+    SEP,
+    section(`<b>Activity:</b>`, [
+      `📥 Positions Opened: ${openedLast24h.length}`,
+      `📤 Positions Closed: ${closedLast24h.length}`,
+    ]),
     "",
-    `<b>Performance (24h):</b>`,
-    `💰 PnL: ${totalPnLUsd >= 0 ? "+" : ""}$${totalPnLUsd.toFixed(2)}`,
-    `💎 Fees Earned: $${totalFeesUsd.toFixed(2)}`,
-    perfLast24h.length > 0
-      ? `📈 Win Rate (24h): ${Math.round((perfLast24h.filter(p => p.pnl_usd > 0).length / perfLast24h.length) * 100)}% (${perfLast24h.length} closed)`
-      : "📈 Win Rate (24h): N/A",
+    section(`<b>Performance (24h):</b>`, [
+      `💰 PnL: ${totalPnLUsd >= 0 ? "+" : ""}$${totalPnLUsd.toFixed(2)}`,
+      `💎 Fees Earned: $${totalFeesUsd.toFixed(2)}`,
+      perfLast24h.length > 0
+        ? `📈 Win Rate (24h): ${Math.round((perfLast24h.filter(p => p.pnl_usd > 0).length / perfLast24h.length) * 100)}% (${perfLast24h.length} closed)`
+        : "📈 Win Rate (24h): N/A",
+    ]),
     "",
     formatPnlTracker(modePerf, { solPriceUsd: solPrice || null }),
     "",
-    formatStatsBlock(statsAll, "All-time (semua racikan)"),
-    buildVerdict(statsAll) || "",
-    formatQuantBlock(statsAll, quantOpts) ? "\n" + formatQuantBlock(statsAll, quantOpts) : "",
-    formatMovement(statsAll) ? "\n" + formatMovement(statsAll) : "",
+    // All-time (semua racikan) — STATS saja (Opsi B). /briefing alltime → deep (Opsi A).
+    // (formatStatsBlock sudah memprefiks 📊 — label cukup teks, distinksi scope jelas.)
+    buildScopeBlock(modePerf, "All-time (semua racikan)", { deep: allTimeDeep, quantOpts, recOpts }),
     "",
-    formatStatsBlock(statsRacikan, racikanLabel),
+    // Racikan aktif — STATS + analisis-dalam (verdict/quant/movement/breakdown/recs).
+    buildScopeBlock(racikanPerf, racikanLabel, { deep: true, quantOpts, recOpts }),
     racikanScopeDisclosure() || "",
     "",
-    `<b>Lessons Learned (24h):</b>`,
-    tradingLessons.length > 0
-      ? tradingLessons.slice(0, 6).map(l => `• ${esc(l.rule)}`).join("\n")
-      : "• No new trading lessons overnight.",
-    configChangeCount > 0 ? `🔧 Config changes (24h): ${configChangeCount}` : "",
+    section(`<b>Lessons Learned (24h):</b>`, [
+      ...(tradingLessons.length > 0
+        ? tradingLessons.slice(0, 6).map(l => esc(l.rule))
+        : ["No new trading lessons overnight."]),
+      ...(configChangeCount > 0 ? [`🔧 Config changes (24h): ${configChangeCount}`] : []),
+    ]),
     "",
-    `<b>Current Portfolio:</b>`,
-    `📂 Open Positions: ${openPositions.length}`,
+    section(`<b>Current Portfolio:</b>`, [`📂 Open Positions: ${openPositions.length}`]),
     "",
     buildFeatureStatus(),
     "",
@@ -389,12 +410,9 @@ export async function generateBriefing() {
     "",
     buildSkipReviewSection() || "",
     "",
-    formatBreakdown(statsAll, { sessions: false }) || "",
-    "",
-    buildRecommendations(modePerf, statsAll, {
-      gasPerTradeUsd: solPrice && perfLast24h.length ? (gasSol * solPrice) / perfLast24h.length : 0,
-    }) || "",
-    "────────────────"
+    // Opsi B: breakdown + recommendations kini di DALAM blok scope (buildScopeBlock
+    // deep) — analisis-dalam terkonsolidasi per-scope, tak lagi berdiri sendiri di bawah.
+    SEP
   ];
 
   // Collapse runs of blank lines left by skipped (null) sections.
@@ -428,11 +446,11 @@ export async function generatePeriodicBriefing(period = "week") {
   });
   const opened = allPositions.filter((p) => new Date(p.deployed_at).getTime() >= since).length;
   const netPnl = windowPerf.reduce((s, p) => s + (p.pnl_usd || 0), 0);
-  // Racikan-scoped windowed perf (same scope as /report default) for a second stats
-  // block, so the periodic digest reconciles with /report. Display-only; the all-live
-  // `windowPerf` report above is unchanged.
+  // Opsi B: analisis-dalam (report penuh + TREND) difokus ke RACIKAN aktif; window
+  // semua-racikan turun jadi blok STATS-only buat rekonsiliasi. Scope sama /report
+  // default (getModePerformance = mode + active-racikan + !suspect). DISPLAY-ONLY.
   const racikanWindowPerf = getModePerformance().filter((p) => new Date(p.closed_at || p.recorded_at || 0).getTime() >= since);
-  const racikanLabel = config.activeSetup ? `Racikan: ${config.activeSetup} (${days}d)` : `Racikan aktif (${days}d)`;
+  const racikanLabel = config.activeSetup ? `Racikan aktif: ${config.activeSetup} (${days}d)` : `Racikan aktif (${days}d)`;
 
   const [balance, credits, wallet] = await Promise.all([
     getOpenRouterBalance(),
@@ -458,55 +476,73 @@ export async function generatePeriodicBriefing(period = "week") {
   const windowCostUsd = (gasUsd ?? 0) + llmTotal;
   const costDragPct = modalUsd ? computeCostDragPct({ costUsd: windowCostUsd, windowDays: days, modalUsd }) : null;
 
-  const report = buildTradeReport(windowPerf, {
+  // Report penuh (stats+verdict+TREND+breakdown+recs) di-scope ke RACIKAN aktif (Opsi B).
+  const report = buildTradeReport(racikanWindowPerf, {
     title: `${emoji} ${label} Briefing — last ${days}d`,
-    statsLabel: `Last ${days}d (semua racikan)`,
+    statsLabel: racikanLabel,
     trendN: period === "month" ? 10 : 7,
     identity: (() => { try { return formatIdentity({ compact: true }); } catch { return null; } })(),
     quant: Number.isFinite(costDragPct) ? { costDragPct } : {},
   });
 
-  const costLines = [`<b>💵 Costs (${days}d)${paper ? " — 🧪 simulasi" : ""}:</b>`];
+  const costHeader = `<b>💵 Costs (${days}d)${paper ? " — 🧪 simulasi" : ""}:</b>`;
+  const costBody = [];
   if (llmStats.hasData) {
-    costLines.push(`🤖 LLM: $${llmStats.totalCost.toFixed(4)} (${llmStats.calls} calls)`);
+    costBody.push(`🤖 LLM: $${llmStats.totalCost.toFixed(4)} (${llmStats.calls} calls)`);
     for (const [role, s] of Object.entries(llmStats.byRole).sort((a, b) => b[1].cost - a[1].cost)) {
-      costLines.push(`  • ${role}: $${s.cost.toFixed(4)} (${s.calls} calls)`);
+      costBody.push(`${role}: $${s.cost.toFixed(4)} (${s.calls} calls)`); // "  •" → branch
     }
   } else if (paper) {
-    costLines.push(`🤖 LLM: $0.0000 (belum ada call tercatat lokal)`);
+    costBody.push(`🤖 LLM: $0.0000 (belum ada call tercatat lokal)`);
   } else if (llmWindow != null) {
-    costLines.push(`🤖 LLM (${period}): $${llmWindow.toFixed(4)}`);
+    costBody.push(`🤖 LLM (${period}): $${llmWindow.toFixed(4)}`);
   }
   if (gasSol > 0) {
     const gasTag = paper ? " (simulasi)" : gasIsEst ? " (est)" : "";
     const approx = paper || gasIsEst ? "~" : "";
-    costLines.push(`⛽ Gas${gasTag}: ${approx}${gasSol.toFixed(4)} SOL${gasUsd != null ? ` (${approx}$${gasUsd.toFixed(2)})` : ""}${paper ? " — estimasi biaya bila live" : ""}`);
+    costBody.push(`⛽ Gas${gasTag}: ${approx}${gasSol.toFixed(4)} SOL${gasUsd != null ? ` (${approx}$${gasUsd.toFixed(2)})` : ""}${paper ? " — estimasi biaya bila live" : ""}`);
     const reserve = config.management?.gasReserve;
     const dailyBurn = gasSol / days;
     if (reserve > 0 && dailyBurn > 0) {
       const runwayDays = reserve / dailyBurn;
       const mode = config.management?.gasReserveAutoTune ? " (auto-tune)" : " (manual)";
-      costLines.push(`🪫 gasReserve ${reserve} SOL${mode} ≈ ${runwayDays.toFixed(0)}d runway @ ${dailyBurn.toFixed(4)} SOL/hari${runwayDays < 7 ? " ⚠️ tipis" : ""}`);
+      costBody.push(`🪫 gasReserve ${reserve} SOL${mode} ≈ ${runwayDays.toFixed(0)}d runway @ ${dailyBurn.toFixed(4)} SOL/hari${runwayDays < 7 ? " ⚠️ tipis" : ""}`);
     }
   }
   const totalCost = llmTotal + (gasUsd ?? 0);
   if (totalCost > 0) {
     const real = netPnl - totalCost;
-    costLines.push(`📊 Net − biaya${paper ? " (simulasi)" : ""}: PnL ${money(netPnl)} − biaya $${totalCost.toFixed(4)} = ${money(real)} ${real >= 0 ? "✅" : "🔴"}`);
+    costBody.push(`📊 Net − biaya${paper ? " (simulasi)" : ""}: PnL ${money(netPnl)} − biaya $${totalCost.toFixed(4)} = ${money(real)} ${real >= 0 ? "✅" : "🔴"}`);
   }
-  if (credits?.balance != null) costLines.push(`💳 Saldo OpenRouter: $${credits.balance.toFixed(2)}`);
+  if (credits?.balance != null) costBody.push(`💳 Saldo OpenRouter: $${credits.balance.toFixed(2)}`);
 
   const parts = [
     report,
-    formatStatsBlock(computeTradeStats(racikanWindowPerf), racikanLabel),
     racikanScopeDisclosure() || null,
+    // Window semua-racikan → STATS-only (rekonsiliasi); analisis-dalam ada di report racikan.
+    formatStatsBlock(computeTradeStats(windowPerf), `Semua racikan (${days}d)`),
     formatPnlTracker((lessonsData.performance || []).filter(keepMode), { solPriceUsd: solPrice || null }) || null,
-    `<b>Activity (${days}d):</b> 📥 ${opened} opened | 📤 ${windowPerf.length} closed`,
+    section(`<b>Activity (${days}d):</b>`, [`📥 ${opened} opened`, `📤 ${windowPerf.length} closed`]),
     buildFeatureStatus(),
-    costLines.length > 1 ? costLines.join("\n") : null,
+    costBody.length ? section(costHeader, costBody) : null,
     buildTimeProfileSection(),
   ];
   return parts.filter(Boolean).join("\n\n");
+}
+
+/**
+ * Milestone learning report render (every N closes). Komposisi render diekstrak dari
+ * index.js (file panas) ke sini (file aman) — index.js tinggal panggil 1-baris +
+ * orkestrasi (counter/dedup/send). Tree-style otomatis lewat buildTradeReport (FASE 1).
+ * SEMUA field dipertahankan (title/statsLabel/trendN/identity identik dgn versi inline).
+ */
+export function buildMilestoneReport(perf, milestone) {
+  return buildTradeReport(perf, {
+    title: `🎓 Learning Report — ${milestone} closed positions`,
+    statsLabel: "All-time",
+    trendN: config.reports?.learningReportTrendN ?? 10,
+    identity: formatIdentity(),
+  });
 }
 
 function loadJson(file) {

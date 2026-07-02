@@ -36,6 +36,7 @@ function getJupiterApiKey() {
 }
 
 function getJupiterReferralParams() {
+  if (config.jupiter.referralEnabled === false) return null;
   const referralAccount = String(config.jupiter.referralAccount || "").trim();
   const referralFee = Number(config.jupiter.referralFeeBps || 0);
   if (!referralAccount || !Number.isFinite(referralFee) || referralFee <= 0) {
@@ -337,4 +338,29 @@ export async function swapToken({
     log("swap_error", error.message);
     return { success: false, error: error.message };
   }
+}
+
+// Auto-swap base token → SOL dengan retry aman. Re-baca saldo tiap percobaan:
+// kalau percobaan sebelumnya ternyata sukses (saldo turun < $0.10), berhenti =
+// sukses → mencegah double-swap. Hanya retry kegagalan transient.
+export async function swapBaseToSolWithRetry({ base_mint, attempts = 3, backoffMs = 3000 }) {
+  let lastError = null;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      const balances = await getWalletBalances({});
+      const token = balances.tokens?.find((t) => t.mint === base_mint);
+      if (!token || token.usd < 0.10) {
+        return { success: true, swapped: i > 1, note: "no balance to swap" };
+      }
+      log("swap", `Auto-swap base→SOL attempt ${i}/${attempts}: ${token.symbol || base_mint.slice(0, 8)} ($${token.usd.toFixed(2)})`);
+      const res = await swapToken({ input_mint: base_mint, output_mint: "SOL", amount: token.balance });
+      if (res?.success) return { success: true, attempts_used: i, amount_out: res.amount_out };
+      lastError = res?.error || "swap returned failure";
+    } catch (e) {
+      lastError = e.message;
+    }
+    if (i < attempts) await new Promise((r) => setTimeout(r, backoffMs));
+  }
+  log("swap_warn", `Auto-swap base→SOL FAILED after ${attempts} attempts: ${lastError} (base_mint=${base_mint})`);
+  return { success: false, error: lastError };
 }

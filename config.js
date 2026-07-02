@@ -353,6 +353,7 @@ export const config = {
     referralFeeBps: Number(
       process.env.JUPITER_REFERRAL_FEE_BPS ?? 50,
     ),
+    referralEnabled: u.jupiterReferralEnabled ?? true,
   },
 
   indicators: {

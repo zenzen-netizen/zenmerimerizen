@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 import { agentLoop } from "./agent.js";
 import { log } from "./logger.js";
 import { getMyPositions, closePosition, getActiveBin, getPositionsRentSol } from "./tools/dlmm.js";
-import { getWalletBalances, getSolMarketRegime, swapToken } from "./tools/wallet.js";
+import { getWalletBalances, getSolMarketRegime, swapToken, swapBaseToSolWithRetry } from "./tools/wallet.js";
 import { getTopCandidates, formatYieldToMe } from "./tools/screening.js";
 import { confirmIndicatorPreset } from "./tools/chart-indicators.js";
 import { formatGmgnCandidateForPrompt } from "./tools/gmgn.js";
@@ -33,12 +33,12 @@ import {
   unpinMessage,
   escapeHtml as escapeHtmlSafe,
 } from "./telegram.js";
-import { generateBriefing, generatePeriodicBriefing } from "./briefing.js";
+import { generateBriefing, generatePeriodicBriefing, buildMilestoneReport } from "./briefing.js";
 import { renderGuide } from "./guide.js";
 import { getLastBriefingDate, setLastBriefingDate, getLastBriefingPinId, setLastBriefingPinId, getLastReportedMilestone, setLastReportedMilestone, getLastPeriodicBriefing, setLastPeriodicBriefing, getTrackedPosition, getTrackedPositions, setPositionInstruction, updatePnlAndCheckExits, queuePeakConfirmation, resolvePendingPeak, queueTrailingDropConfirmation, resolvePendingTrailingDrop } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
 import { listPresets, savePreset, applyPreset, getPresetDiff, deletePreset, validName, presetExists, getActiveSetupStatus, formatIdentity } from "./preset-manager.js";
-import { ORIGIN_SECTIONS, ORIGIN_NOTES, SUB_CLUSTER_META, KEY_SUBCLUSTER, L4_CHILDREN, CORE_GROUPS } from "./config-origin.js";
+import { ORIGIN_SECTIONS, ORIGIN_NOTES, SUB_CLUSTER_META, KEY_SUBCLUSTER, L4_CHILDREN, CORE_GROUPS, FUNCTION_GROUPS } from "./config-origin.js";
 import { recordPositionSnapshot, recallForPool, addPoolNote } from "./pool-memory.js";
 import { isPaperMode } from "./paper-trading.js";
 import { recordCandidateSnapshots, getCandidateMomentum, formatCandidateMomentum, recordSmartWalletCounts, getSmartWalletMomentum, formatSmartWalletMomentum } from "./candidate-memory.js";
@@ -51,6 +51,25 @@ import { appendDecision } from "./decision-log.js";
 import { formatSolTracker, setTrackStart, getTrackStart } from "./sol-tracker.js";
 import { formatPnlTracker } from "./pnl-tracker.js";
 import { getOpenRouterBalance, getOpenRouterCredits } from "./openrouter-usage.js";
+import { render } from "./views/render.js";
+import * as positionsView from "./views/positions.js";
+import * as statusView from "./views/status.js";
+import * as walletView from "./views/wallet.js";
+import * as poolView from "./views/pool.js";
+import * as configView from "./views/config.js";
+import * as systemView from "./views/system.js";
+import {
+  buildMgmtReport, frameMgmtResult,
+  cycleSkip, cycleFail, buildNoCandidates, buildLoneNoDeploy,
+  buildCandidateList, buildNoCache, CYCLE_TITLE,
+  summarizeTradeAction, buildConfigDiff,
+  CONFIRM_OK, CONFIRM_NO, CONFIRM_EXPIRED,
+} from "./views/cycle.js";
+import { ICON, SEP, tree, header, fmtMoneySigned, fmtPct as fmtPctSigned } from "./views/format.js";
+import {
+  initSettingsViews, renderSettingsMenu,
+  settingValue, settingButton, fmtSettingValue, categoryButton, cycleControl,
+} from "./views/settings.js";
 
 import { REPO_ROOT, repoPath } from "./repo-root.js";
 
@@ -216,12 +235,7 @@ async function maybeFireLearningReport() {
     const milestone = Math.floor(perf.length / every) * every;
     if (milestone < every) return;                       // first milestone not reached
     if (milestone <= getLastReportedMilestone()) return; // already reported this milestone
-    const report = buildTradeReport(perf, {
-      title: `🎓 Learning Report — ${milestone} closed positions`,
-      statsLabel: "All-time",
-      trendN: config.reports?.learningReportTrendN ?? 10,
-      identity: formatIdentity(),
-    });
+    const report = buildMilestoneReport(perf, milestone); // render diekstrak ke briefing.js (file aman)
     if (telegramEnabled() && report) await sendHTML(report);
     setLastReportedMilestone(milestone);
     log("cron", `Learning report fired at milestone ${milestone} closes`);
@@ -399,7 +413,13 @@ async function maybeAutoTuneGasReserve() {
     if (Math.abs(target - current) / Math.max(current, 0.001) < 0.2 || Math.abs(target - current) < 0.005) return;
     persistConfigChange("management", "gasReserve", "gasReserve", target);
     log("cron", `gasReserve auto-tuned ${current} → ${target} SOL (burn ${dailyBurn.toFixed(5)}/d × ${buffer}d, floor ${floor})`);
-    if (telegramEnabled()) sendMessage(`🪫 gasReserve auto-tuned: ${current} → ${target} SOL (≈${buffer}d runway @ ${dailyBurn.toFixed(5)} SOL/hari, dari gas nyata)`).catch(() => {});
+    if (telegramEnabled()) sendMessage([
+      header("🪫", "gasReserve auto-tuned"),
+      tree([
+        `${current} → ${target} SOL`,
+        `≈${buffer}d runway @ ${dailyBurn.toFixed(5)} SOL/hari (dari gas nyata)`,
+      ]),
+    ].join("\n")).catch(() => {});
   } catch (error) {
     log("cron_error", `gasReserve auto-tune failed (fail-open): ${error.message}`);
   }
@@ -456,7 +476,7 @@ export async function runManagementCycle({ silent = false } = {}) {
 
   try {
     if (!silent && telegramEnabled()) {
-      liveMessage = await createLiveMessage("🔄 Management Cycle", "Evaluating positions...");
+      liveMessage = await createLiveMessage(CYCLE_TITLE.mgmt, "Evaluating positions...");
     }
     const livePositions = await getMyPositions({ force: true }).catch(() => null);
     positions = livePositions?.positions || [];
@@ -477,11 +497,11 @@ export async function runManagementCycle({ silent = false } = {}) {
       if (idleOnCooldown) {
         const waitedMin = Math.round((Date.now() - _screeningLastTriggered) / 60000);
         log("cron", `No open positions — idle screening on cooldown (${waitedMin}m < ${config.experiments.idleScreeningCooldownMin}m), skipping`);
-        mgmtReport = "No open positions. Idle screening on cooldown.";
+        mgmtReport = "💤 No open positions — idle screening on cooldown.";
         return mgmtReport;
       }
       log("cron", "No open positions — triggering screening cycle");
-      mgmtReport = "No open positions. Triggering screening cycle.";
+      mgmtReport = "🔍 No open positions — triggering screening.";
       runScreeningCycle().catch((e) => log("cron_error", `Triggered screening failed: ${e.message}`));
       return mgmtReport;
     }
@@ -552,32 +572,10 @@ export async function runManagementCycle({ silent = false } = {}) {
       actionMap.set(p.position, { action: "STAY" });
     }
 
-    // ── Build JS report ──────────────────────────────────────────────
-    const totalValue = positionData.reduce((s, p) => s + (p.total_value_usd ?? 0), 0);
-    const totalUnclaimed = positionData.reduce((s, p) => s + (p.unclaimed_fees_usd ?? 0), 0);
+    // ── Build JS report (scaffolding tree → views/cycle.js) ───────────
+    mgmtReport = buildMgmtReport(positionData, actionMap, config);
 
-    const reportLines = positionData.map((p) => {
-      const act = actionMap.get(p.position);
-      const inRange = p.in_range ? "🟢 IN" : `🔴 OOR ${p.minutes_out_of_range ?? 0}m`;
-      const val = config.management.solMode ? `◎${p.total_value_usd ?? "?"}` : `$${p.total_value_usd ?? "?"}`;
-      const unclaimed = config.management.solMode ? `◎${p.unclaimed_fees_usd ?? "?"}` : `$${p.unclaimed_fees_usd ?? "?"}`;
-      const statusLabel = act.action === "INSTRUCTION" ? "HOLD (instruction)" : act.action;
-      let line = `**${p.pair}** | Age: ${p.age_minutes ?? "?"}m | Val: ${val} | Unclaimed: ${unclaimed} | PnL: ${p.pnl_pct ?? "?"}% | Yield: ${p.fee_per_tvl_24h ?? "?"}% | ${inRange} | ${statusLabel}`;
-      if (p.instruction) line += `\nNote: "${p.instruction}"`;
-      if (act.action === "CLOSE" && act.rule === "exit") line += `\n⚡ Trailing TP: ${act.reason}`;
-      if (act.action === "CLOSE" && act.rule && act.rule !== "exit") line += `\nRule ${act.rule}: ${act.reason}`;
-      if (act.action === "CLAIM") line += `\n→ Claiming fees`;
-      return line;
-    });
-
-    const needsAction = [...actionMap.values()].filter(a => a.action !== "STAY");
-    const actionSummary = needsAction.length > 0
-      ? needsAction.map(a => a.action === "INSTRUCTION" ? "EVAL instruction" : `${a.action}${a.reason ? ` (${a.reason})` : ""}`).join(", ")
-      : "no action";
-
-    const cur = config.management.solMode ? "◎" : "$";
-    mgmtReport = reportLines.join("\n\n") +
-      `\n\nSummary: 💼 ${positions.length} positions | ${cur}${totalValue.toFixed(4)} | fees: ${cur}${totalUnclaimed.toFixed(4)} | ${actionSummary}`;
+    const cur = config.management.solMode ? "◎" : "$"; // dipakai blok prompt LLM di bawah (:603)
 
     // ── Call LLM only if action needed ──────────────────────────────
     const actionPositions = positionData.filter(p => {
@@ -618,7 +616,7 @@ After executing, write a brief one-line result per position.
         onToolFinish: async ({ name, result, success }) => { await liveMessage?.toolFinish(name, result, success); },
       });
 
-      mgmtReport += `\n\n${content}`;
+      mgmtReport += frameMgmtResult(content);
     } else {
       log("cron", "Management: all positions STAY — skipping LLM");
       await liveMessage?.note("No tool actions needed.");
@@ -633,13 +631,13 @@ After executing, write a brief one-line result per position.
     }
   } catch (error) {
     log("cron_error", `Management cycle failed: ${error.message}`);
-    mgmtReport = `Management cycle failed: ${error.message}`;
+    mgmtReport = cycleFail(`Management cycle failed: ${error.message}`);
   } finally {
     _managementBusy = false;
     if (!silent && telegramEnabled()) {
       if (mgmtReport) {
         if (liveMessage) await liveMessage.finalize(stripThink(mgmtReport)).catch(() => {});
-        else sendMessage(`🔄 Management Cycle\n\n${stripThink(mgmtReport)}`).catch(() => { });
+        else sendMessage(`${CYCLE_TITLE.mgmt}\n\n${stripThink(mgmtReport)}`).catch(() => { });
       } else if (liveMessage) {
         // Any return path that skipped setting a report must still close the live
         // message, or its typing-indicator timer leaks forever (4s sendChatAction
@@ -676,7 +674,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
     [prePositions, preBalance] = await Promise.all([getMyPositions({ force: true }), getWalletBalances()]);
     if (prePositions.total_positions >= config.risk.maxPositions) {
       log("cron", `Screening skipped — max positions reached (${prePositions.total_positions}/${config.risk.maxPositions})`);
-      screenReport = `Screening skipped — max positions reached (${prePositions.total_positions}/${config.risk.maxPositions}).`;
+      screenReport = cycleSkip(`Screening skipped — max positions reached (${prePositions.total_positions}/${config.risk.maxPositions}).`);
       appendDecision({
         type: "skip",
         actor: "SCREENER",
@@ -703,7 +701,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
     if (!isDryRun && (plannedDeploy < minDeployAmount() || preBalance.sol < needForOne)) {
       const needNote = (minDeployAmount() + config.management.gasReserve + rentReserve).toFixed(3);
       log("cron", `Screening skipped — modal kurang (wallet ${preBalance.sol.toFixed(3)} SOL, sizing/slot ${plannedDeploy} < min ${minDeployAmount()}; butuh ~${needNote} SOL utk 1 posisi). No LLM call.`);
-      screenReport = `Screening skipped — modal kurang (wallet ${preBalance.sol.toFixed(3)} SOL < ~${needNote} untuk 1 posisi ≥ ${minDeployAmount()} SOL + gas + rent).`;
+      screenReport = cycleSkip(`Screening skipped — modal kurang (wallet ${preBalance.sol.toFixed(3)} SOL < ~${needNote} untuk 1 posisi ≥ ${minDeployAmount()} SOL + gas + rent).`);
       appendDecision({
         type: "skip",
         actor: "SCREENER",
@@ -746,12 +744,12 @@ export async function runScreeningCycle({ silent = false } = {}) {
     }
   } catch (e) {
     log("cron_error", `Screening pre-check failed: ${e.message}`);
-    screenReport = `Screening pre-check failed: ${e.message}`;
+    screenReport = cycleFail(`Screening pre-check failed: ${e.message}`);
     _screeningBusy = false;
     return screenReport;
   }
   if (!silent && telegramEnabled()) {
-    liveMessage = await createLiveMessage("🔍 Screening Cycle", "Scanning candidates...");
+    liveMessage = await createLiveMessage(CYCLE_TITLE.screen, "Scanning candidates...");
   }
   timers.screeningLastRun = Date.now();
   log("cron", `Starting screening cycle [model: ${config.llm.screeningModel}]`);
@@ -776,7 +774,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
     // Fetch top candidates, then recon each sequentially with a small delay to avoid 429s
     const topCandidates = await getTopCandidates({ limit: 10 }).catch((e) => ({ _error: e.message }));
     if (topCandidates?._error) {
-      screenReport = `Screening failed: ${topCandidates._error}`;
+      screenReport = cycleFail(`Screening failed: ${topCandidates._error}`);
       return screenReport;
     }
     const candidates = (topCandidates?.candidates || topCandidates?.pools || []).slice(0, 10);
@@ -847,12 +845,18 @@ export async function runScreeningCycle({ silent = false } = {}) {
         .map((entry) => `- ${entry.name}: ${entry.reason}`)
         .join("\n");
       const funnelBlock = buildGmgnFunnelReport(gmgnStageCounts, gmgnAllFiltered, { fromStage: 2 });
-      const thresholds = `Thresholds: tvl>$${config.screening.minTvl} | vol>$${config.screening.minVolume} | organic>${config.screening.minOrganic}% | holders>${config.screening.minHolders} | fee/tvl>${config.screening.minFeeActiveTvlRatio}%`;
-      screenReport = funnelBlock
-        ? `No candidates available.\n\n${funnelBlock}`
-        : combinedExamples
-          ? `No candidates available.\nFiltered examples:\n${combinedExamples}`
-          : `No candidates available (all filtered).\n${thresholds}`;
+      const thresholds = [
+        `tvl > $${config.screening.minTvl}`,
+        `vol > $${config.screening.minVolume}`,
+        `organic > ${config.screening.minOrganic}%`,
+        `holders > ${config.screening.minHolders}`,
+        `fee/tvl > ${config.screening.minFeeActiveTvlRatio}%`,
+      ];
+      screenReport = buildNoCandidates({
+        funnel: funnelBlock,
+        examples: combined.slice(0, 5).map((e) => ({ name: e.name, reason: e.reason })),
+        thresholds,
+      });
       appendDecision({
         type: "no_deploy",
         actor: "SCREENER",
@@ -873,21 +877,7 @@ export async function runScreeningCycle({ silent = false } = {}) {
       if (skipReason) {
         const candidateName = passing[0].pool?.name || "unknown";
         const funnelBlock = buildGmgnFunnelReport(gmgnStageCounts, gmgnAllFiltered, { fromStage: 2 });
-        screenReport = [
-          "⛔ NO DEPLOY",
-          "",
-          "Cycle finished with no valid entry.",
-          "",
-          "BEST LOOKING CANDIDATE",
-          candidateName,
-          "",
-          "WHY SKIPPED",
-          `Only one candidate survived filtering, but it was not worth deploying: ${skipReason}.`,
-          "",
-          "REJECTED",
-          `- ${candidateName}: ${skipReason}`,
-          funnelBlock ? `\n─────────────\n${funnelBlock}` : null,
-        ].filter(Boolean).join("\n");
+        screenReport = buildLoneNoDeploy({ candidateName, skipReason, funnel: funnelBlock });
         appendDecision({
           type: "no_deploy",
           actor: "SCREENER",
@@ -1153,13 +1143,13 @@ IMPORTANT:
     }
   } catch (error) {
     log("cron_error", `Screening cycle failed: ${error.message}`);
-    screenReport = `Screening cycle failed: ${error.message}`;
+    screenReport = cycleFail(`Screening cycle failed: ${error.message}`);
   } finally {
     _screeningBusy = false;
     if (!silent && telegramEnabled()) {
       if (screenReport) {
         if (liveMessage) await liveMessage.finalize(stripThink(screenReport)).catch(() => {});
-        else sendMessage(`🔍 Screening Cycle\n\n${stripThink(screenReport)}`).catch(() => { });
+        else sendMessage(`${CYCLE_TITLE.screen}\n\n${stripThink(screenReport)}`).catch(() => { });
       } else if (liveMessage) {
         // Same typing-indicator leak guard as the management cycle.
         await liveMessage.finalize("(cycle ended without report)").catch(() => {});
@@ -1224,16 +1214,8 @@ async function emergencyCloseDirect(p, reason) {
     if (success) {
       // D1: auto-swap base→SOL (replicates executor post-hook) — FAIL-OPEN.
       if (res.base_mint) {
-        try {
-          const balances = await getWalletBalances({});
-          const token = balances.tokens?.find((t) => t.mint === res.base_mint);
-          if (token && token.usd >= 0.10) {
-            log("executor", `Auto-swapping ${token.symbol || res.base_mint.slice(0, 8)} ($${token.usd.toFixed(2)}) back to SOL`);
-            await swapToken({ input_mint: res.base_mint, output_mint: "SOL", amount: token.balance });
-          }
-        } catch (e) {
-          log("executor_warn", `Auto-swap after emergency close failed: ${e.message}`);
-        }
+        await swapBaseToSolWithRetry({ base_mint: res.base_mint }).catch((e) =>
+          log("executor_warn", `Auto-swap after close failed: ${e.message}`));
       }
       // D2: Telegram notify — FAIL-OPEN.
       if (telegramEnabled()) {
@@ -1357,11 +1339,24 @@ Summarize the current portfolio health, total fees earned, and performance of al
             }
             continue; // skipped (management busy) — let that cycle handle it
           }
+          // Non-emergency exit: direct close (LLM-free) bila TIDAK lagi menunggu konfirmasi.
+          // Confirmation-pending tetap lewat jalur management lama (jaga trailing-confirm gate).
+          if (!exit.needs_confirmation) {
+            const em = await emergencyCloseDirect(p, exit.reason);
+            if (em.success) break;
+            if (em.needFallback) {
+              _pollTriggeredAt = Date.now();
+              log("state", `[PnL poll] Direct close failed: ${p.pair} — ${exit.reason} — falling back to management ASAP`);
+              runManagementCycle({ silent: true }).catch((e) => log("cron_error", `Poll-triggered (fallback) management failed: ${e.message}`));
+              break;
+            }
+            continue; // skipped (management busy) — biarkan cycle itu yang tangani
+          }
           const cooldownMs = config.schedule.managementIntervalMin * 60 * 1000;
           const sinceLastTrigger = Date.now() - _pollTriggeredAt;
           if (sinceLastTrigger >= cooldownMs) {
             _pollTriggeredAt = Date.now();
-            log("state", `[PnL poll] Exit alert: ${p.pair} — ${exit.reason} — triggering management`);
+            log("state", `[PnL poll] Exit alert (awaiting confirm): ${p.pair} — ${exit.reason} — triggering management`);
             runManagementCycle({ silent: true }).catch((e) => log("cron_error", `Poll-triggered management failed: ${e.message}`));
           } else {
             log("state", `[PnL poll] Exit alert: ${p.pair} — ${exit.reason} — cooldown (${Math.round((cooldownMs - sinceLastTrigger) / 1000)}s left)`);
@@ -1382,16 +1377,18 @@ Summarize the current portfolio health, total fees earned, and performance of al
             }
             continue; // skipped (management busy) — let that cycle handle it
           }
-          const cooldownMs = config.schedule.managementIntervalMin * 60 * 1000;
-          const sinceLastTrigger = Date.now() - _pollTriggeredAt;
-          if (sinceLastTrigger >= cooldownMs) {
-            _pollTriggeredAt = Date.now();
-            log("state", `[PnL poll] Deterministic close rule: ${p.pair} — Rule ${closeRule.rule}: ${closeRule.reason} — triggering management`);
-            runManagementCycle({ silent: true }).catch((e) => log("cron_error", `Poll-triggered management failed: ${e.message}`));
-          } else {
-            log("state", `[PnL poll] Deterministic close rule: ${p.pair} — Rule ${closeRule.rule}: ${closeRule.reason} — cooldown (${Math.round((cooldownMs - sinceLastTrigger) / 1000)}s left)`);
+          // Non-emergency deterministic close → direct close (LLM-free).
+          {
+            const em = await emergencyCloseDirect(p, closeRule.reason || "close rule");
+            if (em.success) break;
+            if (em.needFallback) {
+              _pollTriggeredAt = Date.now();
+              log("state", `[PnL poll] Direct close failed: ${p.pair} — Rule ${closeRule.rule}: ${closeRule.reason} — falling back to management ASAP`);
+              runManagementCycle({ silent: true }).catch((e) => log("cron_error", `Poll-triggered (fallback) management failed: ${e.message}`));
+              break;
+            }
+            continue; // skipped (management busy)
           }
-          break;
         }
       }
     } finally {
@@ -1455,22 +1452,11 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 //  FORMAT CANDIDATES TABLE
 // ═══════════════════════════════════════════
 function formatCandidates(candidates) {
-  if (!candidates.length) return "  No eligible pools found right now.";
-
-  const lines = candidates.map((p, i) => {
-    const name = (p.name || "unknown").padEnd(20);
-    const ftvl = `${p.fee_active_tvl_ratio ?? p.fee_tvl_ratio}%`.padStart(8);
-    const vol = `$${((p.volume_window || 0) / 1000).toFixed(1)}k`.padStart(8);
-    const active = `${p.active_pct}%`.padStart(6);
-    const org = String(p.organic_score).padStart(4);
-    return `  [${i + 1}]  ${name}  fee/aTVL:${ftvl}  vol:${vol}  in-range:${active}  organic:${org}`;
-  });
-
-  return [
-    "  #   pool                  fee/aTVL     vol    in-range  organic",
-    "  " + "─".repeat(68),
-    ...lines,
-  ].join("\n");
+  // REPL fetch (plain console). Render → views/cycle.js (JG-2): no-result = hasil-kosong
+  // (sudah screen → 0 lolos), beda dari cache-kosong. Field tabel lama (fee/aTVL, vol,
+  // in-range, organic) semua kebawa via candidateLines. Logika fetch tak diubah.
+  if (!candidates.length) return buildNoCandidates({});
+  return buildCandidateList(candidates);
 }
 
 function getDeterministicCloseRule(position, managementConfig) {
@@ -1619,16 +1605,10 @@ function getLatestCandidatesMeta() {
 }
 
 function describeLatestCandidates(limit = 5) {
-  if (!_latestCandidates.length) return "No cached candidates yet. Run /screen first.";
-  const lines = _latestCandidates.slice(0, limit).map((pool, i) => {
-    const feeTvl = pool.fee_active_tvl_ratio ?? pool.fee_tvl_ratio ?? "?";
-    const vol = pool.volume_window ?? pool.volume_24h ?? "?";
-    const active = pool.active_pct ?? "?";
-    const organic = pool.organic_score ?? "?";
-    return `${i + 1}. ${pool.name} | fee/aTVL ${feeTvl}% | vol $${vol} | in-range ${active}% | organic ${organic}`;
-  });
-  const age = _latestCandidatesAt ? new Date(_latestCandidatesAt).toLocaleString("en-US", { hour12: false }) : "unknown";
-  return `Latest candidates (${_latestCandidates.length}) — updated ${age}\n\n${lines.join("\n")}`;
+  // Cache-kosong (belum pernah /screen) ≠ no-result (sudah screen, 0 lolos) — beda
+  // builder, makna dijaga (governing #4). Render → views/cycle.js (JG-1/JG-2).
+  if (!_latestCandidates.length) return buildNoCache();
+  return buildCandidateList(_latestCandidates.slice(0, limit), { updatedAt: _latestCandidatesAt });
 }
 
 // Compact age label from minutes: <60 → "Xm", else "Y.yh".
@@ -1676,32 +1656,34 @@ function buildRangeEfficiencyLines(pos, tracked) {
   return out;
 }
 
-function formatWalletStatus(wallet, positions, rent = null) {
-  const slotsRemaining = Math.max(1, config.risk.maxPositions - (positions?.total_positions ?? 0));
-  const deployAmount = computeDeployAmount(wallet.sol, { slotsRemaining });
-  const hive = isHiveMindEnabled() ? "on" : "off";
-  const gasReserve = config.management?.gasReserve ?? 0;
-  const lines = [
-    `Wallet: ${wallet.sol} SOL ($${wallet.sol_usd})`,
-    `SOL price: $${wallet.sol_price}`,
-    `Open positions: ${positions.total_positions}/${config.risk.maxPositions}`,
-    `📦 Real deploy/slot: ${deployAmount} SOL  (ukuran per posisi baru)`,
-  ];
-  // Liquid SOL = wallet − gasReserve. Rent is NOT subtracted: it already left the
-  // wallet into the on-chain position accounts (it's not part of wallet.sol), so
-  // deducting it here double-counted. Held rent is shown as info — it refunds to
-  // the wallet on close, it isn't an extra reservation against today's balance.
-  const free = wallet.sol - gasReserve;
-  lines.push(`🟢 Bebas (cair): ~${free.toFixed(3)} SOL  (wallet − gasReserve ${gasReserve})`);
-  const held = rent?.totalRentSol ?? 0;
-  if (held > 0) {
-    lines.push(`🔒 Tertahan (rent ${positions.total_positions} posisi): ~${held.toFixed(3)} SOL${rent?.estimated ? " (sebagian est)" : ""} — info: sudah keluar wallet, balik saat close`);
+// (formatWalletStatus dipindah ke views/wallet.js sebagai walletBlockLines +
+//  systemLines — render wallet block kini ikut solMode, FIX bug unit #12.)
+
+// OpenRouter balance/usage → array baris (logika verbatim dari /status+/wallet lama).
+// Array (bukan string) supaya tree() di views/ bisa kasih prefix per baris (incl
+// baris ⚠️ "menipis"). USD by-design — tetap `$`. Kosong → [].
+function buildOpenRouterLines(orBalance, orCredits) {
+  const lines = [];
+  if (orCredits?.balance != null) {
+    // Actual purchased-credit balance — the number to watch for top-ups.
+    let l = `💳 OpenRouter saldo: $${orCredits.balance.toFixed(2)}`;
+    if (orBalance?.usageDaily != null) l += ` | hari ini $${orBalance.usageDaily.toFixed(4)}`;
+    else if (orBalance?.usageMonthly != null) l += ` | bln ini $${orBalance.usageMonthly.toFixed(2)}`;
+    lines.push(l);
+    if (orCredits.balance < 5) lines.push(`⚠️ Saldo OpenRouter menipis — pertimbangkan top up`);
+  } else if (orBalance) {
+    if (orBalance.remaining != null) {
+      let l = `💳 OpenRouter: $${orBalance.remaining.toFixed(2)} remaining`;
+      if (orBalance.usageMonthly != null) l += ` | $${orBalance.usageMonthly.toFixed(2)} this month`;
+      else if (orBalance.usage != null) l += ` | $${orBalance.usage.toFixed(4)} total spent`;
+      lines.push(l);
+    } else if (orBalance.usageDaily != null) {
+      lines.push(`💳 OpenRouter: $${orBalance.usageDaily.toFixed(4)} today | $${(orBalance.usageMonthly ?? 0).toFixed(2)} this month`);
+    } else if (orBalance.usage != null) {
+      lines.push(`💳 OpenRouter: $${orBalance.usage.toFixed(4)} total spent`);
+    }
   }
-  lines.push(
-    `Dry run: ${process.env.DRY_RUN === "true" ? "yes" : "no"}`,
-    `HiveMind: ${hive}`,
-  );
-  return lines.join("\n");
+  return lines;
 }
 
 // Condense a learning rule into a short, COMPLETE one-liner for /status.
@@ -2009,40 +1991,19 @@ function subgroupDesc(sg) {
     : `Pipeline screening GMGN tidak aktif (source=${config.screening.source}, blok ini diabaikan).`;
 }
 
-// RENDER-ONLY 4-layer /config: L1 origin section (⚙️ Origin Dev / 🧩 Add by zen)
-// → L2 grup (▸) → L3 sub-cluster (emoji + ┈ line, shown when a grup has >1
-// cluster) → L4 mini-grup (the four beranak families indent their anak under the
-// induk via ↳). Layout/placement lives in config-origin.js; this owns no values.
+// /config origin (Batch E 🅴): view per-ASAL 4-lapis (L1 seksi ⚙️/🧩 → L2 grup ▸
+// → L3 sub-cluster → L4 ↳ anak), Zen di atas, tree-style. Render delegated to
+// views/config.js (mode "origin"); layout/placement tetap di config-origin.js,
+// value tetap dari buildConfigRowMap. SHARED: dipakai command /config origin DAN
+// tombol /settings "📋 Config penuh" (:3044) — keduanya ikut gaya tree baru.
 export function formatFullConfig() {
-  const rowMap = buildConfigRowMap();
-  const placed = new Set();
-
-  const sectionBlocks = ORIGIN_SECTIONS.map((sec) => {
-    const subBlocks = sec.subgroups.map((sg) => {
-      // Racikan/Identitas sub-group renders the identity banner, not key rows.
-      if (sg.identity) {
-        const body = formatIdentityLines().split("\n").map((l) => `    ${l}`).join("\n");
-        return `▸ ${sg.title} · ${sg.desc}\n${body}`;
-      }
-      const { text, placed: pl } = renderSubclusterRows(sg.keys, rowMap);
-      pl.forEach((k) => placed.add(k));
-      return `▸ ${sg.title} · ${subgroupDesc(sg)}\n${text}`;
-    });
-    const bar = "━━━━━━━━━━━━━━━━━━━━━━";
-    return `${bar}\n${sec.title} — ${sec.blurb}\n${bar}\n\n${subBlocks.join("\n\n")}`;
-  });
-
-  // Safety net: any computed row the layout did not place is surfaced (never
-  // dropped) so old key count == new key count even if a key is mis-listed.
-  const orphans = Object.keys(rowMap).filter((k) => !placed.has(k));
-  if (orphans.length) {
-    const rows = orphans.map((k) => { const [label, value] = rowMap[k]; return `    ${label}: ${value}`; });
-    sectionBlocks.push(`▸ ❓ Belum terpetakan (auto — cek config-origin.js)\n${rows.join("\n")}`);
-  }
-
-  const intro = "⚙️ Config lengkap — per ASAL (⚙️ Origin Dev vs 🧩 Add by zen)\nLegenda: 🟢 on · ⚪ off · ↳ anak setelan · ringkas → /config core";
-  const outro = "Ubah lewat /settings (menu tombol) atau chat biasa. Detail tiap setting: ketik /guide";
-  return `${intro}\n\n${sectionBlocks.join("\n\n\n")}\n\n${outro}`;
+  return render(configView.buildView({
+    mode: "origin",
+    rowMap: buildConfigRowMap(),
+    identity: formatIdentityLines(),
+    racikanName: activeRacikanName(),
+    subgroupDesc, // GMGN desc flip (zen-gmgn) — fn lama dipakai apa adanya
+  }), "telegram");
 }
 
 // /config core — compact view: only the core-tagged keys (full key names), 2 per
@@ -2063,6 +2024,24 @@ export function formatCoreConfig() {
   return `${head}\n\n${racikan}\n\n${blocks.join("\n\n")}\n\n${tail}`;
 }
 
+// Nama racikan aktif untuk header /config (fail-open → "—").
+function activeRacikanName() {
+  try { return getActiveSetupStatus().name || "—"; } catch { return "—"; }
+}
+
+// Default /config (Batch E 🅴): dikelompokkan per FUNGSI (praktis harian) + marker
+// ASAL ⚙️/🧩 per baris. Render delegated to views/config.js; data (rowMap/identity)
+// unchanged. SEMUA 166 key kebawa (FUNCTION_GROUPS parity + safety-net orphan).
+function formatFunctionConfig() {
+  return render(configView.buildView({
+    mode: "function",
+    rowMap: buildConfigRowMap(),
+    identity: formatIdentityLines(),
+    racikanName: activeRacikanName(),
+    screeningSource: config.screening.source,
+  }), "telegram");
+}
+
 function parseConfigValue(raw) {
   const value = String(raw ?? "").trim();
   if (!value.length) return "";
@@ -2075,164 +2054,6 @@ function parseConfigValue(raw) {
   return value;
 }
 
-function settingValue(key) {
-  const values = {
-    solMode: config.management.solMode,
-    lpAgentRelayEnabled: config.api.lpAgentRelayEnabled,
-    chartIndicatorsEnabled: config.indicators.enabled,
-    trailingTakeProfit: config.management.trailingTakeProfit,
-    useDiscordSignals: config.screening.useDiscordSignals,
-    blockPvpSymbols: config.screening.blockPvpSymbols,
-    screeningSource: config.screening.source,
-    screeningCategories: config.screening.categories,
-    gmgnRequireKol: config.gmgn.requireKol,
-    gmgnInterval: config.gmgn.interval,
-    gmgnIndicatorFilter: config.gmgn.indicatorFilter,
-    gmgnMinVolume: config.gmgn.minVolume,
-    gmgnMinTokenAgeHours: config.gmgn.minTokenAgeHours,
-    gmgnMaxTokenAgeHours: config.gmgn.maxTokenAgeHours,
-    gmgnMaxBundlerRate: config.gmgn.maxBundlerRate,
-    gmgnPreferredKolNames: config.gmgn.preferredKolNames,
-    gmgnPreferredKolMinHoldPct: config.gmgn.preferredKolMinHoldPct,
-    gmgnDumpKolNames: config.gmgn.dumpKolNames,
-    gmgnDumpKolMinHoldPct: config.gmgn.dumpKolMinHoldPct,
-    gmgnIndicatorInterval: config.gmgn.indicatorInterval,
-    gmgnRequireBullishSt: config.gmgn.indicatorRules?.requireBullishSupertrend,
-    gmgnRejectAtBottom: config.gmgn.indicatorRules?.rejectAlreadyAtBottom,
-    gmgnRequireAboveSt: config.gmgn.indicatorRules?.requireAboveSupertrend,
-    gmgnMinRsi: config.gmgn.indicatorRules?.minRsi,
-    gmgnMaxRsi: config.gmgn.indicatorRules?.maxRsi,
-    gmgnMinKolCount: config.gmgn.minKolCount,
-    gmgnMinTotalFeeSol: config.gmgn.minTotalFeeSol,
-    gmgnMinHolders: config.gmgn.minHolders,
-    gmgnFeeSource: config.gmgn.feeSource,
-    pnlSource: config.pnl.source,
-    pnlRpcUrl: config.pnl.rpcUrl,
-    pnlPollIntervalSec: config.pnl.pollIntervalSec,
-    pnlDepositCacheTtlSec: config.pnl.depositCacheTtlSec,
-    strategy: config.strategy.strategy,
-    strategyLock: config.strategy.strategyLock,
-    minBinsBelow: config.strategy.minBinsBelow,
-    maxBinsBelow: config.strategy.maxBinsBelow,
-    deployAmountSol: config.management.deployAmountSol,
-    gasReserve: config.management.gasReserve,
-    maxPositions: config.risk.maxPositions,
-    maxDeployAmount: config.risk.maxDeployAmount,
-    takeProfitPct: config.management.takeProfitPct,
-    stopLossPct: config.management.stopLossPct,
-    trailingTriggerPct: config.management.trailingTriggerPct,
-    trailingDropPct: config.management.trailingDropPct,
-    repeatDeployCooldownEnabled: config.management.repeatDeployCooldownEnabled,
-    repeatDeployCooldownTriggerCount: config.management.repeatDeployCooldownTriggerCount,
-    repeatDeployCooldownHours: config.management.repeatDeployCooldownHours,
-    repeatDeployCooldownMinFeeEarnedPct: config.management.repeatDeployCooldownMinFeeEarnedPct,
-    managementIntervalMin: config.schedule.managementIntervalMin,
-    screeningIntervalMin: config.schedule.screeningIntervalMin,
-    adaptiveScreening: config.schedule.adaptiveScreening,
-    maxScreeningIntervalMin: config.schedule.maxScreeningIntervalMin,
-    indicatorEntryPreset: config.indicators.entryPreset,
-    indicatorExitPreset: config.indicators.exitPreset,
-    indicatorExitEnabled: config.indicators.exitEnabled,
-    indicatorRejectAtBottom: config.indicators.rejectAlreadyAtBottom,
-    rsiLength: config.indicators.rsiLength,
-    indicatorIntervals: config.indicators.intervals,
-    requireAllIntervals: config.indicators.requireAllIntervals,
-    smiPdLookback: config.indicators.smiPdLookback,
-    smiPaLookback: config.indicators.smiPaLookback,
-    smiCrossWindow: config.indicators.smiCrossWindow,
-    // 🧪 GRUP 16 — Experiments
-    candidateMomentum: config.experiments.candidateMomentum,
-    smartWalletMomentum: config.experiments.smartWalletMomentum,
-    expectedYieldSignal: config.experiments.expectedYieldSignal,
-    narrativeProfileSignal: config.experiments.narrativeProfileSignal,
-    counterfactualReview: config.experiments.counterfactualReview,
-    counterfactualMinMcapGainPct: config.experiments.counterfactualMinMcapGainPct,
-    exitLiquidityCheck: config.experiments.exitLiquidityCheck,
-    exitLiquidityMaxSlippagePct: config.experiments.exitLiquidityMaxSlippagePct,
-    marketRegimeGate: config.experiments.marketRegimeGate,
-    marketRegimeMaxDrop24hPct: config.experiments.marketRegimeMaxDrop24hPct,
-    convictionSizing: config.experiments.convictionSizing,
-    convictionSizingMaxAdjustPct: config.experiments.convictionSizingMaxAdjustPct,
-    idleScreeningCooldown: config.experiments.idleScreeningCooldown,
-    idleScreeningCooldownMin: config.experiments.idleScreeningCooldownMin,
-    paperTrading: config.experiments.paperTrading,
-    usePaperHistoryWhenLive: config.experiments.usePaperHistoryWhenLive,
-    // 🧬 Learning / Auto-Evolve freeze
-    evolveEnabled: config.learning.evolveEnabled,
-    // 📊 GRUP 17 — Reports & Gas
-    learningReportEvery: config.reports.learningReportEvery,
-    learningReportTrendN: config.reports.learningReportTrendN,
-    gasReserveAutoTune: config.management.gasReserveAutoTune,
-    gasReserveBufferDays: config.management.gasReserveBufferDays,
-    gasReserveFloorSol: config.management.gasReserveFloorSol,
-    sizingMode: config.management.sizingMode,
-    rentPerPositionSol: config.management.rentPerPositionSol,
-    // ── menu-editable additions (cascade /settings: cover remaining CONFIG_MAP keys) ──
-    // screening
-    minTvl: config.screening.minTvl,
-    maxTvl: config.screening.maxTvl,
-    minVolume: config.screening.minVolume,
-    minFeeActiveTvlRatio: config.screening.minFeeActiveTvlRatio,
-    minTokenFeesSol: config.screening.minTokenFeesSol,
-    minOrganic: config.screening.minOrganic,
-    minQuoteOrganic: config.screening.minQuoteOrganic,
-    minMcap: config.screening.minMcap,
-    maxMcap: config.screening.maxMcap,
-    minHolders: config.screening.minHolders,
-    minTokenAgeHours: config.screening.minTokenAgeHours,
-    maxTokenAgeHours: config.screening.maxTokenAgeHours,
-    minBinStep: config.screening.minBinStep,
-    maxBinStep: config.screening.maxBinStep,
-    maxBotHoldersPct: config.screening.maxBotHoldersPct,
-    maxTop10Pct: config.screening.maxTop10Pct,
-    excludeHighSupplyConcentration: config.screening.excludeHighSupplyConcentration,
-    avoidPvpSymbols: config.screening.avoidPvpSymbols,
-    timeframe: config.screening.timeframe,
-    category: config.screening.category,
-    discordSignalMode: config.screening.discordSignalMode,
-    // management
-    minSolToOpen: config.management.minSolToOpen,
-    positionSizePct: config.management.positionSizePct,
-    outOfRangeBinsToClose: config.management.outOfRangeBinsToClose,
-    outOfRangeWaitMinutes: config.management.outOfRangeWaitMinutes,
-    oorCooldownTriggerCount: config.management.oorCooldownTriggerCount,
-    oorCooldownHours: config.management.oorCooldownHours,
-    minFeePerTvl24h: config.management.minFeePerTvl24h,
-    minAgeBeforeYieldCheck: config.management.minAgeBeforeYieldCheck,
-    minVolumeToRebalance: config.management.minVolumeToRebalance,
-    minClaimAmount: config.management.minClaimAmount,
-    autoSwapAfterClaim: config.management.autoSwapAfterClaim,
-    repeatDeployCooldownScope: config.management.repeatDeployCooldownScope,
-    pnlSanityMaxDiffPct: config.management.pnlSanityMaxDiffPct,
-    // strategy / schedule
-    defaultBinsBelow: config.strategy.defaultBinsBelow,
-    healthCheckIntervalMin: config.schedule.healthCheckIntervalMin,
-    // llm
-    temperature: config.llm.temperature,
-    maxTokens: config.llm.maxTokens,
-    maxSteps: config.llm.maxSteps,
-    generalMaxTokens: config.llm.generalMaxTokens,
-    // indicators
-    indicatorCandles: config.indicators.candles,
-    rsiOversold: config.indicators.rsiOversold,
-    rsiOverbought: config.indicators.rsiOverbought,
-    // infra
-    hiveMindPullMode: config.hiveMind.pullMode,
-    // gmgn
-    gmgnMinMcap: config.gmgn.minMcap,
-    gmgnMaxMcap: config.gmgn.maxMcap,
-    gmgnAthFilterPct: config.gmgn.athFilterPct,
-    gmgnMinSmartDegenCount: config.gmgn.minSmartDegenCount,
-    gmgnMaxRatTraderRate: config.gmgn.maxRatTraderRate,
-    gmgnMaxFreshWalletRate: config.gmgn.maxFreshWalletRate,
-    gmgnMaxDevTeamHoldRate: config.gmgn.maxDevTeamHoldRate,
-    gmgnMaxBotDegenRate: config.gmgn.maxBotDegenRate,
-    gmgnMaxSniperCount: config.gmgn.maxSniperCount,
-    gmgnMaxSniperHoldRate: config.gmgn.maxSniperHoldRate,
-  };
-  return values[key];
-}
-
 function getConfigValue(key) {
   const known = settingValue(key);
   if (known !== undefined) return known;
@@ -2242,27 +2063,7 @@ function getConfigValue(key) {
   return undefined;
 }
 
-// One-line human summary of a trade action for the confirmation prompt. Pure/defensive:
-// any odd arg shape still produces a readable line (never throws).
-function summarizeTradeAction(toolName, args = {}) {
-  const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : null);
-  const shortAddr = (a) => (typeof a === "string" && a.length > 12 ? `${a.slice(0, 4)}…${a.slice(-4)}` : (a ?? "?"));
-  if (toolName === "deploy_position") {
-    const amt = num(args.amount_y) ?? num(args.amount_sol) ?? num(args.amount_x);
-    const strat = args.strategy ? ` | ${args.strategy}` : "";
-    return `🚀 BUKA POSISI (deploy)\n  pool: ${shortAddr(args.pool_address)}\n  ◎ ${amt ?? "?"} SOL${strat}`;
-  }
-  if (toolName === "close_position") {
-    return `🔻 TUTUP POSISI (close)\n  position: ${shortAddr(args.position_address)}${args.reason ? `\n  reason: ${args.reason}` : ""}`;
-  }
-  if (toolName === "claim_fees") {
-    return `💰 CLAIM FEES\n  position: ${shortAddr(args.position_address)}`;
-  }
-  if (toolName === "swap_token") {
-    return `🔁 SWAP TOKEN\n  ${num(args.amount) ?? "?"} ${shortAddr(args.input_mint)} → ${shortAddr(args.output_mint)}`;
-  }
-  return `${toolName}\n  ${JSON.stringify(args).slice(0, 200)}`;
-}
+// summarizeTradeAction (prompt confirm) → views/cycle.js (pure/defensive). Lihat FASE 3.
 
 // Confirm a real-capital / live-position action (deploy/close/claim/swap) in the interactive
 // path. Unlike update_config there is no diff to compute and no "no-op" to skip — the action
@@ -2285,7 +2086,7 @@ async function requestActionConfirmation(toolName, args) {
 
   pending.timer = setTimeout(async () => {
     if (_pendingConfirmation === pending) _pendingConfirmation = null;
-    if (pending.messageId) await editMessage("⏰ Expired — no action taken.", pending.messageId).catch(() => {});
+    if (pending.messageId) await editMessage(CONFIRM_EXPIRED, pending.messageId).catch(() => {});
     resolveFn(false);
   }, 30_000);
 
@@ -2370,15 +2171,14 @@ async function requestConfirmation(toolName, args) {
 
   pending.timer = setTimeout(async () => {
     if (_pendingConfirmation === pending) _pendingConfirmation = null;
-    if (pending.messageId) await editMessage("⏰ Expired — no changes made.", pending.messageId).catch(() => {});
+    if (pending.messageId) await editMessage(CONFIRM_EXPIRED, pending.messageId).catch(() => {});
     resolveFn(false);
   }, 30_000);
 
-  const lines = Object.entries(effective).map(([key, val]) => {
-    const current = getConfigValue(key);
-    return `  ${key}: ${current ?? "unset"} → ${val}`;
-  });
-  const sent = await sendMessageWithButtons(`⚠️ Update config?\n${lines.join("\n")}`, [
+  const diff = buildConfigDiff(Object.entries(effective).map(([key, val]) => ({
+    key, current: getConfigValue(key), val,
+  })));
+  const sent = await sendMessageWithButtons(`⚠️ Update config?\n${diff}`, [
     [
       { text: "✅ Ya", callback_data: "confirm:yes" },
       { text: "❌ Batal", callback_data: "confirm:no" },
@@ -2387,84 +2187,6 @@ async function requestConfirmation(toolName, args) {
   pending.messageId = sent?.result?.message_id ?? null;
 
   return promise;
-}
-
-function fmtSettingValue(value) {
-  if (Array.isArray(value)) return value.join(",");
-  if (typeof value === "boolean") return value ? "🟢 on" : "⚪ off";
-  return String(value);
-}
-
-function settingButton(label, data) {
-  return { text: label, callback_data: data };
-}
-
-function toggleButton(key, label) {
-  return settingButton(`${label}: ${fmtSettingValue(settingValue(key))}`, `cfg:toggle:${key}`);
-}
-
-// Multi-category merge toggle. categories is an array (merge) or null (factory single
-// `category`). A category is ON only when explicitly listed; null/[] = all OFF (factory).
-function categoryButton(cat) {
-  const cats = config.screening.categories;
-  const on = Array.isArray(cats) && cats.includes(cat);
-  return settingButton(`${cat} ${on ? "✅" : "⬜"}`, `cfg:cat:${cat}`);
-}
-
-function stepButtons(key, label, step, { digits = 2 } = {}) {
-  const value = Number(settingValue(key));
-  const shown = Number.isFinite(value) ? value.toFixed(digits).replace(/\.?0+$/, "") : "?";
-  return [
-    settingButton(`- ${label}`, `cfg:step:${key}:${-step}`),
-    settingButton(`${label}: ${shown}`, `cfg:noop`),
-    settingButton(`+ ${label}`, `cfg:step:${key}:${step}`),
-  ];
-}
-
-function inputButton(key, label, { digits = 0 } = {}) {
-  const value = settingValue(key);
-  const shown = value == null ? "off" : Number.isFinite(Number(value)) ? String(parseFloat(Number(value).toFixed(digits))) : String(value);
-  return [settingButton(`${label}: ${shown} ✏`, `cfg:input:${key}`)];
-}
-
-// ── Cascade /settings (breadcrumb) display data ──────────────────────────────
-// Short T1 section labels + T2 group names so all three levels (header → group →
-// settings) fit on screen at once. RENDER-ONLY metadata; the canonical grouping
-// stays in config-origin.js. Falls back to the full title when a short is missing.
-const MENU_SECTION_LABEL = { dev: "⚙️ Origin Dev", zen: "🧩 Add by Zen" };
-const MENU_GROUP_SHORT = {
-  "dev-screening": "Screen", "dev-management": "Risk", "dev-strategy": "Strat",
-  "dev-schedule": "Jadwal", "dev-llm": "LLM", "dev-darwin": "Darwin",
-  "dev-indicators": "Indik", "dev-infra": "Infra",
-  "zen-screening": "Screen+", "zen-gmgn": "GMGN", "zen-management": "Mgmt+",
-  "zen-strategy": "Strat+", "zen-schedule": "Jadwal+", "zen-llm": "LLM+",
-  "zen-indicators": "Indik+", "zen-reports": "Report", "zen-learning": "🧬Learn",
-  "zen-experiments": "🧪Exp", "zen-racikan": "Racikan",
-};
-// Max editable T3 rows per page; groups with more paginate (T1+T2 stay visible).
-const MAX_T3_ROWS = 8;
-const chunkRows = (arr, n) => {
-  const out = [];
-  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
-  return out;
-};
-
-// Build a MENU_CONTROLS "cycle" entry for a small, KNOWN enum: a noop showing the
-// current value + one `cfg:set` button per option (reuses the existing set
-// mechanic + callback_data — no new edit mechanic). `opts` are the literal valid
-// config values; perRow controls wrapping.
-function cycleControl(settingKey, label, opts, perRow = 3) {
-  return {
-    pageKeys: [settingKey],
-    build: () => {
-      const cur = fmtSettingValue(settingValue(settingKey));
-      const rows = [[settingButton(`${label}: ${cur}`, "cfg:noop")]];
-      for (let i = 0; i < opts.length; i += perRow) {
-        rows.push(opts.slice(i, i + perRow).map((o) => settingButton(String(o), `cfg:set:${settingKey}:${o}`)));
-      }
-      return rows;
-    },
-  };
 }
 
 // Which settings page a given key lives on — used to return to the right page after
@@ -2738,6 +2460,23 @@ const MENU_KEY_TO_PAGE = (() => {
   return m;
 })();
 
+// Mode Campur twin of MENU_KEY_TO_PAGE: settingValue key → FUNCTION_GROUPS id (the
+// per-fungsi axis). Same build recipe — resolve each config-origin key through its
+// MENU_CONTROLS entry to the settingValue key(s) it edits — so it handles the
+// dev/zen vs settingValue naming difference identically.
+const MENU_KEY_TO_FNGROUP = (() => {
+  const m = {};
+  for (const fg of FUNCTION_GROUPS) {
+    for (const k of fg.keys) {
+      const ctrl = MENU_CONTROLS[k];
+      if (!ctrl) continue;
+      const keys = ctrl.pageKeys || (ctrl.toggle ? [ctrl.toggle[0]] : ctrl.input ? [ctrl.input[0]] : []);
+      for (const sk of keys) m[sk] = fg.id;
+    }
+  }
+  return m;
+})();
+
 // Which group page a given settingValue key belongs to (return-to-page after an
 // edit, and the page stored for a pending text input). Falls back to the
 // management group for any unmapped key.
@@ -2747,250 +2486,28 @@ function pageForKey(key) {
 
 // Page token to re-render after editing `key`: the key's group, preserving the
 // current T3 page suffix when we're already viewing that group (so an edit on
-// GMGN page 2 re-renders page 2, not page 1).
+// GMGN page 2 re-renders page 2, not page 1). Mode-aware: when the live view is
+// Mode Campur (fn-* token), return the key's FUNCTION group (fn-<id>) so an edit
+// stays in Campur; otherwise the origin group (dev-/zen-) as before. The mode is
+// read from _settingsView (the same module state the menu already relies on); the
+// edit callback itself never carries the mode.
 function returnTokenForKey(key) {
-  const gid = pageForKey(key);
   const [curBase, curPage] = String(_settingsView).split("~");
+  if (curBase === "fn-landing" || curBase.startsWith("fn-")) {
+    const fid = `fn-${MENU_KEY_TO_FNGROUP[key] || "sizing"}`;
+    return curBase === fid && curPage ? `${fid}~${curPage}` : fid;
+  }
+  const gid = pageForKey(key);
   return curBase === gid && curPage ? `${gid}~${curPage}` : gid;
 }
 
-// ── /settings navigation (selaras /config: ASAL seksi → grup → sub-cluster) ──
-// L1 main = two ASAL section buttons; L2 = relevance groups (same names as
-// /config); L3 group page = read-only /config body + the editable controls for
-// that group, bucketed under the same sub-clusters. RENDER-ONLY: every control
-// is the SAME one MENU_CONTROLS already wired (unchanged callback_data/mechanics).
+// Inject index.js-owned helpers into the views/settings.js render layer (one-way:
+// index → views, passed as data so there is no circular import). MENU_CONTROLS is
+// the editable-control registry; the rest are the /config row/text builders the
+// menu body reuses. Must run after MENU_CONTROLS is defined (above).
+initSettingsViews({ MENU_CONTROLS, buildConfigRowMap, renderSubclusterRows, subgroupDesc });
 
-function findSubgroup(groupId) {
-  for (const sec of ORIGIN_SECTIONS) {
-    const sg = sec.subgroups.find((g) => g.id === groupId);
-    if (sg) return { sec, sg };
-  }
-  return null;
-}
-
-// How many keys in a subgroup are editable from the menu (section-list hint).
-function editableCountFor(sg) {
-  return sg.keys.filter((k) => MENU_CONTROLS[k]).length;
-}
-
-// TINGKAT 1 — header rows, ALWAYS shown. The two ASAL sections + Racikan + Config
-// penuh + Refresh/Close. The active section (and Racikan on the presets page) is
-// marked with ▸. `token` is the current page token so Refresh re-renders it.
-function settingsHeaderRows(activeSection, token) {
-  const secRow = ORIGIN_SECTIONS.map((sec) => {
-    const lbl = MENU_SECTION_LABEL[sec.id] || sec.title;
-    return settingButton(`${sec.id === activeSection ? "▸ " : ""}${lbl}`, `cfg:page:${sec.id}`);
-  });
-  const racikanActive = String(token).split("~")[0] === "presets";
-  return [
-    secRow,
-    [
-      settingButton(`${racikanActive ? "▸ " : ""}🗂️ Racikan`, "cfg:page:presets"),
-      settingButton("📋 Config penuh", "cfg:show"),
-    ],
-    [settingButton("🔄 Refresh", `cfg:page:${token}`), settingButton("❌ Close", "cfg:close")],
-  ];
-}
-
-// TINGKAT 2 — group rows for one ASAL section, shown whenever a section is active
-// and STAY visible when a group is open. Short names, 2/row, each tagged ✏N
-// (editable count) or 👁 (view-only). The active group is marked with ▸.
-function settingsGroupRows(sec, activeGroupId) {
-  const btns = sec.subgroups.map((sg) => {
-    const short = MENU_GROUP_SHORT[sg.id] || sg.title;
-    const mark = sg.id === activeGroupId ? "▸ " : "";
-    if (sg.identity) return settingButton(`${mark}${short} 🗂️`, "cfg:page:presets");
-    const n = editableCountFor(sg);
-    return settingButton(`${mark}${short} ${n > 0 ? `✏${n}` : "👁"}`, `cfg:page:${sg.id}`);
-  });
-  return chunkRows(btns, 2);
-}
-
-// TINGKAT 3 — flat list of editable control rows for one group, bucketed by
-// sub-cluster (a noop header per cluster when the group spans >1). Single-button
-// controls pair two-per-row. Returns rows (incl. cluster headers) for pagination.
-function settingsControlRows(sg) {
-  const order = [];
-  const members = {};
-  for (const k of sg.keys) {
-    if (!MENU_CONTROLS[k]) continue;
-    const cl = KEY_SUBCLUSTER[k] || "_misc";
-    if (!members[cl]) { members[cl] = []; order.push(cl); }
-    members[cl].push(k);
-  }
-  const rows = [];
-  const showHdr = order.length > 1;
-  for (const cl of order) {
-    const meta = SUB_CLUSTER_META[cl];
-    if (showHdr && meta) rows.push([settingButton(`· ${meta.emoji} ${meta.label} ·`, "cfg:noop")]);
-    let buffered = null; // hold one single-button control to pair with the next
-    const flush = () => { if (buffered) { rows.push(buffered); buffered = null; } };
-    for (const k of members[cl]) {
-      const ctrl = MENU_CONTROLS[k];
-      if (ctrl.build) { flush(); rows.push(...ctrl.build()); continue; }
-      const row = ctrl.toggle
-        ? [toggleButton(ctrl.toggle[0], ctrl.toggle[1])]
-        : inputButton(ctrl.input[0], ctrl.input[1], ctrl.input[2] || {});
-      if (row.length === 1) {
-        if (buffered) { rows.push([buffered[0], row[0]]); buffered = null; }
-        else buffered = row;
-      } else { flush(); rows.push(row); }
-    }
-    flush();
-  }
-  return rows;
-}
-
-// Compact "config inti" summary for the /settings landing. Values come from the
-// SAME source as /config + /config core (buildConfigRowMap → already 🟢/⚪-tagged),
-// so the landing can never drift from /config. The keys shown are the core set
-// (mirrors config-origin CORE_GROUPS); they're just regrouped one line/kategori.
-function formatSettingsLandingSummary() {
-  const rowMap = buildConfigRowMap();
-  const v = (k) => (rowMap[k] ? rowMap[k][1] : "—");
-  const setup = (() => {
-    try { const s = getActiveSetupStatus(); return s.name ? `${s.name}${s.edited ? " ✎" : ""}` : "—"; }
-    catch { return "—"; }
-  })();
-  const lock = (config.strategy.strategyLock ?? "default") !== "default" ? ` 🔒${v("strategyLock")}` : "";
-  const expOn = Object.entries(config.experiments).filter(([, x]) => x === true).map(([k]) => k).join(", ") || "none";
-  return [
-    `⚙️ SETTINGS · racikan ${setup}`,
-    `💰 pos ${v("maxPositions")} · deploy ${v("deployAmountSol")} · SL ${v("stopLossPct")} · TP ${v("takeProfitPct")} · trail ${v("trailingTakeProfit")}`,
-    `🔎 mcap ${v("minMcap")}–${v("maxMcap")} · TVL ${v("minTvl")}–${v("maxTvl")} · vol ${v("minVolume")} · holders ${v("minHolders")} · organic ${v("minOrganic")}`,
-    `🎯 ${v("strategy")}${lock} · bins ${v("minBinsBelow")}–${v("maxBinsBelow")}`,
-    `🧠 ${v("managementModel")} · ⏱ manage ${v("managementIntervalMin")}m / screen ${v("screeningIntervalMin")}m`,
-    `📊 indikator ${v("enabled")} (${v("entryPreset")}) · exit ${v("exitEnabled")}`,
-    `🧪 experiments ON: ${expOn}`,
-  ].join("\n");
-}
-
-// LANDING — no section chosen: message = config-inti summary, buttons = TINGKAT 1.
-function renderSettingsMain() {
-  const bodyText = [
-    formatSettingsLandingSummary(),
-    "",
-    "Pilih seksi ⤵️  ( ⚙️ dev · 🧩 zen )",
-  ].join("\n");
-  return { text: bodyText, keyboard: settingsHeaderRows(null, "main") };
-}
-
-// SECTION — a section is active: TINGKAT 1 (active ▸) + TINGKAT 2 groups (none ▸).
-function renderSettingsSection(sectionId) {
-  const sec = ORIGIN_SECTIONS.find((s) => s.id === sectionId);
-  if (!sec) return renderSettingsMain();
-  const bodyText = [
-    `${MENU_SECTION_LABEL[sec.id] || sec.title} — ${sec.blurb}`,
-    "",
-    "Pilih grup ⤵️  ( ✏N = N setelan editable · 👁 = lihat-saja )",
-  ].join("\n");
-  const keyboard = [
-    ...settingsHeaderRows(sec.id, sec.id),
-    ...settingsGroupRows(sec, null),
-  ];
-  return { text: bodyText, keyboard };
-}
-
-// GROUP — a group is open: TINGKAT 1 (active section ▸) + TINGKAT 2 (active group
-// ▸, STAYS visible) + TINGKAT 3 editable controls (paginated when many). Body text
-// = the same read-only /config rows (sub-clusters, 🟢/⚪, legacy notes). `token`
-// may carry a T3 page suffix ("dev-management~2"); switching group/section swaps
-// the lower levels without any "back" button.
-function renderSettingsGroup(token) {
-  const [groupId, pageStr] = String(token).split("~");
-  const found = findSubgroup(groupId);
-  if (!found) return renderSettingsMain();
-  const { sec, sg } = found;
-  if (sg.identity) return renderSettingsPresets();
-
-  const rowMap = buildConfigRowMap();
-  const { text: body } = renderSubclusterRows(sg.keys, rowMap);
-
-  let controlRows = settingsControlRows(sg);
-  if (controlRows.length === 0) controlRows = [[settingButton("👁 Lihat-saja — ubah via /setcfg atau file", "cfg:noop")]];
-
-  // T3 pagination: chunk control rows; T1 + T2 stay visible across pages.
-  const totalPages = Math.max(1, Math.ceil(controlRows.length / MAX_T3_ROWS));
-  const page = Math.min(Math.max(1, parseInt(pageStr, 10) || 1), totalPages);
-  const controlsThisPage = totalPages > 1
-    ? controlRows.slice((page - 1) * MAX_T3_ROWS, page * MAX_T3_ROWS)
-    : controlRows;
-  const pagerRows = totalPages > 1
-    ? [[
-        settingButton("‹", `cfg:page:${groupId}~${page > 1 ? page - 1 : totalPages}`),
-        settingButton(`Hal ${page}/${totalPages}`, "cfg:noop"),
-        settingButton("›", `cfg:page:${groupId}~${page < totalPages ? page + 1 : 1}`),
-      ]]
-    : [];
-  const currentToken = totalPages > 1 ? `${groupId}~${page}` : groupId;
-
-  const bodyText = [
-    `${MENU_SECTION_LABEL[sec.id] || sec.title} › ${sg.title}`,
-    `📝 ${subgroupDesc(sg)}`,
-    "",
-    body || "  (tak ada setelan)",
-    "",
-    totalPages > 1
-      ? `Tombol edit (hal ${page}/${totalPages}). Sisanya lihat-saja (via /setcfg / file).`
-      : "Tombol = bisa diubah. Sisanya lihat-saja (via /setcfg / file).",
-  ].join("\n");
-
-  const keyboard = [
-    ...settingsHeaderRows(sec.id, currentToken),
-    ...settingsGroupRows(sec, groupId),
-    ...pagerRows,
-    ...controlsThisPage,
-  ];
-  return { text: bodyText, keyboard };
-}
-
-// 🗂️ Racikan/Identitas — kept as the dedicated presets page (load/diff/del/save).
-function renderSettingsPresets() {
-  const presets = listPresets();
-  const lines = presets.length
-    ? presets.map((p) => p.error
-        ? `⚠ ${p.name}`
-        : `${p.isCurrent ? "●" : "○"} ${p.name} — ${p.dryRun ? "🧪 dry-run" : "live"} · ${p.keys} keys${p.isCurrent ? " (current)" : ""}`)
-    : ["(belum ada preset)"];
-  const setupStatus = (() => {
-    try { const s = getActiveSetupStatus(); return s.name ? `${s.name}${s.edited ? " ✎ (ada edit manual)" : ""}` : "— (belum load)"; } catch { return "—"; }
-  })();
-  const bodyText = ["🧩 ADD BY ZEN › 🗂️ Racikan/Identitas", "",
-    `Aktif: ${setupStatus}`,
-    "(Racikan = snapshot config penuh. Beda dari 🧬 Profil = arketipe wizard.)", "",
-    ...lines, "",
-    "● = sama dgn config live · 🧪 = isi file dryRun (bukan berarti jalan)",
-    "Per baris: ▶ load · 🔍 lihat beda · 🗑️ hapus.",
-    "💾 = simpan config sekarang jadi racikan baru.",
-  ].join("\n");
-  const rows = presets.map((p) => p.error
-    ? [settingButton(`⚠ ${p.name}`, "cfg:noop")]
-    : [
-        settingButton(`${p.isCurrent ? "●" : "▶"} ${p.name}${p.dryRun ? " 🧪" : ""}`, `cfg:preset:ask:${p.name}`),
-        settingButton("🔍", `cfg:preset:diff:${p.name}`),
-        settingButton("🗑️", `cfg:preset:rmask:${p.name}`),
-      ]);
-  rows.push([settingButton("💾 Simpan config sekarang", "cfg:preset:save")]);
-  // Keep TINGKAT 1 + the Zen TINGKAT 2 groups visible (Racikan marked ▸) so the
-  // user can jump straight to another section/group without a back button.
-  const zenSec = ORIGIN_SECTIONS.find((s) => s.id === "zen");
-  const keyboard = [
-    ...settingsHeaderRows("zen", "presets"),
-    ...settingsGroupRows(zenSec, "zen-racikan"),
-    ...rows,
-  ];
-  return { text: bodyText, keyboard };
-}
-
-function renderSettingsMenu(page = "main") {
-  const base = String(page).split("~")[0];
-  if (base === "main") return renderSettingsMain();
-  if (base === "dev" || base === "zen") return renderSettingsSection(base);
-  if (base === "presets") return renderSettingsPresets();
-  return renderSettingsGroup(page); // group token (e.g. "dev-management" / "zen-gmgn~2"); unknown → main
-}
-
-async function showSettingsMenu({ messageId = null, page = "main" } = {}) {
+async function showSettingsMenu({ messageId = null, page = "fn-landing" } = {}) {
   _settingsView = page; // remember the live view so post-edit re-renders stay put
   const menu = renderSettingsMenu(page);
   if (messageId) {
@@ -3137,7 +2654,9 @@ async function applySettingsMenuCallback(msg) {
       return;
     }
     await answerCallbackQuery(msg.callbackQueryId, `categories: ${value ? value.join(",") : "off (factory)"}`);
-    await showSettingsMenu({ messageId: msg.messageId, page: "zen-screening" });
+    // Re-render in the live mode (Campur → fn-screening, Pisah → zen-screening). Only
+    // the navigation target is mode-aware here; the executeTool/clamp above is untouched.
+    await showSettingsMenu({ messageId: msg.messageId, page: returnTokenForKey("screeningCategories") });
     return;
   }
 
@@ -3179,55 +2698,19 @@ async function applySettingsMenuCallback(msg) {
   await showSettingsMenu({ messageId: msg.messageId, page });
 }
 
-function formatHelpText() {
-  return [
-    "🤖 Meridian — Commands",
-    "",
-    "📊 LAPORAN & STATUS",
-    "/status — wallet + positions snapshot",
-    "/wallet — wallet, SOL bebas (cair) + real deploy/slot + rent tertahan + SOL tracker (1d/7d/30d)",
-    "/wallet trackstart <YYYY-MM-DD|off> — anchor tracker SOL ke tanggal",
-    "/positions — list open positions (+ rent tertahan)",
-    "/pool <n> — detail 1 posisi (+ range-efficiency + rent)",
-    "/briefing — morning briefing (auto-pinned)",
-    "/report — racikan aktif · /report all = lifetime · /report setups · /report <racikan>",
-    "/report [week|month|day] — digest periodik",
-    "",
-    "🛠️ POSISI & DEPLOY",
-    "/close <n> — close one position by index",
-    "/closeall — close all open positions",
-    "/set <n> <note> — set note/instruction on position",
-    "/screen — refresh deterministic candidate list",
-    "/candidates — show latest cached candidates",
-    "/deploy <n> — deploy candidate by cached index",
-    "",
-    "⚙️ KONFIGURASI",
-    "/config — show full runtime config (grouped)",
-    "/config core — ringkasan key inti saja",
-    "/settings — button menu for common config",
-    "/setcfg <key> <value> — update persisted config",
-    "/preset [list|save|use|show <nama>] — simpan/ganti profil config",
-    "/guide [no|katakunci|all] — panduan setting",
-    "",
-    "🔧 SISTEM",
-    "/hive — HiveMind sync status",
-    "/hive pull — manual HiveMind pull now",
-    "/pause — stop cron cycles",
-    "/resume — start cron cycles again",
-    "/stop — shut down agent",
-    "/help — show this list",
-  ].join("\n");
-}
+// /help → views/system.js renderHelp() (Batch E 🅴, tree-style). 1-baris call di handler.
 
 // ─── Config presets (/preset) ───────────────────────────────────
 function presetUsageText() {
   return [
-    "🗂️ /preset — config presets (snapshot user-config.json)",
-    "/preset list — daftar preset",
-    "/preset save <nama> — simpan config saat ini jadi preset",
-    "/preset use <nama> — load preset (auto-backup + restart)",
-    "/preset show <nama> — lihat apa yg berubah vs config sekarang",
-    "/preset rm <nama> — hapus preset",
+    header("🗂️", "/preset", "config presets (snapshot user-config.json)"),
+    tree([
+      "/preset list — daftar preset",
+      "/preset save <nama> — simpan config saat ini jadi preset",
+      "/preset use <nama> — load preset (auto-backup + restart)",
+      "/preset show <nama> — lihat apa yg berubah vs config sekarang",
+      "/preset rm <nama> — hapus preset",
+    ]),
   ].join("\n");
 }
 
@@ -3239,7 +2722,7 @@ function runPresetCommand(argStr) {
   try {
     if (sub === "list" || sub === "ls") {
       const presets = listPresets();
-      if (!presets.length) return { text: "Belum ada racikan. Simpan dengan: /preset save <nama>" };
+      if (!presets.length) return { text: `🗂️ Belum ada racikan. Simpan dengan: /preset save <nama>` };
       const lines = presets.map((p) => {
         if (p.error) return `! ${p.name} — tidak terbaca`;
         const mark = p.isCurrent ? "●" : "○";
@@ -3248,44 +2731,52 @@ function runPresetCommand(argStr) {
       });
       const st = getActiveSetupStatus();
       const active = st.name ? `${st.name}${st.edited ? " ✎ (ada edit manual)" : ""}` : "— (belum load)";
-      return { text: `🗂️ Racikan (setup tersimpan)\nAktif: ${active}\n\n${lines.join("\n")}\n\n${presetUsageText()}` };
+      return { text: [
+        header("🗂️", "Racikan", `aktif: ${active}`),
+        SEP, tree(lines), SEP, presetUsageText(),
+      ].join("\n") };
     }
     if (sub === "save") {
-      if (!name) return { text: "Format: /preset save <nama>" };
-      if (!validName(name)) return { text: `Nama tidak valid "${name}". Pakai huruf/angka/_/- (maks 40).` };
+      if (!name) return { text: `${ICON.warn} Format: /preset save <nama>` };
+      if (!validName(name)) return { text: `${ICON.warn} Nama tidak valid "${name}". Pakai huruf/angka/_/- (maks 40).` };
       const r = savePreset(name);
-      return { text: `✅ Config saat ini disimpan → preset "${name}"${r.overwritten ? " (menimpa yang lama)" : ""}.` };
+      return { text: `${ICON.ok} Config saat ini disimpan → preset "${name}"${r.overwritten ? " (menimpa yang lama)" : ""}.` };
     }
     if (sub === "show" || sub === "diff") {
-      if (!name) return { text: "Format: /preset show <nama>" };
-      if (!presetExists(name)) return { text: `Preset "${name}" tidak ada. Coba /preset list.` };
+      if (!name) return { text: `${ICON.warn} Format: /preset show <nama>` };
+      if (!presetExists(name)) return { text: `${ICON.warn} Preset "${name}" tidak ada. Coba /preset list.` };
       const diffs = getPresetDiff(name);
-      if (!diffs.length) return { text: `Preset "${name}" identik dengan config saat ini — tidak ada yang berubah.` };
-      const shown = diffs.slice(0, 30).map((d) => `  ${d.key}: ${d.from} → ${d.to}`);
-      const more = diffs.length > 30 ? `\n  …+${diffs.length - 30} lagi` : "";
-      return { text: `🔍 Kalau load "${name}", ${diffs.length} setting berubah:\n${shown.join("\n")}${more}` };
+      if (!diffs.length) return { text: `${ICON.ok} Preset "${name}" identik dengan config saat ini — tidak ada yang berubah.` };
+      const shown = diffs.slice(0, 30).map((d) => `${d.key}: ${d.from} → ${d.to}`);
+      if (diffs.length > 30) shown.push(`…+${diffs.length - 30} lagi`);
+      return { text: [
+        header("🔍", `Diff "${name}"`, `${diffs.length} setting berubah`),
+        SEP, tree(shown),
+      ].join("\n") };
     }
     if (sub === "use" || sub === "load") {
-      if (!name) return { text: "Format: /preset use <nama>" };
-      if (!presetExists(name)) return { text: `Preset "${name}" tidak ada. Coba /preset list.` };
+      if (!name) return { text: `${ICON.warn} Format: /preset use <nama>` };
+      if (!presetExists(name)) return { text: `${ICON.warn} Preset "${name}" tidak ada. Coba /preset list.` };
       const diffs = getPresetDiff(name);
       const r = applyPreset(name);
       const sample = diffs.slice(0, 4).map((d) => `${d.key} ${d.from}→${d.to}`).join(", ");
       const cnt = diffs.length
-        ? `   ${diffs.length} setting berubah (a.l. ${sample}${diffs.length > 4 ? ", …" : ""})`
-        : "   (config sudah sama — tidak ada yang berubah)";
-      const back = r.backup ? `\n   Rollback: /preset use ${r.backup}` : "";
-      return { text: `✅ Preset "${name}" di-load → user-config.json\n${cnt}${back}`, applied: true, name };
+        ? `${diffs.length} setting berubah (a.l. ${sample}${diffs.length > 4 ? ", …" : ""})`
+        : "config sudah sama — tidak ada yang berubah";
+      return { text: [
+        header(ICON.ok, `Preset "${name}" di-load`, "user-config.json"),
+        tree([cnt, r.backup ? `Rollback: /preset use ${r.backup}` : null]),
+      ].join("\n"), applied: true, name };
     }
     if (sub === "rm" || sub === "delete" || sub === "del") {
-      if (!name) return { text: "Format: /preset rm <nama>" };
-      if (!presetExists(name)) return { text: `Preset "${name}" tidak ada.` };
+      if (!name) return { text: `${ICON.warn} Format: /preset rm <nama>` };
+      if (!presetExists(name)) return { text: `${ICON.warn} Preset "${name}" tidak ada.` };
       deletePreset(name);
       return { text: `🗑️ Preset "${name}" dihapus.` };
     }
     return { text: presetUsageText() };
   } catch (e) {
-    return { text: `Preset error: ${e.message}` };
+    return { text: `${ICON.fail} Preset error: ${e.message}` };
   }
 }
 
@@ -3309,21 +2800,12 @@ async function runDeterministicScreen(limit = 5) {
   const top = await getTopCandidates({ limit });
   const candidates = (top?.candidates || top?.pools || []).slice(0, limit);
   setLatestCandidates(candidates);
-  if (candidates.length > 0) {
-    const lines = candidates.map((pool, i) => {
-      const feeTvl = pool.fee_active_tvl_ratio ?? pool.fee_tvl_ratio ?? "?";
-      const vol = pool.volume_window ?? pool.volume_24h ?? "?";
-      const source = pool.gmgn ? ` | GMGN smart ${pool.gmgn_smart_wallets ?? "?"}, KOL ${pool.gmgn_kol_wallets ?? "?"}, total fee ${pool.gmgn_total_fee_sol ?? "?"} SOL` : ` | organic ${pool.organic_score ?? "?"}`;
-      return `${i + 1}. ${pool.name} | ${pool.pool}\n   fee/aTVL ${feeTvl}% | vol $${vol}${source}`;
-    });
-    return `Top candidates (${candidates.length})\n\n${lines.join("\n")}`;
-  }
-  const examples = (top?.filtered_examples || []).slice(0, 3)
-    .map((entry) => `- ${entry.name}: ${entry.reason}`)
-    .join("\n");
-  return examples
-    ? `No candidates available.\nFiltered examples:\n${examples}`
-    : "No candidates available right now.";
+  // Render → views/cycle.js (JG-1/JG-2): list & no-result kini SATU gaya tree, sama
+  // dgn cycle otomatis. Logika screen/fetch tak diubah — cuma string output.
+  if (candidates.length > 0) return buildCandidateList(candidates);
+  return buildNoCandidates({
+    examples: (top?.filtered_examples || []).slice(0, 5).map((e) => ({ name: e.name, reason: e.reason })),
+  });
 }
 
 async function deployLatestCandidate(index) {
@@ -3354,7 +2836,11 @@ async function deployLatestCandidate(index) {
         pool: candidate.pool,
         pool_name: candidate.name,
       });
-      throw new Error(`NO DEPLOY: only cached candidate ${candidate.name} is not worth deploying — ${skipReason}`);
+      // Render-only: bawa field terstruktur supaya handler bisa render via
+      // buildLoneNoDeploy (gaya cycle) tanpa parse string. Logika tetap throw.
+      const err = new Error(`NO DEPLOY: only cached candidate ${candidate.name} is not worth deploying — ${skipReason}`);
+      err.loneNoDeploy = { candidateName: candidate.name, skipReason };
+      throw err;
     }
   }
   const [balForDeploy, posForDeploy] = await Promise.all([getWalletBalances(), getMyPositions({ force: true }).catch(() => ({ total_positions: 0 }))]);
@@ -3423,7 +2909,7 @@ async function telegramHandler(msg) {
       const resolve = _pendingConfirmation.resolve;
       _pendingConfirmation = null;
       await answerCallbackQuery(msg.callbackQueryId, confirmed ? "Confirmed" : "Cancelled");
-      if (msgId) await editMessage(confirmed ? "✅ Confirmed — updating..." : "❌ Cancelled — no changes made.", msgId).catch(() => {});
+      if (msgId) await editMessage(confirmed ? CONFIRM_OK : CONFIRM_NO, msgId).catch(() => {});
       resolve(confirmed);
     } else {
       await answerCallbackQuery(msg.callbackQueryId, "Expired");
@@ -3437,13 +2923,13 @@ async function telegramHandler(msg) {
     if (pending.action === "presetSave") {
       const name = text.trim();
       if (!validName(name)) {
-        await sendMessage(`Nama tidak valid "${name}". Pakai huruf/angka/_/- (maks 40).`);
+        await sendMessage(`${ICON.warn} Nama tidak valid "${name}". Pakai huruf/angka/_/- (maks 40).`);
       } else {
         try {
           const r = savePreset(name);
           await sendMessage(`💾 Disimpan → preset "${name}"${r.overwritten ? " (nimpa yang lama)" : " (baru)"}.`);
         } catch (e) {
-          await sendMessage(`Gagal simpan: ${e.message}`);
+          await sendMessage(`${ICON.fail} Gagal simpan: ${e.message}`);
         }
       }
       await showSettingsMenu({ messageId: pending.menuMsgId, page: "presets" });
@@ -3456,13 +2942,13 @@ async function telegramHandler(msg) {
     } else {
       value = Number(text);
       if (!Number.isFinite(value)) {
-        await sendMessage(`Invalid value "${text}" — must be a number or "off".`);
+        await sendMessage(systemView.renderError(`Invalid value "${text}" — must be a number or "off".`));
         return;
       }
     }
     const result = await executeTool("update_config", { changes: { [key]: value }, reason: "Telegram input field" });
     if (!result?.success) {
-      await sendMessage(`Failed to update ${key}.`);
+      await sendMessage(`${ICON.fail} Failed to update ${key}.`);
       return;
     }
     await showSettingsMenu({ messageId: menuMsgId, page });
@@ -3488,19 +2974,21 @@ async function telegramHandler(msg) {
   if (_managementBusy || _screeningBusy || busy) {
     if (_telegramQueue.length < 5) {
       _telegramQueue.push(msg);
-      sendMessage(`⏳ Queued (${_telegramQueue.length} in queue): "${text.slice(0, 60)}"`).catch(() => {});
+      sendMessage(systemView.renderQueued(_telegramQueue.length, text.slice(0, 60))).catch(() => {});
     } else {
-      sendMessage("Queue is full (5 messages). Wait for the agent to finish.").catch(() => {});
+      sendMessage(systemView.renderQueueFull()).catch(() => {});
     }
     return;
   }
 
-  if (text === "/briefing") {
+  // /briefing alltime = Opsi A (all-time block JUGA analisis-dalam) — exact-match
+  // subcommand dicek di kondisi yang sama (pola /config origin), default = Opsi B.
+  if (text === "/briefing" || text === "/briefing alltime") {
     try {
-      const briefing = await generateBriefing();
+      const briefing = await generateBriefing({ allTimeDeep: text === "/briefing alltime" });
       await sendAndPinBriefing(briefing);
     } catch (e) {
-      await sendMessage(`Error: ${e.message}`).catch(() => {});
+      await sendMessage(systemView.renderError(e.message)).catch(() => {});
     }
     return;
   }
@@ -3509,13 +2997,13 @@ async function telegramHandler(msg) {
     try {
       await sendHTML(await buildReportForArg(text.slice("/report".length)));
     } catch (e) {
-      await sendMessage(`Error: ${e.message}`).catch(() => {});
+      await sendMessage(systemView.renderError(e.message)).catch(() => {});
     }
     return;
   }
 
   if (text === "/help") {
-    await sendMessage(formatHelpText()).catch(() => {});
+    await sendMessage(systemView.renderHelp()).catch(() => {});
     return;
   }
 
@@ -3526,23 +3014,30 @@ async function telegramHandler(msg) {
     if (!arg) {
       const cur = getTrackStart();
       await sendMessage(cur
-        ? `📊 SOL tracker anchor: ${cur}\nGanti: /wallet trackstart YYYY-MM-DD · Hapus: /wallet trackstart off`
-        : `📊 SOL tracker anchor: belum diset.\nSet: /wallet trackstart YYYY-MM-DD (mis. ${new Date().toISOString().slice(0, 10)})`).catch(() => {});
+        ? [header(ICON.yield, "SOL tracker anchor", cur), tree([
+            "Ganti: /wallet trackstart YYYY-MM-DD",
+            "Hapus: /wallet trackstart off",
+          ])].join("\n")
+        : [header(ICON.yield, "SOL tracker anchor", "belum diset"), tree([
+            `Set: /wallet trackstart YYYY-MM-DD (mis. ${new Date().toISOString().slice(0, 10)})`,
+          ])].join("\n")).catch(() => {});
       return;
     }
     if (["off", "clear", "hapus", "reset"].includes(arg)) {
       setTrackStart(null);
-      await sendMessage("📊 SOL tracker anchor dihapus. /wallet pakai window 1D/7D/30D saja.").catch(() => {});
+      await sendMessage(`${ICON.yield} SOL tracker anchor dihapus — /wallet pakai window 1D/7D/30D saja.`).catch(() => {});
       return;
     }
     const res = setTrackStart(arg);
     await sendMessage(res.ok
-      ? `✅ SOL tracker anchor diset ke ${res.dateKey}. /wallet sekarang nampilin baris "SINCE ${res.dateKey}".`
-      : `❌ ${res.error}`).catch(() => {});
+      ? [header(ICON.ok, "SOL tracker anchor", `diset ke ${res.dateKey}`), tree([
+          `/wallet sekarang nampilin baris "SINCE ${res.dateKey}"`,
+        ])].join("\n")
+      : systemView.renderError(res.error)).catch(() => {});
     return;
   }
 
-  if (text === "/wallet" || text === "/status") {
+  if (text === "/status") {
     try {
       const [wallet, positions, orBalance, orCredits] = await Promise.all([
         getWalletBalances(),
@@ -3550,67 +3045,87 @@ async function telegramHandler(msg) {
         getOpenRouterBalance(),
         getOpenRouterCredits(),
       ]);
-      // Held rent across open positions → total tertahan + SOL bebas efektif.
+      // Held rent across open positions → total tertahan (info; SOL bebas tak dikurangi).
       let rentInfo = null;
       if (positions.total_positions > 0) {
         const rentMap = await getPositionsRentSol(positions.positions.map((p) => p.position)).catch(() => ({}));
         const vals = Object.values(rentMap);
-        rentInfo = {
-          totalRentSol: vals.reduce((s, r) => s + (r?.sol ?? 0), 0),
-          estimated: vals.some((r) => r?.estimated),
-        };
+        rentInfo = { totalRentSol: vals.reduce((s, r) => s + (r?.sol ?? 0), 0), estimated: vals.some((r) => r?.estimated) };
       }
-      let msg = formatWalletStatus(wallet, positions, rentInfo);
-      if (orCredits?.balance != null) {
-        // Actual purchased-credit balance — the number to watch for top-ups.
-        msg += `\n💳 OpenRouter saldo: $${orCredits.balance.toFixed(2)}`;
-        if (orBalance?.usageDaily != null) msg += ` | hari ini $${orBalance.usageDaily.toFixed(4)}`;
-        else if (orBalance?.usageMonthly != null) msg += ` | bln ini $${orBalance.usageMonthly.toFixed(2)}`;
-        if (orCredits.balance < 5) msg += `\n⚠️ Saldo OpenRouter menipis — pertimbangkan top up`;
-      } else if (orBalance) {
-        if (orBalance.remaining != null) {
-          msg += `\n💳 OpenRouter: $${orBalance.remaining.toFixed(2)} remaining`;
-          if (orBalance.usageMonthly != null) msg += ` | $${orBalance.usageMonthly.toFixed(2)} this month`;
-          else if (orBalance.usage != null) msg += ` | $${orBalance.usage.toFixed(4)} total spent`;
-        } else if (orBalance.usageDaily != null) {
-          msg += `\n💳 OpenRouter: $${orBalance.usageDaily.toFixed(4)} today | $${(orBalance.usageMonthly ?? 0).toFixed(2)} this month`;
-        } else if (orBalance.usage != null) {
-          msg += `\n💳 OpenRouter: $${orBalance.usage.toFixed(4)} total spent`;
-        }
-      }
-      if (text === "/wallet") {
-        // SOL balance growth tracker (calendar 1d/7d/30d) — /wallet only.
-        msg += `\n\n${formatSolTracker(wallet.sol)}`;
-      }
-      if (text === "/status") {
-        if (positions.total_positions) msg += `\n\nUse /positions for the numbered list.`;
-        const perf = getPerformanceSummary();
-        const { lessons } = listLessons({ limit: 10, full: true });
-        if (perf) {
-          const cur = config.management.solMode ? "◎" : "$";
-          const sign = perf.total_pnl_usd >= 0 ? "+" : "-";
-          const roiStr = perf.roi_pct != null ? ` (${perf.roi_pct >= 0 ? "+" : ""}${perf.roi_pct}%)` : "";
-          msg += `\n\n💰 All-time PnL: ${sign}${cur}${Math.abs(perf.total_pnl_usd)}${roiStr} over ${perf.total_positions_closed} closed`;
-          msg += `\n🧠 Learning: ${perf.win_rate_pct}% win | avg PnL ${perf.avg_pnl_pct >= 0 ? "+" : ""}${perf.avg_pnl_pct}%`;
-        }
-        const lastBad = lessons.filter(l => l.outcome === "bad" || l.outcome === "poor").slice(-1)[0];
-        const lastGood = lessons.filter(l => l.outcome === "good").slice(-1)[0];
-        if (lastBad) msg += `\n⚠️ ${condenseRule(lastBad.rule)}`;
-        if (lastGood) msg += `\n✅ ${condenseRule(lastGood.rule)}`;
-      }
-      // Realized-PnL & net-of-cost tracker (1d/7d/30d) — both /wallet and /status.
-      const pnlBlock = formatPnlTracker(getModePerformance(), { solPriceUsd: wallet?.sol_price ?? null });
-      if (pnlBlock) msg += `\n\n${pnlBlock}`;
-      msg += racikanScopeDisclosure();
-      await sendMessage(msg).catch(() => {});
+      const slotsRemaining = Math.max(1, config.risk.maxPositions - (positions?.total_positions ?? 0));
+      const { lessons } = listLessons({ limit: 10, full: true });
+      const lastBad = lessons.filter((l) => l.outcome === "bad" || l.outcome === "poor").slice(-1)[0];
+      const lastGood = lessons.filter((l) => l.outcome === "good").slice(-1)[0];
+      // Render delegated to views/status.js (Phase 3 🅴, FIX unit #12). Data fetch unchanged.
+      const vm = statusView.buildView({
+        cfg: config,
+        sol: wallet.sol, solUsd: wallet.sol_usd, solPrice: wallet.sol_price,
+        totalPositions: positions.total_positions, maxPositions: config.risk.maxPositions,
+        deployAmount: computeDeployAmount(wallet.sol, { slotsRemaining }),
+        gasReserve: config.management?.gasReserve ?? 0,
+        heldSol: rentInfo?.totalRentSol ?? 0, heldEst: rentInfo?.estimated ?? false,
+        dryRun: process.env.DRY_RUN === "true", hive: isHiveMindEnabled(),
+        orLines: buildOpenRouterLines(orBalance, orCredits),
+        perf: getPerformanceSummary(),
+        lastGoodRule: lastGood ? condenseRule(lastGood.rule) : null,
+        lastBadRule: lastBad ? condenseRule(lastBad.rule) : null,
+        pnlBlock: formatPnlTracker(getModePerformance(), { solPriceUsd: wallet?.sol_price ?? null }),
+        disclosure: racikanScopeDisclosure(),
+      });
+      await sendHTML(render(vm, "telegram"));
     } catch (e) {
-      await sendMessage(`Error: ${e.message}`).catch(() => {});
+      await sendMessage(systemView.renderError(e.message)).catch(() => {});
     }
     return;
   }
 
-  if (text === "/config" || text === "/config core") {
-    await sendMessage(text === "/config core" ? formatCoreConfig() : formatFullConfig()).catch(() => {});
+  if (text === "/wallet") {
+    try {
+      const [wallet, positions, orBalance, orCredits] = await Promise.all([
+        getWalletBalances(),
+        getMyPositions({ force: true }),
+        getOpenRouterBalance(),
+        getOpenRouterCredits(),
+      ]);
+      // Held rent across open positions → total tertahan (info; SOL bebas tak dikurangi).
+      let rentInfo = null;
+      if (positions.total_positions > 0) {
+        const rentMap = await getPositionsRentSol(positions.positions.map((p) => p.position)).catch(() => ({}));
+        const vals = Object.values(rentMap);
+        rentInfo = { totalRentSol: vals.reduce((s, r) => s + (r?.sol ?? 0), 0), estimated: vals.some((r) => r?.estimated) };
+      }
+      const slotsRemaining = Math.max(1, config.risk.maxPositions - (positions?.total_positions ?? 0));
+      // Render delegated to views/wallet.js (Phase 3 🅴). Data fetch unchanged.
+      const vm = walletView.buildView({
+        cfg: config,
+        sol: wallet.sol, solUsd: wallet.sol_usd, solPrice: wallet.sol_price,
+        totalPositions: positions.total_positions, maxPositions: config.risk.maxPositions,
+        deployAmount: computeDeployAmount(wallet.sol, { slotsRemaining }),
+        gasReserve: config.management?.gasReserve ?? 0,
+        heldSol: rentInfo?.totalRentSol ?? 0, heldEst: rentInfo?.estimated ?? false,
+        dryRun: process.env.DRY_RUN === "true", hive: isHiveMindEnabled(),
+        orLines: buildOpenRouterLines(orBalance, orCredits),
+        solTracker: formatSolTracker(wallet.sol),
+        pnlBlock: formatPnlTracker(getModePerformance(), { solPriceUsd: wallet?.sol_price ?? null }),
+        disclosure: racikanScopeDisclosure(),
+      });
+      await sendHTML(render(vm, "telegram"));
+    } catch (e) {
+      await sendMessage(systemView.renderError(e.message)).catch(() => {});
+    }
+    return;
+  }
+
+  if (text === "/config core") {
+    await sendMessage(formatCoreConfig()).catch(() => {});
+    return;
+  }
+  if (text === "/config origin") {
+    await sendMessage(formatFullConfig()).catch(() => {});
+    return;
+  }
+  if (text === "/config") {
+    await sendMessage(formatFunctionConfig()).catch(() => {});
     return;
   }
 
@@ -3624,42 +3139,13 @@ async function telegramHandler(msg) {
   if (text === "/positions") {
     try {
       const { positions, total_positions } = await getMyPositions({ force: true });
-      if (total_positions === 0) { await sendMessage("No open positions."); return; }
-      const cur = config.management.solMode ? "◎" : "$";
+      if (total_positions === 0) { await sendMessage(`${ICON.position} No open positions.`); return; }
+      // Data fetch unchanged; render delegated to views/ layer (Phase 2 🅴 pilot).
       const rentMap = await getPositionsRentSol(positions.map((p) => p.position)).catch(() => ({}));
-      const lines = [];
-      let totalRent = 0, anyRentEst = false;
-      positions.forEach((p, i) => {
-        const pnlVal = p.pnl_usd ?? 0;
-        const pnl = `${pnlVal >= 0 ? "+" : "-"}${cur}${Math.abs(pnlVal)}${p.pnl_pct != null ? ` (${p.pnl_pct >= 0 ? "+" : ""}${p.pnl_pct}%)` : ""}`;
-        const age = fmtAgeMin(p.age_minutes);
-        const state = p.in_range ? "✅ in-range" : `⚠️ OOR ${p.minutes_out_of_range ?? 0}m`;
-        const width = (Number.isFinite(p.lower_bin) && Number.isFinite(p.upper_bin)) ? `${p.upper_bin - p.lower_bin + 1} bins` : "? bins";
-        const rent = rentMap[p.position];
-        if (rent) { totalRent += rent.sol; if (rent.estimated) anyRentEst = true; }
-        const rentStr = rent ? ` · 🔒 ${rent.sol.toFixed(3)}◎${rent.estimated ? " (est)" : ""}` : "";
-        // Fee density so far: simple fees-earned / position-value (% of capital
-        // recovered as fees). NOT annualized — extrapolating a young position's
-        // short window to a year produces nonsense (a fresh pos reads 1000s of %).
-        // The aggregate /report carries the proper fee-APR (large, stable window).
-        const feesSoFar = (p.collected_fees_usd ?? 0) + (p.unclaimed_fees_usd ?? 0);
-        let feeDensStr = "";
-        if (Number.isFinite(p.total_value_usd) && p.total_value_usd > 0 && feesSoFar > 0) {
-          feeDensStr = ` · 💧 fee ${((feesSoFar / p.total_value_usd) * 100).toFixed(2)}%`;
-        }
-        lines.push(
-          `${i + 1}. ${p.pair}  ${state}`,
-          `   value ${cur}${p.total_value_usd ?? "?"} · PnL ${pnl} · fees ${cur}${p.unclaimed_fees_usd ?? "?"}`,
-          `   age ${age} · range ${width}${rentStr}${feeDensStr}`,
-        );
-      });
-      const footer = [
-        "━━━━━━━━━━━━━━━━━",
-        `🔒 Total tertahan ~${totalRent.toFixed(3)} SOL${anyRentEst ? " (sebagian est)" : ""} — refund saat close`,
-        "/close <n> · /pool <n> · /set <n> <note>",
-      ].join("\n");
-      await sendMessage(`📊 Open Positions (${total_positions})\n━━━━━━━━━━━━━━━━━\n${lines.join("\n")}\n${footer}`);
-    } catch (e) { await sendMessage(`Error: ${e.message}`).catch(() => {}); }
+      const solPrice = (await getSolMarketRegime())?.usdPrice || null;
+      const vm = positionsView.buildView(positions, config, rentMap, solPrice);
+      await sendHTML(render(vm, "telegram"));
+    } catch (e) { await sendMessage(systemView.renderError(e.message)).catch(() => {}); }
     return;
   }
 
@@ -3668,27 +3154,27 @@ async function telegramHandler(msg) {
     try {
       const idx = parseInt(poolMatch[1]) - 1;
       const { positions } = await getMyPositions({ force: true });
-      if (idx < 0 || idx >= positions.length) { await sendMessage("Invalid number. Use /positions first."); return; }
+      if (idx < 0 || idx >= positions.length) { await sendMessage(systemView.renderError("Invalid number. Use /positions first.")); return; }
       const pos = positions[idx];
-      const cur = config.management.solMode ? "◎" : "$";
       const tracked = (() => { try { return getTrackedPosition(pos.position); } catch { return null; } })();
       const rent = (await getPositionsRentSol([pos.position]).catch(() => ({})))[pos.position];
-
-      const lines = [
-        `${idx + 1}. ${pos.pair}`,
-        `Pool: ${pos.pool}`,
-        `Position: ${pos.position}`,
-        "── Range efficiency ──",
-        ...buildRangeEfficiencyLines(pos, tracked),
-        "── Value ──",
-        `PnL: ${pos.pnl_pct ?? "?"}% | fees: ${cur}${pos.unclaimed_fees_usd ?? "?"} | value ${cur}${pos.total_value_usd ?? "?"}`,
-        `Age: ${fmtAgeMin(pos.age_minutes)}`,
-      ];
-      if (rent) lines.push(`🔒 Tertahan (rent): ${rent.sol.toFixed(4)} SOL${rent.estimated ? " (estimasi)" : ""} — refund saat close`);
-      if (pos.instruction) lines.push(`Note: ${pos.instruction}`);
-      await sendMessage(lines.join("\n"));
+      // Render delegated to views/pool.js (Phase 3 🅴). Data fetch + range-eff calc unchanged.
+      const solPrice = (await getSolMarketRegime())?.usdPrice || null;
+      const vm = poolView.buildView({
+        cfg: config, idx, pair: pos.pair, inRange: !!pos.in_range,
+        poolAddr: pos.pool, positionAddr: pos.position,
+        pnlPct: pos.pnl_pct, pnlVal: pos.pnl_usd ?? 0,
+        value: pos.total_value_usd, fees: pos.unclaimed_fees_usd,
+        collectedFees: pos.collected_fees_usd, unclaimedFees: pos.unclaimed_fees_usd,
+        ageMin: pos.age_minutes,
+        heldSol: rent ? rent.sol : null, heldEst: rent ? rent.estimated : false,
+        note: pos.instruction || null,
+        rangeEffLines: buildRangeEfficiencyLines(pos, tracked),
+        solPrice,
+      });
+      await sendHTML(render(vm, "telegram"));
     } catch (e) {
-      await sendMessage(`Error: ${e.message}`).catch(() => {});
+      await sendMessage(systemView.renderError(e.message)).catch(() => {});
     }
     return;
   }
@@ -3698,38 +3184,53 @@ async function telegramHandler(msg) {
     try {
       const idx = parseInt(closeMatch[1]) - 1;
       const { positions } = await getMyPositions({ force: true });
-      if (idx < 0 || idx >= positions.length) { await sendMessage("Invalid number. Use /positions first."); return; }
+      if (idx < 0 || idx >= positions.length) { await sendMessage(systemView.renderError("Invalid number. Use /positions first.")); return; }
       const pos = positions[idx];
       await sendMessage(`Closing ${pos.pair}...`);
       const result = await closePosition({ position_address: pos.position });
       if (result.success) {
+        // N2 notifyClose TIDAK kebit utk /close manual (closePosition dipanggil langsung
+        // dari dlmm.js, bukan executeTool post-hook) → reply WAJIB bawa PnL/detail
+        // (governing #2). Tree-style; PnL ikut solMode (fmtMoneySigned).
+        const solMode = config.management.solMode;
         const closeTxs = result.close_txs?.length ? result.close_txs : result.txs;
-        const claimNote = result.claim_txs?.length ? `\nClaim txs: ${result.claim_txs.join(", ")}` : "";
-        await sendMessage(`✅ Closed ${pos.pair}\nPnL: ${config.management.solMode ? "◎" : "$"}${result.pnl_usd ?? "?"} | close txs: ${closeTxs?.join(", ") || "n/a"}${claimNote}`);
+        const lines = [
+          result.pnl_usd != null
+            ? `PnL: ${fmtMoneySigned(result.pnl_usd, solMode)}${result.pnl_pct != null ? ` (${fmtPctSigned(result.pnl_pct)})` : ""}`
+            : null,
+          `close txs: ${closeTxs?.join(", ") || "n/a"}`,
+          result.claim_txs?.length ? `claim txs: ${result.claim_txs.join(", ")}` : null,
+        ];
+        await sendMessage([header(ICON.closed, "Closed", pos.pair), SEP, tree(lines)].join("\n"));
       } else {
-        await sendMessage(`❌ Close failed: ${JSON.stringify(result)}`);
+        await sendMessage(`${ICON.fail} Close gagal — ${pos.pair}: ${result.error || JSON.stringify(result)}`);
       }
-    } catch (e) { await sendMessage(`Error: ${e.message}`).catch(() => {}); }
+    } catch (e) { await sendMessage(systemView.renderError(e.message)).catch(() => {}); }
     return;
   }
 
   if (text === "/closeall") {
     try {
       const { positions } = await getMyPositions({ force: true });
-      if (!positions.length) { await sendMessage("No open positions."); return; }
+      if (!positions.length) { await sendMessage(`${ICON.position} No open positions.`); return; }
       await sendMessage(`Closing ${positions.length} position(s)...`);
+      // N2 notifyClose TIDAK kebit per-posisi (direct close) → ringkasan WAJIB bawa
+      // hasil + PnL per posisi (governing #2). PnL ikut solMode.
+      const solMode = config.management.solMode;
       const results = [];
       for (const pos of positions) {
         try {
           const result = await closePosition({ position_address: pos.position });
-          results.push(`${pos.pair}: ${result.success ? "closed" : `failed (${result.error || "unknown"})`}`);
+          results.push(result.success
+            ? `${pos.pair}: ${ICON.ok} closed${result.pnl_usd != null ? ` · ${fmtMoneySigned(result.pnl_usd, solMode)}` : ""}`
+            : `${pos.pair}: ${ICON.fail} failed (${result.error || "unknown"})`);
         } catch (error) {
-          results.push(`${pos.pair}: failed (${error.message})`);
+          results.push(`${pos.pair}: ${ICON.fail} failed (${error.message})`);
         }
       }
-      await sendMessage(`Close-all finished.\n\n${results.join("\n")}`).catch(() => {});
+      await sendMessage([header(ICON.closed, "Close-all", `${positions.length} posisi`), SEP, tree(results)].join("\n")).catch(() => {});
     } catch (e) {
-      await sendMessage(`Error: ${e.message}`).catch(() => {});
+      await sendMessage(systemView.renderError(e.message)).catch(() => {});
     }
     return;
   }
@@ -3740,11 +3241,11 @@ async function telegramHandler(msg) {
       const idx = parseInt(setMatch[1]) - 1;
       const note = setMatch[2].trim();
       const { positions } = await getMyPositions({ force: true });
-      if (idx < 0 || idx >= positions.length) { await sendMessage("Invalid number. Use /positions first."); return; }
+      if (idx < 0 || idx >= positions.length) { await sendMessage(systemView.renderError("Invalid number. Use /positions first.")); return; }
       const pos = positions[idx];
       setPositionInstruction(pos.position, note);
-      await sendMessage(`✅ Note set for ${pos.pair}:\n"${note}"`);
-    } catch (e) { await sendMessage(`Error: ${e.message}`).catch(() => {}); }
+      await sendMessage([header(ICON.ok, "Note set", pos.pair), tree([`"${note}"`])].join("\n"));
+    } catch (e) { await sendMessage(systemView.renderError(e.message)).catch(() => {}); }
     return;
   }
 
@@ -3753,17 +3254,19 @@ async function telegramHandler(msg) {
     try {
       const key = setCfgMatch[1];
       const value = parseConfigValue(setCfgMatch[2]);
+      const oldVal = getConfigValue(key); // baca SEBELUM mutasi (utk diff old→new)
       const result = await executeTool("update_config", {
         changes: { [key]: value },
         reason: "Telegram slash command /setcfg",
       });
       if (!result?.success) {
-        await sendMessage(`Config update failed.\nUnknown: ${(result?.unknown || []).join(", ") || "none"}`).catch(() => {});
+        await sendMessage(`${ICON.fail} Config update failed.\nUnknown: ${(result?.unknown || []).join(", ") || "none"}`).catch(() => {});
         return;
       }
-      await sendMessage(`✅ Updated ${key} = ${JSON.stringify(value)}`).catch(() => {});
+      // Ack styled (reuse buildConfigDiff — gaya sama gate konfirmasi): "key: old → new".
+      await sendMessage([header(ICON.ok, "Config updated"), buildConfigDiff([{ key, current: oldVal, val: value }])].join("\n")).catch(() => {});
     } catch (e) {
-      await sendMessage(`Error: ${e.message}`).catch(() => {});
+      await sendMessage(systemView.renderError(e.message)).catch(() => {});
     }
     return;
   }
@@ -3772,7 +3275,7 @@ async function telegramHandler(msg) {
     try {
       await sendMessage(await runDeterministicScreen(5)).catch(() => {});
     } catch (e) {
-      await sendMessage(`Error: ${e.message}`).catch(() => {});
+      await sendMessage(systemView.renderError(e.message)).catch(() => {});
     }
     return;
   }
@@ -3786,20 +3289,21 @@ async function telegramHandler(msg) {
   if (deployMatch) {
     try {
       const idx = parseInt(deployMatch[1]) - 1;
-      const { candidate, result, deployAmount, binsBelow } = await deployLatestCandidate(idx);
-      const coverage = result.range_coverage
-        ? `Range: ${fmtPct(result.range_coverage.downside_pct)} downside | ${fmtPct(result.range_coverage.upside_pct)} upside`
-        : `Strategy: ${config.strategy.strategy} | binsBelow: ${binsBelow}`;
-      await sendMessage([
-        `✅ Deployed ${candidate.name}`,
-        `Pool: ${candidate.pool}`,
-        `Amount: ${deployAmount} SOL`,
-        coverage,
-        `Position: ${result.position || "n/a"}`,
-        result.txs?.length ? `Tx: ${result.txs[0]}` : null,
-      ].filter(Boolean).join("\n")).catch(() => {});
+      const { candidate, result, deployAmount } = await deployLatestCandidate(idx);
+      // Mirror executor.js:783 — N1 notifyDeploy kebit hanya saat success (incl dry-run).
+      const ok = result?.success !== false && !result?.error;
+      if (ok) {
+        // Sukses → N1 (executor.js:797) sudah kirim detail penuh (amount/range/cover/
+        // bin/tx) → reply cukup ack pendek, hindari pesan dobel (JG-5).
+        await sendMessage(`${ICON.ok} Deploy ${candidate.name} terkirim — ${deployAmount} SOL.`).catch(() => {});
+      } else {
+        // Gagal → N1 TIDAK kebit → reply WAJIB bawa error (governing #2, anti detail-hilang).
+        await sendMessage(`${ICON.fail} Deploy gagal — ${candidate.name}: ${result?.error || JSON.stringify(result)}`).catch(() => {});
+      }
     } catch (e) {
-      await sendMessage(`Error: ${e.message}`).catch(() => {});
+      // JG-3 lone-no-deploy: render gaya cycle (buildLoneNoDeploy), bukan error mentah.
+      if (e?.loneNoDeploy) await sendMessage(buildLoneNoDeploy(e.loneNoDeploy)).catch(() => {});
+      else await sendMessage(systemView.renderError(e.message)).catch(() => {});
     }
     return;
   }
@@ -3807,7 +3311,7 @@ async function telegramHandler(msg) {
   if (text === "/pause") {
     stopCronJobs();
     cronStarted = false;
-    await sendMessage("⏸ Paused autonomous cycles. Telegram control still works. Use /resume to start again.").catch(() => {});
+    await sendMessage(systemView.renderPaused()).catch(() => {});
     return;
   }
 
@@ -3817,9 +3321,9 @@ async function telegramHandler(msg) {
       timers.managementLastRun = Date.now();
       timers.screeningLastRun = Date.now();
       startCronJobs();
-      await sendMessage("▶️ Autonomous cycles resumed.").catch(() => {});
+      await sendMessage(systemView.renderResumed()).catch(() => {});
     } else {
-      await sendMessage("Autonomous cycles are already running.").catch(() => {});
+      await sendMessage(systemView.renderAlreadyRunning()).catch(() => {});
     }
     return;
   }
@@ -3829,7 +3333,7 @@ async function telegramHandler(msg) {
       const enabled = isHiveMindEnabled();
       const agentId = ensureAgentId();
       if (!enabled) {
-        await sendMessage(`HiveMind: disabled\nAgent ID: ${agentId}\nSet hiveMindApiKey to connect.`).catch(() => {});
+        await sendMessage(systemView.renderHive({ enabled: false, agentId })).catch(() => {});
         return;
       }
       const isManualPull = text === "/hive pull";
@@ -3839,18 +3343,12 @@ async function telegramHandler(msg) {
         (pullMode === "auto" || isManualPull) ? pullHiveMindLessons(12) : Promise.resolve(null),
         (pullMode === "auto" || isManualPull) ? pullHiveMindPresets() : Promise.resolve(null),
       ]);
-      await sendMessage([
-        "HiveMind: enabled",
-        `Agent ID: ${agentId}`,
-        `URL: ${config.hiveMind.url}`,
-        `Pull mode: ${pullMode}`,
-        `Register: ${registerResult ? "ok" : "warn"}`,
-        `Shared lessons: ${Array.isArray(lessons) ? lessons.length : (pullMode === "manual" ? "manual" : 0)}`,
-        `Presets: ${Array.isArray(presets) ? presets.length : (pullMode === "manual" ? "manual" : 0)}`,
-        isManualPull ? "Manual pull: completed" : null,
-      ].join("\n")).catch(() => {});
+      await sendMessage(systemView.renderHive({
+        enabled: true, agentId, url: config.hiveMind.url, pullMode,
+        register: registerResult, lessons, presets, manualPull: isManualPull,
+      })).catch(() => {});
     } catch (e) {
-      await sendMessage(`HiveMind error: ${e.message}`).catch(() => {});
+      await sendMessage(systemView.renderError(e.message, "HiveMind")).catch(() => {});
     }
     return;
   }
@@ -3879,7 +3377,7 @@ async function telegramHandler(msg) {
     else await sendMessage(stripThink(content));
   } catch (e) {
     if (liveMessage) await liveMessage.fail(e.message).catch(() => {});
-    else await sendMessage(`Error: ${e.message}`).catch(() => {});
+    else await sendMessage(systemView.renderError(e.message)).catch(() => {});
   } finally {
     busy = false;
     refreshPrompt();
@@ -3985,7 +3483,7 @@ Commands:
   auto           Let the agent pick and deploy automatically
   /status        Refresh wallet + positions
   /candidates    Refresh top pool list
-  /briefing      Show morning briefing (last 24h)
+  /briefing      Show morning briefing (last 24h) — /briefing alltime = all-time juga analisis-dalam
   /report        Trade report — /report [all|setups|<racikan>|week|month|day]
   /guide         Panduan setting (TOC) — /guide <no|katakunci|all>
   /learn         Study top LPers from the best current pool and save lessons
@@ -4049,25 +3547,47 @@ Commands:
 
     if (input === "/status") {
       await runBusy(async () => {
-        const [wallet, positions] = await Promise.all([getWalletBalances(), getMyPositions({ force: true })]);
-        console.log(`\nWallet: ${wallet.sol} SOL  ($${wallet.sol_usd})`);
-        console.log(`Positions: ${positions.total_positions}`);
-        for (const p of positions.positions) {
-          const status = p.in_range ? "in-range ✓" : "OUT OF RANGE ⚠";
-          console.log(`  ${p.pair.padEnd(16)} ${status}  fees: ${config.management.solMode ? "◎" : "$"}${p.unclaimed_fees_usd}`);
+        // JG-6: REPL == TG /status. Feed data SAMA persis dgn telegramHandler /status
+        // (wallet/slot/rent/OpenRouter/all-time/learning/pnl), render target "plain".
+        const [wallet, positions, orBalance, orCredits] = await Promise.all([
+          getWalletBalances(),
+          getMyPositions({ force: true }),
+          getOpenRouterBalance(),
+          getOpenRouterCredits(),
+        ]);
+        let rentInfo = null;
+        if (positions.total_positions > 0) {
+          const rentMap = await getPositionsRentSol(positions.positions.map((p) => p.position)).catch(() => ({}));
+          const vals = Object.values(rentMap);
+          rentInfo = { totalRentSol: vals.reduce((s, r) => s + (r?.sol ?? 0), 0), estimated: vals.some((r) => r?.estimated) };
         }
-        console.log();
-        const pnlBlock = formatPnlTracker(getModePerformance(), { solPriceUsd: wallet?.sol_price ?? null });
-        if (pnlBlock) console.log(`${pnlBlock}\n`);
-        const disc = racikanScopeDisclosure();
-        if (disc) console.log(`${disc.trim()}\n`);
+        const slotsRemaining = Math.max(1, config.risk.maxPositions - (positions?.total_positions ?? 0));
+        const { lessons } = listLessons({ limit: 10, full: true });
+        const lastBad = lessons.filter((l) => l.outcome === "bad" || l.outcome === "poor").slice(-1)[0];
+        const lastGood = lessons.filter((l) => l.outcome === "good").slice(-1)[0];
+        const vm = statusView.buildView({
+          cfg: config,
+          sol: wallet.sol, solUsd: wallet.sol_usd, solPrice: wallet.sol_price,
+          totalPositions: positions.total_positions, maxPositions: config.risk.maxPositions,
+          deployAmount: computeDeployAmount(wallet.sol, { slotsRemaining }),
+          gasReserve: config.management?.gasReserve ?? 0,
+          heldSol: rentInfo?.totalRentSol ?? 0, heldEst: rentInfo?.estimated ?? false,
+          dryRun: process.env.DRY_RUN === "true", hive: isHiveMindEnabled(),
+          orLines: buildOpenRouterLines(orBalance, orCredits),
+          perf: getPerformanceSummary(),
+          lastGoodRule: lastGood ? condenseRule(lastGood.rule) : null,
+          lastBadRule: lastBad ? condenseRule(lastBad.rule) : null,
+          pnlBlock: formatPnlTracker(getModePerformance(), { solPriceUsd: wallet?.sol_price ?? null }),
+          disclosure: racikanScopeDisclosure(),
+        });
+        console.log(`\n${render(vm, "plain")}\n`);
       });
       return;
     }
 
-    if (input === "/briefing") {
+    if (input === "/briefing" || input === "/briefing alltime") {
       await runBusy(async () => {
-        const briefing = await generateBriefing();
+        const briefing = await generateBriefing({ allTimeDeep: input === "/briefing alltime" });
         console.log(`\n${briefing.replace(/<[^>]*>/g, "")}\n`);
       });
       return;

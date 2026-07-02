@@ -17,6 +17,7 @@
 import fs from "fs";
 import { log } from "./logger.js";
 import { repoPath } from "./repo-root.js";
+import { renderSolTracker } from "./views/trackers.js";
 
 const HISTORY_FILE = repoPath("sol-balance-history.json");
 const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
@@ -157,47 +158,29 @@ export function getSolTracker(currentSol) {
   });
 }
 
-function fmtSol(n) { return n.toFixed(3); }
-function signedSol(n) { return `${n >= 0 ? "+" : ""}${n.toFixed(3)}`; }
-function signedPct(n) { return n == null ? "n/a" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`; }
-function dot(n) { return n > 0 ? "🟢" : n < 0 ? "🔴" : "⚪"; }
-
 /**
- * Telegram (plain-text) SOL balance tracker block. Compact one-line-per-window
- * layout: the shared "Now" balance sits in the header, then each window is a
- * single row "<label> <dot> <Δsol> (<Δ%>) ← <start bal> @ <start day>".
+ * Telegram SOL balance tracker block (tree-style; render di views/trackers.js).
+ * Di sini cuma COMPUTE (getSolTracker + sinceStartRow) → map ke display-data
+ * (startKey jadi label "Jun 22"); rakitan string tree-style ada di renderSolTracker.
  */
 export function formatSolTracker(currentSol) {
-  const rows = getSolTracker(currentSol);
-  const now = Number.isFinite(currentSol) ? fmtSol(currentSol) : "?";
-  const lines = [`📊 SOL Tracker · Now ${now} SOL`, "━━━━━━━━━━━━━━━━━"];
-  for (const r of rows) {
-    const label = r.label.padEnd(3);
-    if (r.startBal == null) {
-      lines.push(`${label} ⚪ (blm ada baseline)`);
-      continue;
-    }
-    const star = r.partial ? " *" : "";
-    lines.push(
-      `${label} ${dot(r.deltaSol)} ${signedSol(r.deltaSol)} SOL (${signedPct(r.deltaPct)}) ← ${fmtSol(r.startBal)} @ ${labelFromKey(r.startKey)}${star}`,
-    );
-  }
-  // User-anchored "SINCE <date>" row, when set via /wallet trackstart.
+  const rows = getSolTracker(currentSol).map((r) => ({
+    label: r.label,
+    startBal: r.startBal,
+    deltaSol: r.deltaSol,
+    deltaPct: r.deltaPct,
+    startLabel: r.startBal == null ? null : labelFromKey(r.startKey),
+    partial: r.partial,
+  }));
+  // User-anchored "sejak <date>" row, when set via /wallet trackstart.
   const ss = sinceStartRow(currentSol);
-  if (ss) {
-    if (ss.startBal == null) {
-      lines.push(`SINCE ${labelFromKey(ss.anchor)} ⚪ (blm ada baseline)`);
-    } else {
-      const star = ss.partial ? " *" : "";
-      lines.push(`SINCE ${labelFromKey(ss.startKey)} ${dot(ss.deltaSol)} ${signedSol(ss.deltaSol)} SOL (${signedPct(ss.deltaPct)}) ← ${fmtSol(ss.startBal)}${star}`);
-    }
-  }
-  if (rows.some((r) => r.partial) || ss?.partial) {
-    lines.push("* window/anchor blm punya baseline pas — pakai hari terlama tercatat");
-  }
-  // Honesty note: this tracks raw liquid SOL, not PnL — deposits/withdrawals
-  // and capital parked in positions all move it. Use /report for true PnL.
-  lines.push("ℹ️ saldo SOL mentah (termasuk deposit/tarik & modal di posisi) — buat PnL murni pakai /report");
-  if (!ss) lines.push("💡 set anchor: /wallet trackstart YYYY-MM-DD");
-  return lines.join("\n");
+  const since = ss ? {
+    anchorLabel: labelFromKey(ss.anchor),
+    startLabel: ss.startBal == null ? null : labelFromKey(ss.startKey),
+    startBal: ss.startBal,
+    deltaSol: ss.deltaSol,
+    deltaPct: ss.deltaPct,
+    partial: ss.partial,
+  } : null;
+  return renderSolTracker({ currentSol, rows, since });
 }

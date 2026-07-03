@@ -274,7 +274,7 @@ export const config = {
     // Naruh sebagian kecil modal sbg TOKEN di bin ATAS harga → nangkep fee & apresiasi
     // saat harga pump. OFF = single-side SOL seperti biasa (nol perubahan perilaku).
     dualSideEnabled:   u.dualSideEnabled   ?? false,  // gerbang utama
-    dualSideTokenPct:  u.dualSideTokenPct  ?? 0.10,   // porsi modal ke sisi token (0.10 = 10%)
+    dualSideTokenPct:  u.dualSideTokenPct  ?? 10,     // PERSEN (10 = 10%); di-/100 saat dipakai
     dualSideUpsidePct: u.dualSideUpsidePct ?? 15,     // seberapa jauh (%) di atas harga token dipasang
     dualSideStrategy:  u.dualSideStrategy  ?? "bid_ask", // "spot" | "bid_ask" bentuk sebaran atas
   },

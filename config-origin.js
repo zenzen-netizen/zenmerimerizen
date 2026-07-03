@@ -55,7 +55,7 @@ export const ORIGIN_SECTIONS = [
         id: "dev-strategy",
         title: "Strategy & Bins",
         desc: "Bentuk sebaran modal + lebar range (bin).",
-        keys: ["strategy", "minBinsBelow", "maxBinsBelow", "defaultBinsBelow", "dualSideEnabled"],
+        keys: ["strategy", "minBinsBelow", "maxBinsBelow", "defaultBinsBelow", "dualSideEnabled", "dualSideTokenPct", "dualSideUpsidePct"],
       },
       {
         id: "dev-schedule",
@@ -300,7 +300,7 @@ export const KEY_SUBCLUSTER = {
   repeatDeployCooldownMinFeeEarnedPct: "redeploy-cd",
   solMode: "display",
   // dev-strategy
-  strategy: "strategy", minBinsBelow: "bins", maxBinsBelow: "bins", defaultBinsBelow: "bins", dualSideEnabled: "strategy",
+  strategy: "strategy", minBinsBelow: "bins", maxBinsBelow: "bins", defaultBinsBelow: "bins", dualSideEnabled: "strategy", dualSideTokenPct: "strategy", dualSideUpsidePct: "strategy",
   // dev-schedule
   managementIntervalMin: "schedule", screeningIntervalMin: "schedule", healthCheckIntervalMin: "schedule",
   // dev-llm
@@ -485,7 +485,7 @@ export const FUNCTION_GROUPS = [
   {
     id: "strategy",
     emoji: "📐", title: "Strategy & Range",
-    keys: ["strategy", "minBinsBelow", "maxBinsBelow", "defaultBinsBelow", "strategyLock", "dualSideEnabled"],
+    keys: ["strategy", "minBinsBelow", "maxBinsBelow", "defaultBinsBelow", "strategyLock", "dualSideEnabled", "dualSideTokenPct", "dualSideUpsidePct"],
   },
   {
     id: "indik",

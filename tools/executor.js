@@ -399,6 +399,8 @@ const toolMap = {
       strategy:     ["strategy", "strategy"],
       strategyLock: ["strategy", "strategyLock"],
       dualSideEnabled: ["strategy", "dualSideEnabled"],
+      dualSideTokenPct: ["strategy", "dualSideTokenPct"],
+      dualSideUpsidePct: ["strategy", "dualSideUpsidePct"],
       binsBelow:    ["strategy", "maxBinsBelow", ["maxBinsBelow"]],
       minBinsBelow: ["strategy", "minBinsBelow"],
       maxBinsBelow: ["strategy", "maxBinsBelow"],

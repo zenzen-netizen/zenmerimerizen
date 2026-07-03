@@ -811,6 +811,28 @@ Setiap siklus, kode (`getDeterministicCloseRule()`, bukan LLM) ngecek posisi **u
 
 ---
 
+### `dualSideTokenPct`
+| | |
+|---|---|
+| **Nilai sekarang** | `10` |
+| **Default** | `10` |
+| **Format** | Angka desimal (%) |
+| **Opsi** | `0.1` – `50` |
+| **Penjelasan** | **Hanya aktif saat `dualSideEnabled=true`**. Berapa persen dari modal SOL yang dialokasikan ke kaki quote (token). Contoh: 10 = 10% SOL dipakai beli token, 90% sisanya tetap di kaki SOL. Lebih kecil = lebih aman (mayoritas tetap SOL), lebih besar = lebih banyak token (swap lebih fleksibel tapi exposure lebih tinggi) |
+
+---
+
+### `dualSideUpsidePct`
+| | |
+|---|---|
+| **Nilai sekarang** | `15` |
+| **Default** | `15` |
+| **Format** | Angka bulat (%) |
+| **Opsi** | `0` – `100` |
+| **Penjelasan** | **Hanya aktif saat `dualSideEnabled=true`**. Range atas berapa persen di atas harga aktif untuk kaki quote. Contoh: 15 = kaki token tersebar sampai +15% di atas harga sekarang. Lebih kecil = range sempit (cepat OOR kalau pump), lebih besar = range lebar (tahan pump lebih lama, tapi modal token lebih tipis per bin) |
+
+---
+
 ---
 
 # GRUP 10 — JADWAL BOT

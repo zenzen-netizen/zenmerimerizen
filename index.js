@@ -1904,6 +1904,8 @@ function buildConfigRowMap() {
     // ── Strategy+ (zen) ──
     strategyLock: ["strategyLock", fmt(c.strategy.strategyLock ?? "default")],
     dualSideEnabled: ["dualSideEnabled", fmt(c.strategy.dualSideEnabled)],
+    dualSideTokenPct: ["dualSideTokenPct", fmt(c.strategy.dualSideTokenPct)],
+    dualSideUpsidePct: ["dualSideUpsidePct", fmt(c.strategy.dualSideUpsidePct)],
 
     // ── Schedule+ (zen) ──
     adaptiveScreening: ["adaptiveScreening", fmt(c.schedule.adaptiveScreening)],
@@ -2410,6 +2412,8 @@ const MENU_CONTROLS = {
   },
   // 🧩 zen-strategy dual-side toggle
   dualSideEnabled: { toggle: ["dualSideEnabled", "Dual-side deploy (swap-flex)"] },
+  dualSideTokenPct: { input: ["dualSideTokenPct", "Token leg %", { digits: 1 }] },
+  dualSideUpsidePct: { input: ["dualSideUpsidePct", "Upside range %", { digits: 0 }] },
   // 🧩 zen-schedule
   adaptiveScreening: { toggle: ["adaptiveScreening", "Adaptive screening"] },
   maxScreeningIntervalMin: { input: ["maxScreeningIntervalMin", "Screen interval — ceil (min)"] },

@@ -746,7 +746,7 @@ export async function deployPosition({
   let dualSideTokenPct = 0;
   if (config.strategy.dualSideEnabled && isSingleSidedSol && finalAmountY > 0) {
     dualSide = true;
-    dualSideTokenPct = Math.max(0, Math.min(0.5, Number(config.strategy.dualSideTokenPct ?? 0.10)));
+    dualSideTokenPct = Math.max(0, Math.min(50, Number(config.strategy.dualSideTokenPct ?? 10))) / 100;
     const upPct = Math.max(0, Number(config.strategy.dualSideUpsidePct ?? 15));
     const upperTargetPrice = activePrice * (1 + upPct / 100);
     const upperBinId = getBinIdFromPrice(upperTargetPrice, actualBinStep, false);

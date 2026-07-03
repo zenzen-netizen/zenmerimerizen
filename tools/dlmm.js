@@ -29,7 +29,7 @@ import {
 import { recordPerformance } from "../lessons.js";
 import { estimateGasSol } from "../reports.js";
 import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
-import { normalizeMint, getWalletBalances } from "./wallet.js";
+import { normalizeMint, getWalletBalances, swapToken } from "./wallet.js";
 import {
   isPaperMode,
   makePaperPositionId,
@@ -725,8 +725,8 @@ export async function deployPosition({
     amount_y == null && amount_sol == null
       ? computeDeployAmount((await getWalletBalances()).sol)
       : 0;
-  const finalAmountY = Number(amount_y ?? amount_sol ?? fallbackAmountY);
-  const finalAmountX = Number(amount_x ?? 0);
+  let finalAmountY = Number(amount_y ?? amount_sol ?? fallbackAmountY);
+  let finalAmountX = Number(amount_x ?? 0);
   if (!Number.isFinite(finalAmountY) || !Number.isFinite(finalAmountX) || finalAmountY < 0 || finalAmountX < 0) {
     throw new Error("Invalid deploy amount: amount_x and amount_y must be valid non-negative numbers.");
   }
@@ -914,6 +914,22 @@ export async function deployPosition({
   // Read base fee directly from pool — baseFactor * binStep / 10^6 gives fee in %
   const baseFactor = pool.lbPair.parameters?.baseFactor ?? 0;
   const actualBaseFee = base_fee ?? (baseFactor > 0 ? parseFloat((baseFactor * actualBinStep / 1e6 * 100).toFixed(4)) : null);
+
+  // ─── Dual-side (E1) pre-swap (Cara B, lokal): tukar porsi token dari SOL ───
+  let dualSideSwapped = false;
+  if (dualSide && dualSideTokenPct > 0) {
+    const swapSol = finalAmountY * dualSideTokenPct;
+    const dsBaseMint = pool.lbPair.tokenXMint.toString();
+    const dsSwap = await swapToken({ input_mint: config.tokens.SOL, output_mint: dsBaseMint, amount: swapSol });
+    const dsTokenOut = Number(dsSwap?.amount_out ?? 0);
+    if (!Number.isFinite(dsTokenOut) || dsTokenOut <= 0) {
+      throw new Error(`Dual-side pre-swap gagal / 0 token diterima: ${JSON.stringify(dsSwap).slice(0, 160)}`);
+    }
+    finalAmountX = dsTokenOut;
+    finalAmountY = finalAmountY - swapSol;
+    dualSideSwapped = true;
+    log("deploy", `Dual-side pre-swap: ${swapSol} SOL → ${dsTokenOut} token (sisi atas)`);
+  }
 
   const totalYLamports = new BN(Math.floor(finalAmountY * 1e9));
   // For X, we assume it's also 9 decimals for now, or we'd need to fetch mint decimals.
@@ -1240,6 +1256,18 @@ export async function deployPosition({
         log("deploy_error", `Tracked orphan position ${orphanAddr} (create succeeded, liquidity-add failed) for cleanup`);
       } catch (trackErr) {
         log("deploy_error", `Failed to track orphan position for cleanup: ${trackErr.message}`);
+      }
+    }
+
+    // ─── Dual-side (E1) cleanup: pre-swap sukses TAPI deploy gagal → token balik ke SOL ───
+    if (dualSideSwapped && finalAmountX > 0) {
+      try {
+        const dsBaseMint = pool.lbPair.tokenXMint.toString();
+        log("deploy_warn", `Dual-side deploy gagal — swap ${finalAmountX} token balik ke SOL`);
+        await swapToken({ input_mint: dsBaseMint, output_mint: config.tokens.SOL, amount: finalAmountX });
+        log("deploy_warn", `Dual-side cleanup selesai — token balik ke SOL`);
+      } catch (dsCleanupErr) {
+        log("deploy_error", `⚠️ Dual-side cleanup GAGAL — token mungkin nyangkut, owner swap manual: ${dsCleanupErr.message}`);
       }
     }
     return { success: false, error: error.message };

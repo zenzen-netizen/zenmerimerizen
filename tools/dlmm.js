@@ -921,10 +921,16 @@ export async function deployPosition({
     const swapSol = finalAmountY * dualSideTokenPct;
     const dsBaseMint = pool.lbPair.tokenXMint.toString();
     const dsSwap = await swapToken({ input_mint: config.tokens.SOL, output_mint: dsBaseMint, amount: swapSol });
-    const dsTokenOut = Number(dsSwap?.amount_out ?? 0);
-    if (!Number.isFinite(dsTokenOut) || dsTokenOut <= 0) {
+    const dsTokenOutRaw = Number(dsSwap?.amount_out ?? 0);
+    if (!dsSwap?.success || !Number.isFinite(dsTokenOutRaw) || dsTokenOutRaw <= 0) {
       throw new Error(`Dual-side pre-swap gagal / 0 token diterima: ${JSON.stringify(dsSwap).slice(0, 160)}`);
     }
+    // amount_out dari swapToken() adalah RAW base units (mis. Jupiter outputAmountResult) —
+    // konversi ke human-readable dulu, karena finalAmountX & totalXLamports di bawah (dan
+    // cleanup di catch) mengasumsikan amount human-readable (sama seperti amount_y/amount_sol).
+    const dsMintInfo = await getConnection().getParsedAccountInfo(new PublicKey(dsBaseMint));
+    const dsDecimals = dsMintInfo.value?.data?.parsed?.info?.decimals ?? 9;
+    const dsTokenOut = dsTokenOutRaw / Math.pow(10, dsDecimals);
     finalAmountX = dsTokenOut;
     finalAmountY = finalAmountY - swapSol;
     dualSideSwapped = true;
@@ -1264,8 +1270,12 @@ export async function deployPosition({
       try {
         const dsBaseMint = pool.lbPair.tokenXMint.toString();
         log("deploy_warn", `Dual-side deploy gagal — swap ${finalAmountX} token balik ke SOL`);
-        await swapToken({ input_mint: dsBaseMint, output_mint: config.tokens.SOL, amount: finalAmountX });
-        log("deploy_warn", `Dual-side cleanup selesai — token balik ke SOL`);
+        const dsBack = await swapToken({ input_mint: dsBaseMint, output_mint: config.tokens.SOL, amount: finalAmountX });
+        if (dsBack?.success) {
+          log("deploy_warn", `Dual-side cleanup selesai — token balik ke SOL`);
+        } else {
+          log("deploy_error", `⚠️ Dual-side cleanup GAGAL — token nyangkut, owner swap manual: ${dsBack?.error ?? 'unknown'}`);
+        }
       } catch (dsCleanupErr) {
         log("deploy_error", `⚠️ Dual-side cleanup GAGAL — token mungkin nyangkut, owner swap manual: ${dsCleanupErr.message}`);
       }

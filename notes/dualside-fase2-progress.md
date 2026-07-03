@@ -8,11 +8,34 @@ sesi ini identik commit 83d453f (state OLD, pre-transform).
 [x] 2. Sisipkan transform + gate 2 guard (1 str-replace)
 [x] 3. node --check dlmm.js — SYNTAX OK
 [x] 4. Verifikasi MATEMATIKA bins (skrip murni, NOL deploy) — binStep 50→28, 100→14, 125→11 bins_above @upside 15% (sesuai harapan, magnitude wajar)
-[ ] 5. git diff --stat + commit
+[x] 5. git diff --stat + commit — commit edab7ae (tools/dlmm.js + notes/, scope bersih)
 
 Aturan sesi ini: DILARANG panggil deployPosition/getMyPositions/apa pun yg
 nyentuh wallet/network — verifikasi CUMA lewat hitung bins terpisah (pelajaran
 dari insiden di bawah).
+
+---
+
+# FASE 2-LENGKAP — lengkapi 3 titik maxBin (2026-07-03, sesi lanjutan)
+
+Transform bentuk dari FASE 2 (commit edab7ae) sudah menghitung `activeBinsAbove`
+dgn benar saat `dualSide` ON, TAPI 3 titik konstruksi range masih cuma cek
+`isSingleSidedSol` (bukan `dualSide`) jadi tetap collapse ke active bin —
+gap yg sudah ditandai di arsip insiden di bawah. Sesi ini menutup gap itu.
+
+[x] 0. (kondisional) Pasang blok transform kalau belum ada — SKIP, `let dualSide = false` sudah ada dari sesi lalu (line 745)
+[x] 1. Verifikasi branch (experimental) + node --check baseline
+[x] 2. Fix titik #1 — paper maxBin (dlmm.js line 800): `pMaxBinId = isSingleSidedSol ? ... ` → `(isSingleSidedSol && !dualSide) ? ...`
+[x] 3. Fix titik #2 — live maxBin (dlmm.js line 895): `maxBinId = isSingleSidedSol ? ...` → `(isSingleSidedSol && !dualSide) ? ...`
+[x] 4. Fix titik #3 — guard single-side (dlmm.js line 900): `if (isSingleSidedSol && maxBinId !== activeBin.binId)` → tambah `&& !dualSide`
+[x] 5. node --check dlmm.js — SYNTAX OK
+[x] 6. Verifikasi matematika bins (skrip murni, NOL deploy) — binStep 50→28, 100→14, 125→11 bins_above (identik hasil fase sebelumnya)
+[ ] 7. git diff --stat + commit
+
+Cross-check semua situs `isSingleSidedSol` (grep, 7 total): 739 (deklarasi),
+747 (trigger dualSide), 756+761 (2 guard fase-lalu, sudah `!dualSide`),
+800+895+900 (3 fix sesi ini, sekarang semua `!dualSide`). Nol situs
+tersisa yang gate rentang atas tanpa `!dualSide`.
 
 ---
 

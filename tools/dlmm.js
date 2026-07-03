@@ -797,7 +797,7 @@ export async function deployPosition({
     if (isPaperMode()) {
       try {
         const pMinBinId = activeBin.binId - activeBinsBelow;
-        const pMaxBinId = isSingleSidedSol ? activeBin.binId : activeBin.binId + activeBinsAbove;
+        const pMaxBinId = (isSingleSidedSol && !dualSide) ? activeBin.binId : activeBin.binId + activeBinsAbove;
         const pMinPrice = Number(getPriceOfBinByBinId(pMinBinId, actualBinStep).toString());
         const pMaxPrice = Number(getPriceOfBinByBinId(pMaxBinId, actualBinStep).toString());
         const baseFactor = pool.lbPair.parameters?.baseFactor ?? 0;
@@ -892,12 +892,12 @@ export async function deployPosition({
 
   const isWideRange = totalBins > 69;
   const minBinId = activeBin.binId - activeBinsBelow;
-  const maxBinId = isSingleSidedSol ? activeBin.binId : activeBin.binId + activeBinsAbove;
+  const maxBinId = (isSingleSidedSol && !dualSide) ? activeBin.binId : activeBin.binId + activeBinsAbove;
 
   if (minBinId > maxBinId) {
     throw new Error(`Invalid bin range: ${minBinId} -> ${maxBinId}`);
   }
-  if (isSingleSidedSol && maxBinId !== activeBin.binId) {
+  if (isSingleSidedSol && !dualSide && maxBinId !== activeBin.binId) {
     throw new Error(
       `Single-side SOL deploy must end at the SDK active bin. Expected ${activeBin.binId}, got ${maxBinId}.`,
     );

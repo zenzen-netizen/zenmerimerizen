@@ -398,6 +398,7 @@ const toolMap = {
       // strategy
       strategy:     ["strategy", "strategy"],
       strategyLock: ["strategy", "strategyLock"],
+      dualSideEnabled: ["strategy", "dualSideEnabled"],
       binsBelow:    ["strategy", "maxBinsBelow", ["maxBinsBelow"]],
       minBinsBelow: ["strategy", "minBinsBelow"],
       maxBinsBelow: ["strategy", "maxBinsBelow"],

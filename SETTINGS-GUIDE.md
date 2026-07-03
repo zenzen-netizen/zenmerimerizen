@@ -800,6 +800,17 @@ Setiap siklus, kode (`getDeterministicCloseRule()`, bukan LLM) ngecek posisi **u
 
 ---
 
+### `dualSideEnabled`
+| | |
+|---|---|
+| **Nilai sekarang** | `false` |
+| **Default** | `false` |
+| **Format** | Boolean (`true` / `false`) |
+| **Opsi** | `true` / `false` |
+| **Penjelasan** | **OFF by default** — eksperimen E1 (Fase 1-4). Saat ON, deploy single-side SOL otomatis ditambahkan kaki quote kecil (swap-flexibility). Posisi yang di-swap diberi notif dengan emoji 🔄. OFF = factory behavior (single-side murni). Toggle via `/setcfg dualSideEnabled true/false` atau `/settings` → Strategy |
+
+---
+
 ---
 
 # GRUP 10 — JADWAL BOT

@@ -29,7 +29,7 @@ import {
 import { recordPerformance } from "../lessons.js";
 import { estimateGasSol } from "../reports.js";
 import { isBaseMintOnCooldown, isPoolOnCooldown } from "../pool-memory.js";
-import { normalizeMint, getWalletBalances } from "./wallet.js";
+import { normalizeMint, getWalletBalances, swapToken } from "./wallet.js";
 import {
   isPaperMode,
   makePaperPositionId,
@@ -725,8 +725,8 @@ export async function deployPosition({
     amount_y == null && amount_sol == null
       ? computeDeployAmount((await getWalletBalances()).sol)
       : 0;
-  const finalAmountY = Number(amount_y ?? amount_sol ?? fallbackAmountY);
-  const finalAmountX = Number(amount_x ?? 0);
+  let finalAmountY = Number(amount_y ?? amount_sol ?? fallbackAmountY);
+  let finalAmountX = Number(amount_x ?? 0);
   if (!Number.isFinite(finalAmountY) || !Number.isFinite(finalAmountX) || finalAmountY < 0 || finalAmountX < 0) {
     throw new Error("Invalid deploy amount: amount_x and amount_y must be valid non-negative numbers.");
   }
@@ -737,12 +737,28 @@ export async function deployPosition({
     throw new Error("Invalid deploy amount: provide a positive amount_y/amount_sol.");
   }
   const isSingleSidedSol = finalAmountX <= 0 && finalAmountY > 0;
-  if (isSingleSidedSol && (Number(bins_above ?? 0) > 0 || Number(upside_pct ?? 0) > 0)) {
+
+  // ─── Dual-side (E1) transform — config-gated, default OFF (byte-identical saat OFF) ───
+  // ON: ubah deploy single-side-SOL jadi dua-sisi. Sisi SOL mayoritas di bawah + sisi token
+  // kecil di atas. Di sini set BENTUK saja: bins ATAS dari dualSideUpsidePct.
+  // Token amount (relay percentX / pre-swap) = Fase 3, belum disentuh di sini.
+  let dualSide = false;
+  let dualSideTokenPct = 0;
+  if (config.strategy.dualSideEnabled && isSingleSidedSol && finalAmountY > 0) {
+    dualSide = true;
+    dualSideTokenPct = Math.max(0, Math.min(0.5, Number(config.strategy.dualSideTokenPct ?? 0.10)));
+    const upPct = Math.max(0, Number(config.strategy.dualSideUpsidePct ?? 15));
+    const upperTargetPrice = activePrice * (1 + upPct / 100);
+    const upperBinId = getBinIdFromPrice(upperTargetPrice, actualBinStep, false);
+    activeBinsAbove = Math.max(0, upperBinId - activeBin.binId);
+  }
+
+  if (isSingleSidedSol && !dualSide && (Number(bins_above ?? 0) > 0 || Number(upside_pct ?? 0) > 0)) {
     throw new Error(
       "Single-side SOL deploy cannot use bins_above or upside_pct. Use amount_y with bins_below only; the upper bin is the SDK active bin.",
     );
   }
-  if (isSingleSidedSol) {
+  if (isSingleSidedSol && !dualSide) {
     activeBinsAbove = 0;
   }
   activeBinsBelow = Number(activeBinsBelow);
@@ -781,7 +797,7 @@ export async function deployPosition({
     if (isPaperMode()) {
       try {
         const pMinBinId = activeBin.binId - activeBinsBelow;
-        const pMaxBinId = isSingleSidedSol ? activeBin.binId : activeBin.binId + activeBinsAbove;
+        const pMaxBinId = (isSingleSidedSol && !dualSide) ? activeBin.binId : activeBin.binId + activeBinsAbove;
         const pMinPrice = Number(getPriceOfBinByBinId(pMinBinId, actualBinStep).toString());
         const pMaxPrice = Number(getPriceOfBinByBinId(pMaxBinId, actualBinStep).toString());
         const baseFactor = pool.lbPair.parameters?.baseFactor ?? 0;
@@ -876,12 +892,12 @@ export async function deployPosition({
 
   const isWideRange = totalBins > 69;
   const minBinId = activeBin.binId - activeBinsBelow;
-  const maxBinId = isSingleSidedSol ? activeBin.binId : activeBin.binId + activeBinsAbove;
+  const maxBinId = (isSingleSidedSol && !dualSide) ? activeBin.binId : activeBin.binId + activeBinsAbove;
 
   if (minBinId > maxBinId) {
     throw new Error(`Invalid bin range: ${minBinId} -> ${maxBinId}`);
   }
-  if (isSingleSidedSol && maxBinId !== activeBin.binId) {
+  if (isSingleSidedSol && !dualSide && maxBinId !== activeBin.binId) {
     throw new Error(
       `Single-side SOL deploy must end at the SDK active bin. Expected ${activeBin.binId}, got ${maxBinId}.`,
     );
@@ -898,6 +914,28 @@ export async function deployPosition({
   // Read base fee directly from pool — baseFactor * binStep / 10^6 gives fee in %
   const baseFactor = pool.lbPair.parameters?.baseFactor ?? 0;
   const actualBaseFee = base_fee ?? (baseFactor > 0 ? parseFloat((baseFactor * actualBinStep / 1e6 * 100).toFixed(4)) : null);
+
+  // ─── Dual-side (E1) pre-swap (Cara B, lokal): tukar porsi token dari SOL ───
+  let dualSideSwapped = false;
+  if (dualSide && dualSideTokenPct > 0) {
+    const swapSol = finalAmountY * dualSideTokenPct;
+    const dsBaseMint = pool.lbPair.tokenXMint.toString();
+    const dsSwap = await swapToken({ input_mint: config.tokens.SOL, output_mint: dsBaseMint, amount: swapSol });
+    const dsTokenOutRaw = Number(dsSwap?.amount_out ?? 0);
+    if (!dsSwap?.success || !Number.isFinite(dsTokenOutRaw) || dsTokenOutRaw <= 0) {
+      throw new Error(`Dual-side pre-swap gagal / 0 token diterima: ${JSON.stringify(dsSwap).slice(0, 160)}`);
+    }
+    // amount_out dari swapToken() adalah RAW base units (mis. Jupiter outputAmountResult) —
+    // konversi ke human-readable dulu, karena finalAmountX & totalXLamports di bawah (dan
+    // cleanup di catch) mengasumsikan amount human-readable (sama seperti amount_y/amount_sol).
+    const dsMintInfo = await getConnection().getParsedAccountInfo(new PublicKey(dsBaseMint));
+    const dsDecimals = dsMintInfo.value?.data?.parsed?.info?.decimals ?? 9;
+    const dsTokenOut = dsTokenOutRaw / Math.pow(10, dsDecimals);
+    finalAmountX = dsTokenOut;
+    finalAmountY = finalAmountY - swapSol;
+    dualSideSwapped = true;
+    log("deploy", `Dual-side pre-swap: ${swapSol} SOL → ${dsTokenOut} token (sisi atas)`);
+  }
 
   const totalYLamports = new BN(Math.floor(finalAmountY * 1e9));
   // For X, we assume it's also 9 decimals for now, or we'd need to fetch mint decimals.
@@ -924,11 +962,11 @@ export async function deployPosition({
           idempotencyKey: `deploy:${pool_address}:${minBinId}:${maxBinId}:${finalAmountY}:${finalAmountX}`,
           poolId: pool_address,
           owner: wallet.publicKey.toString(),
-          strategy: activeStrategy === "spot" ? "Spot" : "BidAsk",
+          strategy: dualSide ? (config.strategy.dualSideStrategy === "spot" ? "Spot" : "BidAsk") : (activeStrategy === "spot" ? "Spot" : "BidAsk"),
           inputSOL: finalAmountY,
           amountY: finalAmountY,
           amountX: finalAmountX,
-          percentX: finalAmountX > 0 && finalAmountY > 0 ? 0.5 : 0,
+          percentX: dualSide ? dualSideTokenPct : (finalAmountX > 0 && finalAmountY > 0 ? 0.5 : 0),
           fromBinId: minBinId,
           toBinId: maxBinId,
           slippageBps: 500,
@@ -1224,6 +1262,22 @@ export async function deployPosition({
         log("deploy_error", `Tracked orphan position ${orphanAddr} (create succeeded, liquidity-add failed) for cleanup`);
       } catch (trackErr) {
         log("deploy_error", `Failed to track orphan position for cleanup: ${trackErr.message}`);
+      }
+    }
+
+    // ─── Dual-side (E1) cleanup: pre-swap sukses TAPI deploy gagal → token balik ke SOL ───
+    if (dualSideSwapped && finalAmountX > 0) {
+      try {
+        const dsBaseMint = pool.lbPair.tokenXMint.toString();
+        log("deploy_warn", `Dual-side deploy gagal — swap ${finalAmountX} token balik ke SOL`);
+        const dsBack = await swapToken({ input_mint: dsBaseMint, output_mint: config.tokens.SOL, amount: finalAmountX });
+        if (dsBack?.success) {
+          log("deploy_warn", `Dual-side cleanup selesai — token balik ke SOL`);
+        } else {
+          log("deploy_error", `⚠️ Dual-side cleanup GAGAL — token nyangkut, owner swap manual: ${dsBack?.error ?? 'unknown'}`);
+        }
+      } catch (dsCleanupErr) {
+        log("deploy_error", `⚠️ Dual-side cleanup GAGAL — token mungkin nyangkut, owner swap manual: ${dsCleanupErr.message}`);
       }
     }
     return { success: false, error: error.message };

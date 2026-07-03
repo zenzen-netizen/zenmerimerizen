@@ -737,12 +737,28 @@ export async function deployPosition({
     throw new Error("Invalid deploy amount: provide a positive amount_y/amount_sol.");
   }
   const isSingleSidedSol = finalAmountX <= 0 && finalAmountY > 0;
-  if (isSingleSidedSol && (Number(bins_above ?? 0) > 0 || Number(upside_pct ?? 0) > 0)) {
+
+  // ─── Dual-side (E1) transform — config-gated, default OFF (byte-identical saat OFF) ───
+  // ON: ubah deploy single-side-SOL jadi dua-sisi. Sisi SOL mayoritas di bawah + sisi token
+  // kecil di atas. Di sini set BENTUK saja: bins ATAS dari dualSideUpsidePct.
+  // Token amount (relay percentX / pre-swap) = Fase 3, belum disentuh di sini.
+  let dualSide = false;
+  let dualSideTokenPct = 0;
+  if (config.strategy.dualSideEnabled && isSingleSidedSol && finalAmountY > 0) {
+    dualSide = true;
+    dualSideTokenPct = Math.max(0, Math.min(0.5, Number(config.strategy.dualSideTokenPct ?? 0.10)));
+    const upPct = Math.max(0, Number(config.strategy.dualSideUpsidePct ?? 15));
+    const upperTargetPrice = activePrice * (1 + upPct / 100);
+    const upperBinId = getBinIdFromPrice(upperTargetPrice, actualBinStep, false);
+    activeBinsAbove = Math.max(0, upperBinId - activeBin.binId);
+  }
+
+  if (isSingleSidedSol && !dualSide && (Number(bins_above ?? 0) > 0 || Number(upside_pct ?? 0) > 0)) {
     throw new Error(
       "Single-side SOL deploy cannot use bins_above or upside_pct. Use amount_y with bins_below only; the upper bin is the SDK active bin.",
     );
   }
-  if (isSingleSidedSol) {
+  if (isSingleSidedSol && !dualSide) {
     activeBinsAbove = 0;
   }
   activeBinsBelow = Number(activeBinsBelow);

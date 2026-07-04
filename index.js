@@ -2792,6 +2792,7 @@ function exportUsageText() {
       "/export racikan <nama> — ekspor 1 racikan ke folder exports/",
       "/export racikan <nama> tar — sama, dibungkus 1 file .tar.gz",
       "/export profil — backup 1 profil penuh (config+data, berisi secret, offline)",
+      "/export profil tar — sama, dibungkus 1 file .tar.gz",
     ]),
   ].join("\n");
 }
@@ -2804,13 +2805,14 @@ function runExportCommand(argStr) {
   const name = parts[1];
   try {
     if (sub === "profil") {
-      const r = exportProfil();
+      const wantTar = (parts[1] || "").toLowerCase() === "tar";
+      const r = exportProfil({ archive: wantTar });
       return { text: [
         header(ICON.ok, `Export profil "${r.label}"`, "config + presets + data (BERISI SECRET)"),
         tree([
           `${r.copiedCount} file disalin`,
           r.skipped.length ? `dilewati (belum ada): ${r.skipped.join(", ")}` : "semua file profil ada",
-          `Folder: ${r.outDir}`,
+          `${r.archived ? "Arsip" : "Folder"}: ${r.outDir}`,
           `${ICON.warn} Berisi secret (rpcUrl/telegram/apikey) — simpan OFFLINE, jangan upload publik.`,
         ]),
       ].join("\n") };

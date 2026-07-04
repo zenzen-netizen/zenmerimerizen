@@ -12,6 +12,7 @@
 
 import fs from "fs";
 import path from "path";
+import { execFileSync } from "child_process";
 import { paths } from "./paths.js";
 import { repoPath } from "./repo-root.js";
 
@@ -35,9 +36,10 @@ function label() {
 
 /**
  * Ekspor 1 profil penuh ke exports/profil_<label>_<stamp>/. Semua file di-chmod 600.
- * @returns {{ label, outDir, copiedCount, copied: string[], skipped: string[] }}
+ * @param {{ archive?: boolean }} [opts] archive=true → bungkus jadi 1 .tar.gz (opt-in).
+ * @returns {{ label, outDir, copiedCount, copied: string[], skipped: string[], archived: boolean }}
  */
-export function exportProfil() {
+export function exportProfil({ archive = false } = {}) {
   const lbl = label();
   // Stamp WIB: sv-SE → "YYYY-MM-DD HH:MM:SS" → "YYYYMMDD-HHMMSS".
   const rawStamp = new Date().toLocaleString("sv-SE", { timeZone: "Asia/Jakarta" });
@@ -100,5 +102,17 @@ export function exportProfil() {
   fs.writeFileSync(restorePath, `${restore}\n`);
   try { fs.chmodSync(restorePath, 0o600); } catch { /* best-effort */ }
 
-  return { label: lbl, outDir, copiedCount: copied.length, copied, skipped };
+  // Bonus: bungkus folder jadi 1 file .tar.gz (gampang dikirim/simpan) — opt-in.
+  // Fail-open: `tar` tak ada / gagal → tetap kembalikan folder mentah (tar bukan inti).
+  if (archive) {
+    const archivePath = `${outDir}.tar.gz`;
+    try {
+      execFileSync("tar", ["-czf", archivePath, "-C", path.dirname(outDir), path.basename(outDir)]);
+      try { fs.chmodSync(archivePath, 0o600); } catch { /* best-effort */ }
+      fs.rmSync(outDir, { recursive: true, force: true });
+      return { label: lbl, outDir: archivePath, copiedCount: copied.length, copied, skipped, archived: true };
+    } catch { /* fall through — keep the folder */ }
+  }
+
+  return { label: lbl, outDir, copiedCount: copied.length, copied, skipped, archived: false };
 }

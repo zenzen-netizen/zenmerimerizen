@@ -12,6 +12,7 @@ const userConfigPath = process.env.MERIDIAN_CONFIG_PATH
 export const paths = {
   dataDir,
   userConfigPath,
+  presetsDir:            path.join(dataDir, "presets"),
   gmgnConfigPath:        path.join(dataDir, "gmgn-config.json"),
   statePath:             path.join(dataDir, "state.json"),
   lessonsPath:           path.join(dataDir, "lessons.json"),

@@ -530,6 +530,7 @@ const BOT_COMMANDS = [
   { command: "settings",   description: "Button menu for common config" },
   { command: "setcfg",     description: "Update persisted config key" },
   { command: "preset",     description: "Save/load full config presets" },
+  { command: "export",     description: "Export racikan (config+riwayat, secret di-strip)" },
   { command: "guide",      description: "Settings guide (TOC | keyword | all)" },
   { command: "hive",       description: "HiveMind sync status" },
   { command: "pause",      description: "Stop cron cycles" },

@@ -38,6 +38,7 @@ import { renderGuide } from "./guide.js";
 import { getLastBriefingDate, setLastBriefingDate, getLastBriefingPinId, setLastBriefingPinId, getLastReportedMilestone, setLastReportedMilestone, getLastPeriodicBriefing, setLastPeriodicBriefing, getTrackedPosition, getTrackedPositions, setPositionInstruction, updatePnlAndCheckExits, queuePeakConfirmation, resolvePendingPeak, queueTrailingDropConfirmation, resolvePendingTrailingDrop } from "./state.js";
 import { getActiveStrategy } from "./strategy-library.js";
 import { listPresets, savePreset, applyPreset, getPresetDiff, deletePreset, validName, presetExists, getActiveSetupStatus, formatIdentity } from "./preset-manager.js";
+import { exportRacikan, listExportableRacikan } from "./racikan-export.js";
 import { ORIGIN_SECTIONS, ORIGIN_NOTES, SUB_CLUSTER_META, KEY_SUBCLUSTER, L4_CHILDREN, CORE_GROUPS, FUNCTION_GROUPS } from "./config-origin.js";
 import { recordPositionSnapshot, recallForPool, addPoolNote } from "./pool-memory.js";
 import { isPaperMode } from "./paper-trading.js";
@@ -2780,6 +2781,51 @@ function runPresetCommand(argStr) {
   }
 }
 
+// ─── Export racikan (/export) ─────────────────────────────────────
+function exportUsageText() {
+  return [
+    header("📦", "/export", "ekspor racikan (config + riwayat, secret di-strip)"),
+    tree([
+      "/export racikan — daftar racikan yang bisa diekspor",
+      "/export racikan <nama> — ekspor 1 racikan ke folder exports/",
+    ]),
+  ].join("\n");
+}
+
+// Returns { text }. Pure (file ops only) — read-only riwayat, tulis file baru
+// di exports/ saja (tidak menyentuh user-config.json / presets/).
+function runExportCommand(argStr) {
+  const parts = String(argStr || "").trim().split(/\s+/).filter(Boolean);
+  const sub = (parts[0] || "").toLowerCase();
+  const name = parts[1];
+  try {
+    if (sub !== "racikan") return { text: exportUsageText() };
+    if (!name) {
+      const list = listExportableRacikan();
+      return { text: [
+        header("📦", "/export racikan", "pilih nama"),
+        SEP,
+        list.length ? tree(list) : "Belum ada racikan (preset atau riwayat).",
+        SEP, exportUsageText(),
+      ].join("\n") };
+    }
+    if (!presetExists(name) && !listRacikanInPerformance().some((r) => r.name === name)) {
+      return { text: `${ICON.warn} Racikan "${name}" tidak ditemukan (bukan preset & tak ada di riwayat).` };
+    }
+    const r = exportRacikan(name);
+    return { text: [
+      header(ICON.ok, `Export "${r.name}"`, r.hasPreset ? "preset + riwayat" : "riwayat saja"),
+      tree([
+        `${r.recordCount} trade`,
+        r.hasPreset ? `${r.strippedCount} key rahasia di-strip` : "preset file tidak ditemukan — riwayat saja",
+        `Folder: ${r.outDir}`,
+      ]),
+    ].join("\n") };
+  } catch (e) {
+    return { text: `${ICON.fail} Export error: ${e.message}` };
+  }
+}
+
 function underPm2() {
   return process.env.pm_id !== undefined || !!process.env.PM2_HOME || !!process.env.PM2_USAGE;
 }
@@ -3133,6 +3179,12 @@ async function telegramHandler(msg) {
     const res = runPresetCommand(text.slice("/preset".length));
     await sendMessage(res.text).catch(() => {});
     if (res.applied) await finishPresetApply({ viaTelegram: true });
+    return;
+  }
+
+  if (text === "/export" || text.startsWith("/export ")) {
+    const res = runExportCommand(text.slice("/export".length));
+    await sendMessage(res.text).catch(() => {});
     return;
   }
 
@@ -3738,6 +3790,14 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
         const res = runPresetCommand(input.slice("/preset".length));
         console.log(`\n${res.text}\n`);
         if (res.applied) await finishPresetApply({ viaTelegram: false });
+      });
+      return;
+    }
+
+    if (input === "/export" || input.startsWith("/export ")) {
+      await runBusy(async () => {
+        const res = runExportCommand(input.slice("/export".length));
+        console.log(`\n${res.text}\n`);
       });
       return;
     }

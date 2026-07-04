@@ -42,6 +42,7 @@ export function renderHelp() {
       "/settings — button menu for common config",
       "/setcfg <key> <value> — update persisted config",
       "/preset [list|save|use|show <nama>] — simpan/ganti profil config",
+      "/export racikan [<nama>] — ekspor config+riwayat racikan (secret di-strip)",
       "/guide [no|katakunci|all] — panduan setting",
     ]],
     ["🔧 Sistem", [

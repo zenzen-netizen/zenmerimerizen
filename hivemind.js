@@ -3,9 +3,10 @@ import crypto from "crypto";
 import { log } from "./logger.js";
 import { config } from "./config.js";
 import { repoPath } from "./repo-root.js";
+import { paths } from "./paths.js";
 
-const USER_CONFIG_PATH = repoPath("user-config.json");
-const CACHE_PATH = repoPath("hivemind-cache.json");
+const USER_CONFIG_PATH = paths.userConfigPath;
+const CACHE_PATH = paths.hivemindCachePath;
 const PACKAGE_JSON_PATH = repoPath("package.json");
 const HEARTBEAT_INTERVAL_MS = 15 * 60 * 1000;
 

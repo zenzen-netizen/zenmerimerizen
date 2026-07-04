@@ -1,7 +1,8 @@
 import fs from "fs";
 import { repoPath } from "./repo-root.js";
+import { paths } from "./paths.js";
 
-const DECISION_LOG_FILE = repoPath("decision-log.json");
+const DECISION_LOG_FILE = paths.decisionLogPath;
 const MAX_DECISIONS = 100;
 
 function load() {

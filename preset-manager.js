@@ -15,10 +15,14 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { paths } from "./paths.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PRESETS_DIR = path.join(__dirname, "presets");
-const USER_CONFIG_PATH = path.join(__dirname, "user-config.json");
+// Sadar-profil: PRESETS_DIR & USER_CONFIG_PATH ikut data-dir profil aktif
+// (via paths.js). Tanpa MERIDIAN_DATA_DIR → dataDir==REPO_ROOT → path IDENTIK
+// dengan lokasi lama (paritas penuh buat bot single-profil sekarang).
+const PRESETS_DIR = paths.presetsDir;
+const USER_CONFIG_PATH = paths.userConfigPath;
 const BACKUP_NAME = "_backup"; // auto-written before each apply, for rollback
 
 const NAME_RE = /^[a-z0-9_-]+$/i;

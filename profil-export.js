@@ -26,7 +26,7 @@ const DATA_FILES = [
 // File identitas proses (repo-level, sama utk semua profil di 1 repo).
 const IDENTITY_FILES = [repoPath("ecosystem.config.cjs"), repoPath("package.json")];
 // Folder preset (disalin rekursif).
-const PRESETS_DIR = repoPath("presets");
+const PRESETS_DIR = paths.presetsDir;   // per-profil: presets ikut data-dir (konsisten #3B)
 // TIDAK disalin: .env (secret wallet — dibikin baru di rumah tujuan), logs/, archive.
 
 /** Nama profil buat penamaan folder — env override → nama folder dataDir → "main". */

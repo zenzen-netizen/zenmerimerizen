@@ -40,6 +40,7 @@ import { getActiveStrategy } from "./strategy-library.js";
 import { listPresets, savePreset, applyPreset, getPresetDiff, deletePreset, validName, presetExists, getActiveSetupStatus, formatIdentity } from "./preset-manager.js";
 import { exportRacikan, listExportableRacikan } from "./racikan-export.js";
 import { exportProfil } from "./profil-export.js";
+import { scaffoldProfil, listProfil } from "./addprofil.js";
 import { ORIGIN_SECTIONS, ORIGIN_NOTES, SUB_CLUSTER_META, KEY_SUBCLUSTER, L4_CHILDREN, CORE_GROUPS, FUNCTION_GROUPS } from "./config-origin.js";
 import { recordPositionSnapshot, recallForPool, addPoolNote } from "./pool-memory.js";
 import { isPaperMode } from "./paper-trading.js";
@@ -2845,6 +2846,43 @@ function runExportCommand(argStr) {
   }
 }
 
+// ─── Tambah profil (/addprofil) ───────────────────────────────────
+// Scaffolder profil baru (isolasi data-dir). Pure file-ops — bikin folder+file
+// baru di profiles/<nama>/, TIDAK menyentuh profil yang lagi jalan. Sisi secret +
+// pm2 start = MANUAL (dicetak di RESTORE.txt).
+function runAddProfilCommand(argStr) {
+  const parts = String(argStr || "").trim().split(/\s+/).filter(Boolean);
+  const name = parts[0];
+  try {
+    if (!name) {
+      const existing = listProfil();
+      return { text: [
+        header("🗂️", "/addprofil", "scaffold profil baru (data-dir isolasi)"),
+        SEP,
+        existing.length ? `Profil ada: ${existing.join(", ")}` : "Belum ada profil di profiles/.",
+        SEP,
+        tree([
+          "/addprofil <nama> — scaffold profil baru (folder + config + template)",
+          "Sisi secret (wallet/token) + pm2 start = MANUAL (lihat RESTORE.txt).",
+        ]),
+      ].join("\n") };
+    }
+    const r = scaffoldProfil(name);
+    return { text: [
+      header(ICON.ok, `Profil "${r.name}" ter-scaffold`, "data-dir + config + template"),
+      tree([
+        `${r.created.length} item dibuat di profiles/${r.name}/`,
+        `Config: dryRun=true (paper, aman sampai owner flip)`,
+        `${ICON.warn} Langkah manual owner (wallet/token/pm2) -> profiles/${r.name}/RESTORE.txt`,
+      ]),
+      SEP,
+      r.steps,
+    ].join("\n") };
+  } catch (e) {
+    return { text: `${ICON.fail} /addprofil error: ${e.message}` };
+  }
+}
+
 function underPm2() {
   return process.env.pm_id !== undefined || !!process.env.PM2_HOME || !!process.env.PM2_USAGE;
 }
@@ -3198,6 +3236,12 @@ async function telegramHandler(msg) {
     const res = runPresetCommand(text.slice("/preset".length));
     await sendMessage(res.text).catch(() => {});
     if (res.applied) await finishPresetApply({ viaTelegram: true });
+    return;
+  }
+
+  if (text === "/addprofil" || text.startsWith("/addprofil ")) {
+    const res = runAddProfilCommand(text.slice("/addprofil".length));
+    await sendMessage(res.text).catch(() => {});
     return;
   }
 
@@ -3809,6 +3853,14 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
         const res = runPresetCommand(input.slice("/preset".length));
         console.log(`\n${res.text}\n`);
         if (res.applied) await finishPresetApply({ viaTelegram: false });
+      });
+      return;
+    }
+
+    if (input === "/addprofil" || input.startsWith("/addprofil ")) {
+      await runBusy(async () => {
+        const res = runAddProfilCommand(input.slice("/addprofil".length));
+        console.log(`\n${res.text}\n`);
       });
       return;
     }

@@ -43,6 +43,7 @@ export function renderHelp() {
       "/setcfg <key> <value> — update persisted config",
       "/preset [list|save|use|show <nama>] — simpan/ganti profil config",
       "/export racikan [<nama>] — ekspor config+riwayat racikan (secret di-strip)",
+      "/addprofil <nama> — scaffold profil baru (data-dir isolasi; secret+start manual)",
       "/guide [no|katakunci|all] — panduan setting",
     ]],
     ["🔧 Sistem", [

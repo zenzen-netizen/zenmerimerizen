@@ -1,11 +1,12 @@
 import fs from "fs";
 import { log } from "./logger.js";
 import { repoPath } from "./repo-root.js";
+import { paths } from "./paths.js";
 import { estimateGasSol } from "./reports.js";
 import { renderDeploy, renderOOR, renderSwap, renderClose } from "./views/notifs.js";
 import { ICON } from "./views/format.js";
 
-const USER_CONFIG_PATH = repoPath("user-config.json");
+const USER_CONFIG_PATH = paths.userConfigPath;
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || null;
 const BASE  = TOKEN ? `https://api.telegram.org/bot${TOKEN}` : null;

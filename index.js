@@ -73,6 +73,7 @@ import {
 } from "./views/settings.js";
 
 import { REPO_ROOT, repoPath } from "./repo-root.js";
+import { paths } from "./paths.js";
 
 const entrypointPath = process.env.pm_exec_path || process.argv[1];
 const indexPath = fileURLToPath(import.meta.url);
@@ -3771,7 +3772,7 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
           return;
         }
         const fs = await import("fs");
-        const lessonsData = JSON.parse(fs.default.readFileSync(repoPath("lessons.json"), "utf8"));
+        const lessonsData = JSON.parse(fs.default.readFileSync(paths.lessonsPath, "utf8"));
         const result = evolveThresholds(lessonsData.performance, config);
         if (!result || Object.keys(result.changes).length === 0) {
           console.log("\nNo threshold changes needed — current settings already match performance data.\n");

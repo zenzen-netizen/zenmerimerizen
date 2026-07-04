@@ -26,10 +26,11 @@ import { getRecentDecisions } from "../decision-log.js";
 import fs from "fs";
 import { execSync, spawn } from "child_process";
 import { REPO_ROOT, repoPath } from "../repo-root.js";
+import { paths } from "../paths.js";
 import { normalizeTimeframe, scaleScreeningToTimeframe } from "../screening-scales.js";
 
-const USER_CONFIG_PATH = repoPath("user-config.json");
-const GMGN_CONFIG_PATH = repoPath("gmgn-config.json");
+const USER_CONFIG_PATH = paths.userConfigPath;
+const GMGN_CONFIG_PATH = paths.gmgnConfigPath;
 const POOL_DISCOVERY_BASE = "https://pool-discovery-api.datapi.meteora.ag";
 const MIN_VOLATILITY_TIMEFRAME = "30m";
 const TIMEFRAME_MINUTES = {

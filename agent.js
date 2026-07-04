@@ -114,6 +114,16 @@ const client = new OpenAI({
   timeout: 5 * 60 * 1000,
 });
 
+// Fallback client for OpenCode Zen (or any OpenAI-compatible fallback API)
+// Set LLM_FALLBACK_BASE_URL in .env to enable; model defaults to deepseek-v4-flash-free
+const fallbackClient = process.env.LLM_FALLBACK_BASE_URL
+  ? new OpenAI({
+      baseURL: process.env.LLM_FALLBACK_BASE_URL,
+      apiKey: process.env.LLM_FALLBACK_API_KEY || process.env.OPENCODE_ZEN_API_KEY,
+      timeout: 5 * 60 * 1000,
+    })
+  : null;
+
 const DEFAULT_MODEL = process.env.LLM_MODEL || "openrouter/healer-alpha";
 
 const MUTATING_TOOL_INTENTS = /\b(deploy|open position|add liquidity|lp into|invest in|close|exit|withdraw|remove liquidity|claim|harvest|collect|swap|convert|sell|exchange|block|unblock|blacklist|add smart wallet|remove smart wallet|add wallet|remove wallet|pin|unpin|clear lesson|add lesson|set active strategy|remove strategy|add strategy|set |change |update |self.?update|pull latest|git pull|update yourself|enable|disable|turn (on|off)|switch (on|off)|activate|deactivate|toggle|matikan|nyalakan|hidupkan|aktifkan|non-?aktifkan|buka posisi|tambah likuiditas|tutup|tarik|cabut|hentikan|klaim|panen|tukar|jual|konversi|blokir|buka blokir|ubah|ganti|atur|setel|sematkan|lepas sematan|perbarui|tambah wallet|hapus wallet|tambah strategi|hapus strategi)\b/i;
@@ -258,6 +268,12 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
       const FALLBACK_MODEL = "stepfun/step-3.5-flash:free";
       let response;
       let usedModel = activeModel;
+      // Route GENERAL chat through OpenCode Zen if fallback client is configured
+      const useFallbackForModel = fallbackClient && (
+        agentType === "GENERAL" ||
+        (model && model.endsWith("-free"))
+      );
+      let activeClient = useFallbackForModel ? fallbackClient : client;
       // Force a tool call on step 0 for action intents — prevents the model from inventing deploy/close outcomes
       const ACTION_INTENTS = /\b(deploy|open|add liquidity|close|exit|withdraw|claim|swap|block|unblock)\b/i;
       let toolChoice = (step === 0 && (ACTION_INTENTS.test(goal) || mustUseRealTool)) ? "required" : "auto";
@@ -273,7 +289,7 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
             usage: { include: true }, // OpenRouter returns per-call cost in response.usage
           };
           if (!omitToolChoice) reqParams.tool_choice = toolChoice;
-          response = await client.chat.completions.create(reqParams);
+          response = await activeClient.chat.completions.create(reqParams);
           // Record this call's cost per role (local, no external feed needed). Fail-open.
           try {
             const u = response?.usage;
@@ -305,7 +321,12 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
         const errCode = response.error?.code;
         if (errCode === 502 || errCode === 503 || errCode === 529) {
           const wait = (attempt + 1) * 5000;
-          if (attempt === 1 && usedModel !== FALLBACK_MODEL) {
+          if (attempt === 1 && fallbackClient && activeClient !== fallbackClient) {
+            // Fail over to fallback API (OpenCode Zen or custom)
+            activeClient = fallbackClient;
+            usedModel = process.env.LLM_FALLBACK_MODEL || "deepseek-v4-flash-free";
+            log("agent", `API error ${errCode}, failing over to ${usedModel} via ${process.env.LLM_FALLBACK_BASE_URL}`);
+          } else if (attempt === 1 && usedModel !== FALLBACK_MODEL) {
             usedModel = FALLBACK_MODEL;
             log("agent", `Switching to fallback model ${FALLBACK_MODEL}`);
           } else {

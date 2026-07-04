@@ -14,6 +14,9 @@ gmgn-config.json
 # Saved config presets (full snapshots — contain API keys/identity, local-only)
 presets/
 
+# Per-profil data (config+secret+lessons+state) — local-only
+profiles/
+
 # /export racikan output (bundles — local-only, transfer manually)
 exports/
 

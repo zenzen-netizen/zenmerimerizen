@@ -9,8 +9,9 @@
 import fs from "fs";
 import { log } from "./logger.js";
 import { repoPath } from "./repo-root.js";
+import { paths } from "./paths.js";
 
-const STRATEGY_FILE = repoPath("strategy-library.json");
+const STRATEGY_FILE = paths.strategyLibraryPath;
 
 function load() {
   if (!fs.existsSync(STRATEGY_FILE)) return { active: null, strategies: {} };

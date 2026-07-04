@@ -17,9 +17,10 @@
 import fs from "fs";
 import { log } from "./logger.js";
 import { repoPath } from "./repo-root.js";
+import { paths } from "./paths.js";
 import { renderSolTracker } from "./views/trackers.js";
 
-const HISTORY_FILE = repoPath("sol-balance-history.json");
+const HISTORY_FILE = paths.solBalanceHistoryPath;
 const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
 const KEEP_DAYS = 35; // > 30d window, with slack for missed days
 

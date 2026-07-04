@@ -1,8 +1,9 @@
 import fs from "fs";
 import { log } from "./logger.js";
 import { repoPath } from "./repo-root.js";
+import { paths } from "./paths.js";
 
-const WALLETS_PATH = repoPath("smart-wallets.json");
+const WALLETS_PATH = paths.smartWalletsPath;
 
 function loadWallets() {
   if (!fs.existsSync(WALLETS_PATH)) return { wallets: [] };

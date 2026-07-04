@@ -10,13 +10,14 @@ import fs from "fs";
 import { log } from "./logger.js";
 import { getSharedLessonsForPrompt, pushHiveLesson, pushHivePerformanceEvent } from "./hivemind.js";
 import { repoPath } from "./repo-root.js";
+import { paths } from "./paths.js";
 import { isPaperMode } from "./paper-trading.js";
 import { config } from "./config.js";
 import { ICON, SEP, tree, header } from "./views/format.js"; // primitif string-only (no dep) — Batch I FINAL S2
 
-const USER_CONFIG_PATH = repoPath("user-config.json");
+const USER_CONFIG_PATH = paths.userConfigPath;
 
-const LESSONS_FILE = repoPath("lessons.json");
+const LESSONS_FILE = paths.lessonsPath;
 const MIN_EVOLVE_POSITIONS = 5;   // don't evolve until we have real data
 const MAX_CHANGE_PER_STEP  = 0.20; // never shift a threshold more than 20% at once
 const PERFORMANCE_SIGNAL_FIELDS = [
@@ -899,7 +900,7 @@ export function getAllPerformance() {
   return load().performance || [];
 }
 
-const ARCHIVE_FILE = repoPath("lessons-archive-pre-mainzen_v2.json");
+const ARCHIVE_FILE = paths.lessonsArchivePath;
 
 /**
  * Pre-baseline archived performance (the 84 unattributed records moved out of

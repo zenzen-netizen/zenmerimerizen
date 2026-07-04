@@ -11,9 +11,10 @@
 import fs from "fs";
 import { log } from "./logger.js";
 import { repoPath } from "./repo-root.js";
+import { paths } from "./paths.js";
 import { config } from "./config.js";
 
-const STATE_FILE = repoPath("state.json");
+const STATE_FILE = paths.statePath;
 
 const MAX_RECENT_EVENTS = 20;
 const MAX_INSTRUCTION_LENGTH = 280;

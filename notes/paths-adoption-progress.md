@@ -1,5 +1,5 @@
 # BUILD paths.js adoption — progress
-- [ ] F1 paths.js + config/state/lessons
+- [x] F1 paths.js + config/state/lessons
 - [ ] F2 decision-log/pool-memory/hivemind/logger/signal-weights
 - [ ] F3 smart-wallets/sol-tracker/strategy-library/token-blacklist
 - [ ] F4 fix path-relatif: candidate-memory/gas-tracker/llm-cost-tracker

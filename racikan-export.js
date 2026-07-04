@@ -8,6 +8,7 @@
 
 import fs from "fs";
 import path from "path";
+import { execFileSync } from "child_process";
 import { repoPath } from "./repo-root.js";
 import { validName, presetExists, listPresets } from "./preset-manager.js";
 import { getPerformanceForRacikan, listRacikanInPerformance } from "./lessons.js";
@@ -58,7 +59,7 @@ export function listExportableRacikan() {
  * (secret di-strip, kalau file preset ada), lessons.json (riwayat racikan ini),
  * dan MANIFEST.txt. Racikan tanpa file preset tetap diekspor (riwayat saja).
  */
-export function exportRacikan(name) {
+export function exportRacikan(name, { archive = false } = {}) {
   if (!validName(name)) throw new Error("nama tidak valid");
 
   const presetFile = repoPath("presets", `${name}.json`);
@@ -96,5 +97,17 @@ export function exportRacikan(name) {
   ].join("\n");
   fs.writeFileSync(path.join(outDir, "MANIFEST.txt"), `${manifest}\n`);
 
-  return { name, outDir, recordCount: records.length, strippedCount: stripped.length, hasPreset: clean != null };
+  // Bonus: bungkus folder jadi 1 file .tar.gz (lebih gampang dikirim) — opt-in,
+  // folder mentah tetap default. Gagal tar (binary tak ada dll) → fail-open,
+  // kembalikan folder biasa (tar bukan bagian inti export).
+  if (archive) {
+    const archivePath = `${outDir}.tar.gz`;
+    try {
+      execFileSync("tar", ["-czf", archivePath, "-C", path.dirname(outDir), path.basename(outDir)]);
+      fs.rmSync(outDir, { recursive: true, force: true });
+      return { name, outDir: archivePath, recordCount: records.length, strippedCount: stripped.length, hasPreset: clean != null, archived: true };
+    } catch { /* fall through — keep the folder */ }
+  }
+
+  return { name, outDir, recordCount: records.length, strippedCount: stripped.length, hasPreset: clean != null, archived: false };
 }

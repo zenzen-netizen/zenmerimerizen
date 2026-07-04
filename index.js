@@ -2788,6 +2788,7 @@ function exportUsageText() {
     tree([
       "/export racikan — daftar racikan yang bisa diekspor",
       "/export racikan <nama> — ekspor 1 racikan ke folder exports/",
+      "/export racikan <nama> tar — sama, dibungkus 1 file .tar.gz",
     ]),
   ].join("\n");
 }
@@ -2812,13 +2813,14 @@ function runExportCommand(argStr) {
     if (!presetExists(name) && !listRacikanInPerformance().some((r) => r.name === name)) {
       return { text: `${ICON.warn} Racikan "${name}" tidak ditemukan (bukan preset & tak ada di riwayat).` };
     }
-    const r = exportRacikan(name);
+    const archive = (parts[2] || "").toLowerCase() === "tar";
+    const r = exportRacikan(name, { archive });
     return { text: [
       header(ICON.ok, `Export "${r.name}"`, r.hasPreset ? "preset + riwayat" : "riwayat saja"),
       tree([
         `${r.recordCount} trade`,
         r.hasPreset ? `${r.strippedCount} key rahasia di-strip` : "preset file tidak ditemukan — riwayat saja",
-        `Folder: ${r.outDir}`,
+        `${r.archived ? "Arsip" : "Folder"}: ${r.outDir}`,
       ]),
     ].join("\n") };
   } catch (e) {

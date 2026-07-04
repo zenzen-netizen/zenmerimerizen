@@ -39,6 +39,7 @@ import { getLastBriefingDate, setLastBriefingDate, getLastBriefingPinId, setLast
 import { getActiveStrategy } from "./strategy-library.js";
 import { listPresets, savePreset, applyPreset, getPresetDiff, deletePreset, validName, presetExists, getActiveSetupStatus, formatIdentity } from "./preset-manager.js";
 import { exportRacikan, listExportableRacikan } from "./racikan-export.js";
+import { exportProfil } from "./profil-export.js";
 import { ORIGIN_SECTIONS, ORIGIN_NOTES, SUB_CLUSTER_META, KEY_SUBCLUSTER, L4_CHILDREN, CORE_GROUPS, FUNCTION_GROUPS } from "./config-origin.js";
 import { recordPositionSnapshot, recallForPool, addPoolNote } from "./pool-memory.js";
 import { isPaperMode } from "./paper-trading.js";
@@ -2790,6 +2791,7 @@ function exportUsageText() {
       "/export racikan — daftar racikan yang bisa diekspor",
       "/export racikan <nama> — ekspor 1 racikan ke folder exports/",
       "/export racikan <nama> tar — sama, dibungkus 1 file .tar.gz",
+      "/export profil — backup 1 profil penuh (config+data, berisi secret, offline)",
     ]),
   ].join("\n");
 }
@@ -2801,6 +2803,18 @@ function runExportCommand(argStr) {
   const sub = (parts[0] || "").toLowerCase();
   const name = parts[1];
   try {
+    if (sub === "profil") {
+      const r = exportProfil();
+      return { text: [
+        header(ICON.ok, `Export profil "${r.label}"`, "config + presets + data (BERISI SECRET)"),
+        tree([
+          `${r.copiedCount} file disalin`,
+          r.skipped.length ? `dilewati (belum ada): ${r.skipped.join(", ")}` : "semua file profil ada",
+          `Folder: ${r.outDir}`,
+          `${ICON.warn} Berisi secret (rpcUrl/telegram/apikey) — simpan OFFLINE, jangan upload publik.`,
+        ]),
+      ].join("\n") };
+    }
     if (sub !== "racikan") return { text: exportUsageText() };
     if (!name) {
       const list = listExportableRacikan();

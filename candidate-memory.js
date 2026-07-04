@@ -14,8 +14,9 @@
 
 import fs from "fs";
 import { log } from "./logger.js";
+import { paths } from "./paths.js";
 
-const CANDIDATE_MEMORY_FILE = "./candidate-memory.json";
+const CANDIDATE_MEMORY_FILE = paths.candidateMemoryPath;
 const MAX_SNAPSHOTS = 8; // per pool (~last few screening cycles)
 const STALE_MS = 24 * 60 * 60 * 1000; // drop pools not seen in 24h
 

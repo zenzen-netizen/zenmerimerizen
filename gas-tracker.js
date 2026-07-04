@@ -13,8 +13,9 @@
 
 import fs from "fs";
 import { log } from "./logger.js";
+import { paths } from "./paths.js";
 
-const GAS_LOG = "./gas-log.json";
+const GAS_LOG = paths.gasLogPath;
 const MAX_ENTRIES = 5000;            // hard cap so the file stays bounded
 const PRUNE_MS = 40 * 24 * 60 * 60 * 1000; // keep ~40 days (covers monthly reports)
 

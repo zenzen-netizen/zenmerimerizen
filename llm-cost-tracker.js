@@ -11,8 +11,9 @@
 
 import fs from "fs";
 import { log } from "./logger.js";
+import { paths } from "./paths.js";
 
-const LOG_FILE = "./llm-cost-log.json";
+const LOG_FILE = paths.llmCostLogPath;
 const MAX_ENTRIES = 20000;
 const PRUNE_MS = 40 * 24 * 60 * 60 * 1000; // ~40 days (covers monthly reports)
 

@@ -2,9 +2,14 @@ import fs from "fs";
 import path from "path";
 import dotenv from "dotenv";
 import { repoPath } from "./repo-root.js";
+import { paths } from "./paths.js";
 
-const DEFAULT_ENV_PATH = repoPath(".env");
-const DEFAULT_KEY_PATH = repoPath(".envrypt");
+// Per-profil: .env & .envrypt ikut data-dir profil aktif (via MERIDIAN_DATA_DIR).
+// Tanpa MERIDIAN_DATA_DIR → paths.dataDir == REPO_ROOT → path IDENTIK dengan
+// repoPath(".env")/repoPath(".envrypt") lama (paritas penuh; MAIN tak berubah).
+// repoPath TETAP dipakai di encryptEnvRaw (.env.raw) — jangan hapus importnya.
+const DEFAULT_ENV_PATH = path.join(paths.dataDir, ".env");
+const DEFAULT_KEY_PATH = path.join(paths.dataDir, ".envrypt");
 
 function isEncryptedMarker(line) {
   return line.trim().toLowerCase() === "# encrypted";

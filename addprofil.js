@@ -143,6 +143,12 @@ export function scaffoldProfil(name) {
   // 2. seed user-config.json dari template (example sudah blank-secret). Paksa dryRun=true (paper, aman).
   const base = JSON.parse(fs.readFileSync(EXAMPLE_CONFIG, "utf8"));
   base.dryRun = true;
+  // Default model = FREE (profil pakai key free-tier sendiri; nyaris nol biaya).
+  // Nilai = model free yang bot 1 pakai sekarang; owner bebas ganti nanti.
+  base.llmModel = "nvidia/nemotron-3-ultra-550b-a55b:free";
+  base.screeningModel = "nvidia/nemotron-3-ultra-550b-a55b:free";
+  base.managementModel = "nvidia/nemotron-3-ultra-550b-a55b:free";
+  base.generalModel = "deepseek-v4-flash-free";
   fs.writeFileSync(path.join(dataDir, "user-config.json"), JSON.stringify(base, null, 2));
   created.push(`profiles/${name}/user-config.json`);
 

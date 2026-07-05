@@ -60,6 +60,22 @@ function getJupiterReferralParams() {
  * Returns USD-denominated values provided by Helius.
  */
 export async function getWalletBalances() {
+  // ─── Paper/dry-run: return virtual balance ─────────────────
+  if (process.env.DRY_RUN === "true") {
+    const virtualSol = parseFloat(process.env.PAPER_SOL_BALANCE || "3");
+    const virtualPrice = 150; // placeholder SOL price ~$150
+    log("wallet", `[PAPER] Virtual balance: ${virtualSol} SOL (override via PAPER_SOL_BALANCE)`);
+    return {
+      wallet: "paper-virtual",
+      sol: Math.round(virtualSol * 1e6) / 1e6,
+      sol_price: virtualPrice,
+      sol_usd: Math.round(virtualSol * virtualPrice * 100) / 100,
+      usdc: 500,
+      tokens: [],
+      total_usd: Math.round(virtualSol * virtualPrice * 100) / 100,
+    };
+  }
+
   let walletAddress;
   try {
     walletAddress = getWallet().publicKey.toString();

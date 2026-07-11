@@ -51,3 +51,7 @@ docs/
 test-*.js
 gas-log.json
 llm-cost-log.json
+
+# leftover backup files
+*.bak
+*.bak-*

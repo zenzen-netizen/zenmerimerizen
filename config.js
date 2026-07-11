@@ -496,7 +496,7 @@ export const config = {
  * let sizing emit a sub-min amount the check then rejected (the stuck-retry bug).
  */
 export function minDeployAmount() {
-  return Math.max(0.1, config.management.deployAmountSol ?? 0.1);
+  return Math.max(0.03, config.management.deployAmountSol ?? 0.03);
 }
 
 /**

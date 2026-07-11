@@ -268,11 +268,10 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
       const FALLBACK_MODEL = "stepfun/step-3.5-flash:free";
       let response;
       let usedModel = activeModel;
-      // Route GENERAL chat through OpenCode Zen if fallback client is configured
-      const useFallbackForModel = fallbackClient && (
-        agentType === "GENERAL" ||
-        (model && model.endsWith("-free"))
-      );
+      // Route through fallback client (OpenCode Zen) only when the model
+      // name ends with "-free" — regardless of agent role. This lets each
+      // role independently choose free (Zen) or paid (OpenRouter) models.
+      const useFallbackForModel = fallbackClient && model && model.endsWith("-free");
       let activeClient = useFallbackForModel ? fallbackClient : client;
       // Force a tool call on step 0 for action intents — prevents the model from inventing deploy/close outcomes
       const ACTION_INTENTS = /\b(deploy|open|add liquidity|close|exit|withdraw|claim|swap|block|unblock)\b/i;
